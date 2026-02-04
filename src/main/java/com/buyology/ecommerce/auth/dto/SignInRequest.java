@@ -1,10 +1,9 @@
 package com.buyology.ecommerce.auth.dto;
 
-public class SignUpRequest {
+public class SignInRequest {
 
     private String email;
     private String password;
-    private String repeatedPassword;
 
     public String getEmail() {
         return email;
@@ -20,14 +19,6 @@ public class SignUpRequest {
 
     public void setPassword(String password) {
         this.password = password;
-    }
-
-    public String getRepeatedPassword() {
-        return repeatedPassword;
-    }
-
-    public void setRepeatedPassword(String repeatedPassword) {
-        this.repeatedPassword = repeatedPassword;
     }
 
 }
