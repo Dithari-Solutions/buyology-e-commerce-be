@@ -1,8 +1,11 @@
 package com.buyology.ecommerce.common.response;
 
 import com.buyology.ecommerce.auth.dto.SignInResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 public class ApiResponse<T> {
+
     private int statusCode;
     private String message;
     private T data;
@@ -19,23 +22,25 @@ public class ApiResponse<T> {
     // ------------------------
     // Generic success
     // ------------------------
-    public static <T> ApiResponse<T> success(T data, String message) {
-        return new ApiResponse<>(200, message, data);
+    public static <T> ResponseEntity<ApiResponse<T>> success(T data, String message) {
+        return ResponseEntity.ok(new ApiResponse<>(200, message, data));
     }
 
     // ------------------------
     // Generic failure
     // ------------------------
-    public static <T> ApiResponse<T> failure(int statusCode, String message) {
-        return new ApiResponse<>(statusCode, message, null);
+    public static <T> ResponseEntity<ApiResponse<T>> failure(HttpStatus status, String message) {
+        return ResponseEntity.status(status)
+                .body(new ApiResponse<>(status.value(), message, null));
     }
 
     // ------------------------
-    // Convenience for signin
+    // Convenience for signin success
     // ------------------------
-    public static ApiResponse<SignInResponse> signinSuccess(String accessToken, String refreshToken, long expiresIn) {
+    public static ResponseEntity<ApiResponse<SignInResponse>> signinSuccess(
+            String accessToken, String refreshToken, long expiresIn) {
         SignInResponse response = new SignInResponse(accessToken, refreshToken, expiresIn);
-        return new ApiResponse<>(200, "Signin successful", response);
+        return ResponseEntity.ok(new ApiResponse<>(200, "Signin successful", response));
     }
 
     // ------------------------

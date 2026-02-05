@@ -2,9 +2,8 @@ package com.buyology.ecommerce.auth.service;
 
 import java.util.Optional;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
@@ -14,6 +13,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.common.utils.EmailValidation;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import org.springframework.transaction.annotation.Transactional;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 
 @Service
@@ -24,8 +24,8 @@ public class AuthService {
     private final AuthCredentialRepository authCredentialRepository;
 
     public AuthService(TokenService tokenService,
-                       UserRepository userRepository,
-                       AuthCredentialRepository authCredentialRepository) {
+            UserRepository userRepository,
+            AuthCredentialRepository authCredentialRepository) {
         this.tokenService = tokenService;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -35,56 +35,55 @@ public class AuthService {
      * Regular signup: create user + auth credentials.
      */
     @Transactional
-    public ApiResponse<SignInResponse> signup(SignUpRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> signup(SignUpRequest request) {
 
-        // 1️⃣ Validate email
+        // Validate email
         if (!EmailValidation.isValid(request.getEmail())) {
-            return ApiResponse.<SignInResponse>failure(HttpStatus.BAD_REQUEST.value(), "Email is not valid");
+            return ApiResponse.<SignInResponse>failure(HttpStatus.BAD_REQUEST, "Email is not valid");
         }
 
-        // 2️⃣ Check if user already exists
+        // Check if user already exists
         Optional<AuthCredentials> existingUser = authCredentialRepository
-                .findByEmailAndProvider(request.getEmail(), "EMAIL");
+                .findByEmailAndProvider(request.getEmail(), "LOCAL");
         if (existingUser.isPresent()) {
-            return ApiResponse.<SignInResponse>failure(HttpStatus.CONFLICT.value(), "User already exists");
+            return ApiResponse.<SignInResponse>failure(HttpStatus.CONFLICT, "User already exists");
         }
 
-        // 3️⃣ Check passwords match
+        // Check passwords match
         if (!request.getPassword().equals(request.getRepeatedPassword())) {
-            return ApiResponse.<SignInResponse>failure(HttpStatus.BAD_REQUEST.value(), "Passwords do not match");
+            return ApiResponse.<SignInResponse>failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
         try {
-            // 4️⃣ Create User
+            // Create User
             Users newUser = new Users();
             newUser.setIsGuest(false);
             newUser.setStatus("ACTIVE");
             userRepository.save(newUser);
 
-            // 5️⃣ Create AuthCredentials
+            // Create AuthCredentials
             AuthCredentials credentials = new AuthCredentials();
             credentials.setUserId(newUser.getId());
             credentials.setEmail(request.getEmail());
             credentials.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
-            credentials.setProvider("EMAIL");
+            credentials.setProvider("LOCAL");
             credentials.setIsActive(true);
             credentials.setCreatedAt(java.time.Instant.now());
             authCredentialRepository.save(credentials);
 
-            // 6️⃣ Generate tokens
+            // Generate tokens
             String accessToken = tokenService.generateAccessToken(credentials);
             var refreshToken = tokenService.generateRefreshToken(credentials);
 
-            // 7️⃣ Return success response with tokens
+            // Return success response with tokens
             return ApiResponse.signinSuccess(
                     accessToken,
                     refreshToken.getToken(),
-                    tokenService.getAccessTokenExpirySeconds()
-            );
+                    tokenService.getAccessTokenExpirySeconds());
 
         } catch (Exception e) {
             e.printStackTrace();
-            return ApiResponse.<SignInResponse>failure(HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            return ApiResponse.<SignInResponse>failure(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Something went wrong during signup");
         }
     }
@@ -92,41 +91,40 @@ public class AuthService {
     /**
      * Signin using email + password
      */
-    public ApiResponse<SignInResponse> signin(SignInRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> signin(SignInRequest request) {
         try {
-            // 1️⃣ Validate email
+            // Validate email
             if (!EmailValidation.isValid(request.getEmail())) {
-                return ApiResponse.<SignInResponse>failure(HttpStatus.BAD_REQUEST.value(), "Email is not valid");
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
             }
 
-            // 2️⃣ Find user by email + provider
+            // Find user by email + provider
             Optional<AuthCredentials> existingUser = authCredentialRepository
-                    .findByEmailAndProvider(request.getEmail(), "EMAIL");
+                    .findByEmailAndProvider(request.getEmail(), "LOCAL");
             if (existingUser.isEmpty()) {
-                return ApiResponse.<SignInResponse>failure(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED");
+                return ApiResponse.<SignInResponse>failure(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
             }
 
             AuthCredentials authCredentials = existingUser.get();
 
-            // 3️⃣ Verify password
+            // Verify password
             if (!PasswordUtils.verifyPassword(request.getPassword(), authCredentials.getPasswordHash())) {
-                return ApiResponse.<SignInResponse>failure(HttpStatus.UNAUTHORIZED.value(), "Invalid credentials");
+                return ApiResponse.<SignInResponse>failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
-            // 4️⃣ Generate tokens
+            // Generate tokens
             String accessToken = tokenService.generateAccessToken(authCredentials);
             var refreshToken = tokenService.generateRefreshToken(authCredentials);
 
-            // 5️⃣ Return success response
+            // Return success response
             return ApiResponse.signinSuccess(
                     accessToken,
                     refreshToken.getToken(),
-                    tokenService.getAccessTokenExpirySeconds()
-            );
+                    tokenService.getAccessTokenExpirySeconds());
 
         } catch (Exception e) {
             e.printStackTrace();
-            return ApiResponse.<SignInResponse>failure(HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            return ApiResponse.<SignInResponse>failure(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Something went wrong during signin");
         }
     }
