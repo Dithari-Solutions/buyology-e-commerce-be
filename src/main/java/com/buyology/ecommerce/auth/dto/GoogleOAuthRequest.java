@@ -4,6 +4,7 @@ public class GoogleOAuthRequest {
     private String code;
 
     // getters and setters
+    
     public String getCode() {
         return code;
     }
