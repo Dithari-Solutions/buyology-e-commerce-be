@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.auth.controller;
 
 import org.springframework.http.HttpStatus;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import com.buyology.ecommerce.user.domain.Users;
 import org.springframework.web.bind.annotation.*;
@@ -11,8 +12,6 @@ import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.auth.service.GoogleOAuthService;
-
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/auth")
