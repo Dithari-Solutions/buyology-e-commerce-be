@@ -6,7 +6,6 @@ import com.buyology.ecommerce.story.domain.StoryMedia;
 import com.buyology.ecommerce.story.domain.StoryTranslation;
 import com.buyology.ecommerce.story.dto.CreateStoryRequest;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
-import com.buyology.ecommerce.story.repository.StoryMediaRepository;
 import com.buyology.ecommerce.story.repository.StoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,22 +25,23 @@ public class StoryService {
     private static final String STATIC_STORY_PATH = "static/story";
 
     private final StoryRepository storyRepository;
-    private final StoryMediaRepository storyMediaRepository;
 
-    public StoryService(StoryRepository storyRepository, StoryMediaRepository storyMediaRepository) {
+    public StoryService(StoryRepository storyRepository) {
         this.storyRepository = storyRepository;
-        this.storyMediaRepository = storyMediaRepository;
     }
 
     @Transactional
-    public Story createStory(CreateStoryRequest request, List<MultipartFile> mediaFiles, UUID createdBy) {
+    public Story createStory(CreateStoryRequest request, List<MultipartFile> mediaFiles,
+                             List<Integer> mediaOrders, UUID createdBy) {
+        if (mediaFiles.size() != mediaOrders.size()) {
+            throw new IllegalArgumentException("Number of media files must match number of media orders");
+        }
+
         Story story = new Story();
         story.setCreatedBy(createdBy);
         story.setStatus(request.getStatus());
-        story.setStartAt(request.getStartAt());
-        story.setEndAt(request.getEndAt());
 
-        // Build translations from request
+        // Build translations
         List<StoryTranslation> translations = new ArrayList<>();
         for (StoryTranslationRequest tr : request.getTranslations()) {
             translations.addAll(buildTranslations(story, tr));
@@ -59,15 +59,19 @@ public class StoryService {
             throw new RuntimeException("Failed to create story media directory", e);
         }
 
-        // Save each media file and create StoryMedia records
+        // Save each media file with its order
+        List<StoryMedia> mediaList = new ArrayList<>();
+
         for (int i = 0; i < mediaFiles.size(); i++) {
             MultipartFile file = mediaFiles.get(i);
+            int orderIndex = mediaOrders.get(i);
+
             String originalFilename = file.getOriginalFilename();
             String extension = "";
             if (originalFilename != null && originalFilename.contains(".")) {
                 extension = originalFilename.substring(originalFilename.lastIndexOf("."));
             }
-            String savedFileName = (i + 1) + extension;
+            String savedFileName = orderIndex + extension;
             Path filePath = storyDir.resolve(savedFileName);
 
             try {
@@ -79,9 +83,12 @@ public class StoryService {
             String mediaType = determineMediaType(file.getContentType());
             String url = "/" + STATIC_STORY_PATH + "/" + savedStory.getId() + "/" + savedFileName;
 
-            StoryMedia storyMedia = new StoryMedia(savedStory.getId(), mediaType, url, null, i);
-            storyMediaRepository.save(storyMedia);
+            StoryMedia storyMedia = new StoryMedia(savedStory.getId(), mediaType, url, null, orderIndex);
+            mediaList.add(storyMedia);
         }
+
+        savedStory.setMedia(mediaList);
+        storyRepository.save(savedStory);
 
         return savedStory;
     }

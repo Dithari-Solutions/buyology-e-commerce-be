@@ -17,12 +17,6 @@ public class Story {
     @Column(length = 20)
     private StoryStatus status = StoryStatus.ACTIVE;
 
-    @Column(name = "start_at")
-    private LocalDateTime startAt;
-
-    @Column(name = "end_at")
-    private LocalDateTime endAt;
-
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
@@ -34,6 +28,10 @@ public class Story {
 
     @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<StoryTranslation> translations;
+
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "story_id")
+    private List<StoryMedia> media;
 
     // ========================
     // Lifecycle Hooks
@@ -72,23 +70,7 @@ public class Story {
     public void setStatus(StoryStatus status) {
         this.status = status;
     }
-
-    public LocalDateTime getStartAt() {
-        return startAt;
-    }
-
-    public void setStartAt(LocalDateTime startAt) {
-        this.startAt = startAt;
-    }
-
-    public LocalDateTime getEndAt() {
-        return endAt;
-    }
-
-    public void setEndAt(LocalDateTime endAt) {
-        this.endAt = endAt;
-    }
-
+    
     public UUID getCreatedBy() {
         return createdBy;
     }
@@ -111,5 +93,13 @@ public class Story {
 
     public void setTranslations(List<StoryTranslation> translations) {
         this.translations = translations;
+    }
+
+    public List<StoryMedia> getMedia() {
+        return media;
+    }
+
+    public void setMedia(List<StoryMedia> media) {
+        this.media = media;
     }
 }

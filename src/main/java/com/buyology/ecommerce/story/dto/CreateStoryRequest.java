@@ -19,9 +19,6 @@ public class CreateStoryRequest {
 
     private LocalDateTime endAt;
 
-    @NotEmpty(message = "Media order list is required")
-    private List<Integer> mediaOrders;
-
     // ========================
     // Getters & Setters
     // ========================
