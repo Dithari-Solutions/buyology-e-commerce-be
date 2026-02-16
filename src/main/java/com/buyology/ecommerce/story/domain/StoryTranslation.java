@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.story.domain;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;

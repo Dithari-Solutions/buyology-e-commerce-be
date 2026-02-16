@@ -13,15 +13,14 @@ public class CreateStoryRequest {
     @Valid
     private List<StoryTranslationRequest> translations;
 
-    @NotEmpty(message = "At least one media is required")
-    @Valid
-    private List<StoryMediaRequest> media;
-
     private StoryStatus status;
 
     private LocalDateTime startAt;
 
     private LocalDateTime endAt;
+
+    @NotEmpty(message = "Media order list is required")
+    private List<Integer> mediaOrders;
 
     // ========================
     // Getters & Setters
@@ -33,14 +32,6 @@ public class CreateStoryRequest {
 
     public void setTranslations(List<StoryTranslationRequest> translations) {
         this.translations = translations;
-    }
-
-    public List<StoryMediaRequest> getMedia() {
-        return media;
-    }
-
-    public void setMedia(List<StoryMediaRequest> media) {
-        this.media = media;
     }
 
     public StoryStatus getStatus() {
