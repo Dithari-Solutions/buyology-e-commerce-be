@@ -1,21 +1,29 @@
 package com.buyology.ecommerce.story.service;
 
 import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.story.domain.Story;
 import com.buyology.ecommerce.story.domain.StoryMedia;
+import com.buyology.ecommerce.story.domain.StoryStatus;
 import com.buyology.ecommerce.story.domain.StoryTranslation;
 import com.buyology.ecommerce.story.dto.CreateStoryRequest;
+import com.buyology.ecommerce.story.dto.StoryResponse;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
 import com.buyology.ecommerce.story.repository.StoryRepository;
+
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,11 +40,7 @@ public class StoryService {
 
     @Transactional
     public Story createStory(CreateStoryRequest request, List<MultipartFile> mediaFiles,
-                             List<Integer> mediaOrders, UUID createdBy) {
-        if (mediaFiles.size() != mediaOrders.size()) {
-            throw new IllegalArgumentException("Number of media files must match number of media orders");
-        }
-
+            UUID createdBy) {
         Story story = new Story();
         story.setCreatedBy(createdBy);
         story.setStatus(request.getStatus());
@@ -64,7 +68,7 @@ public class StoryService {
 
         for (int i = 0; i < mediaFiles.size(); i++) {
             MultipartFile file = mediaFiles.get(i);
-            int orderIndex = mediaOrders.get(i);
+            int orderIndex = i;
 
             String originalFilename = file.getOriginalFilename();
             String extension = "";
@@ -126,4 +130,38 @@ public class StoryService {
         }
         return "IMAGE";
     }
+
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getStories(Language language) {
+
+        List<StorySummaryResponse> responses = storyRepository.findByStatus(StoryStatus.ACTIVE)
+                .stream()
+                .map(story -> {
+                    StoryTranslation translation = story.getTranslations()
+                            .stream()
+                            .filter(t -> t.getLanguage() == language)
+                            .findFirst()
+                            .orElse(null); // fallback if missing
+
+                    StoryMedia thumbnail = story.getMedia()
+                            .stream()
+                            .filter(m -> m.getUrl() != null && !m.getUrl().isEmpty())
+                            .findFirst()
+                            .orElse(null);
+
+                    if (translation == null || thumbnail == null)
+                        return null;
+
+                    return new StorySummaryResponse(
+                            translation.getTitle(),
+                            thumbnail.getUrl());
+                })
+                .filter(r -> r != null)
+                .toList();
+
+        return ApiResponse.success(
+                responses,
+                responses.isEmpty() ? "No stories found." : "Stories fetched successfully");
+    }
+
 }
