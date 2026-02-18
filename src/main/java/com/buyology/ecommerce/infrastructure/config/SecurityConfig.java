@@ -19,6 +19,11 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
+                        // ✅ Allow access to static story resources
+                        .requestMatchers("/story/**").permitAll()
+                        // Optionally allow other common static resources
+                        .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
+                        // All other requests
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())
                 .httpBasic(httpBasic -> httpBasic.disable());
@@ -31,10 +36,10 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:5173",
-                    "http://localhost:3000",
-                    "http://5.189.132.250:3000",
-                    "http://5.189.132.250:5173",
-                    "http://5.189.132.250"));
+                "http://localhost:3000",
+                "http://5.189.132.250:3000",
+                "http://5.189.132.250:5173",
+                "http://5.189.132.250"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setAllowCredentials(true);
