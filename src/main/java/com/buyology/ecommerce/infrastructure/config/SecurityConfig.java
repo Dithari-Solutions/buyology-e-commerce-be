@@ -39,7 +39,9 @@ public class SecurityConfig {
                 "http://localhost:3000",
                 "http://5.189.132.250:3000",
                 "http://5.189.132.250:5173",
-                "http://5.189.132.250"));
+                "http://5.189.132.250",
+                "https://dev.dithari.com",
+                "http://dev.dithari.com"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setAllowCredentials(true);
