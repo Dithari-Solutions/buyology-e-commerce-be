@@ -20,6 +20,17 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
 @RequestMapping("/api/story")
+@CrossOrigin(
+        origins = {
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://5.189.132.250:3000",
+                "http://5.189.132.250:5173"
+        },
+        allowedHeaders = "*",
+        allowCredentials = "true",
+        methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS}
+)
 @Tag(name = "Story", description = "APIs for stories")
 public class StoryController {
 
@@ -33,7 +44,7 @@ public class StoryController {
     @Operation(summary = "Create a new story")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Story> createStory(
-            @RequestPart("request") @io.swagger.v3.oas.annotations.media.Schema(type = "string", format = "json", description = "Story creation request as JSON", example = "{\"translations\":[{\"titleAz\":\"Yeni Hekayə\",\"titleEn\":\"New Story\",\"titleAr\":\"قصة جديدة\",\"descriptionAz\":\"Bu yeni hekayənin təsviridir\",\"descriptionEn\":\"This is the description of the new story\",\"descriptionAr\":\"هذا وصف القصة الجديدة\"}],\"status\":\"ACTIVE\"}") String requestJson,
+            @RequestPart("request") String requestJson,
             @RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
             @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
 
@@ -45,7 +56,6 @@ public class StoryController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getStories(
             @RequestParam Language language) {
-
         return storyService.getStories(language);
     }
 
@@ -58,17 +68,13 @@ public class StoryController {
 
     @PostMapping("/{storyId}/activate")
     public ResponseEntity<ApiResponse<Void>> activateStory(@PathVariable UUID storyId) {
-        // ✅ Call the service to actually activate the story
         storyService.activateStory(storyId);
-
-        // Return success message
         return ApiResponse.success(null, "Story activated successfully.");
     }
 
     @PostMapping("/{storyId}/deactivate")
     public ResponseEntity<ApiResponse<Void>> deActivateStory(@PathVariable UUID storyId) {
         storyService.deActivateStory(storyId);
-
         return ApiResponse.success(null, "Story deactivated successfully.");
     }
 
@@ -85,8 +91,6 @@ public class StoryController {
     @DeleteMapping("/{storyId}")
     public ResponseEntity<ApiResponse<Void>> deleteStory(@PathVariable UUID storyId) {
         storyService.deleteStory(storyId);
-
         return ApiResponse.success(null, "Story deleted successfully.");
     }
-
 }
