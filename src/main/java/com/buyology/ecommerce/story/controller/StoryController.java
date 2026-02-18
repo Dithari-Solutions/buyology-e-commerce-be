@@ -21,12 +21,7 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 @RestController
 @RequestMapping("/api/story")
 @CrossOrigin(
-        origins = {
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "http://5.189.132.250:3000",
-                "http://5.189.132.250:5173"
-        },
+        origins = "*",
         allowedHeaders = "*",
         allowCredentials = "true",
         methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS}
