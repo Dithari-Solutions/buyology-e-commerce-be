@@ -30,7 +30,7 @@ import com.buyology.ecommerce.story.domain.StoryNotFoundException;
 @Service
 public class StoryService {
 
-    private static final String STATIC_STORY_PATH = "src/main/resources/static/story";
+    private static final String STATIC_STORY_PATH = "/opt/uploads/story";
 
     private final StoryRepository storyRepository;
 
