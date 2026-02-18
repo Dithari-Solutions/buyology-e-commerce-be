@@ -1,36 +1,36 @@
 package com.buyology.ecommerce.story.service;
 
-import com.buyology.ecommerce.common.enums.Language;
-import com.buyology.ecommerce.common.response.ApiResponse;
-import com.buyology.ecommerce.story.domain.Story;
-import com.buyology.ecommerce.story.domain.StoryMedia;
-import com.buyology.ecommerce.story.domain.StoryStatus;
-import com.buyology.ecommerce.story.domain.StoryTranslation;
-import com.buyology.ecommerce.story.dto.CreateStoryRequest;
-import com.buyology.ecommerce.story.dto.StoryResponse;
-import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
-import com.buyology.ecommerce.story.repository.StoryRepository;
-
-import org.springframework.data.domain.PageRequest;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
-import com.buyology.ecommerce.story.dto.StorySummaryResponse;
+import java.util.List;
+import java.util.UUID;
+import java.nio.file.Path;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.http.ResponseEntity;
+import com.buyology.ecommerce.story.domain.Story;
+import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.story.domain.StoryMedia;
+import com.buyology.ecommerce.story.dto.StoryResponse;
+import com.buyology.ecommerce.story.domain.StoryStatus;
+import org.springframework.web.multipart.MultipartFile;
+import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.story.dto.CreateStoryRequest;
+import com.buyology.ecommerce.story.domain.StoryTranslation;
+import com.buyology.ecommerce.story.dto.StorySummaryResponse;
+import com.buyology.ecommerce.story.repository.StoryRepository;
+
+import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
+import org.springframework.transaction.annotation.Transactional;
+import com.buyology.ecommerce.story.domain.StoryNotFoundException;
 
 @Service
 public class StoryService {
 
-    private static final String STATIC_STORY_PATH = "static/story";
+    private static final String STATIC_STORY_PATH = "src/main/resources/static/story";
 
     private final StoryRepository storyRepository;
 
@@ -41,16 +41,14 @@ public class StoryService {
     @Transactional
     public Story createStory(CreateStoryRequest request, List<MultipartFile> mediaFiles,
             UUID createdBy) {
-        Story story = new Story();
-        story.setCreatedBy(createdBy);
-        story.setStatus(request.getStatus());
+        Story story = new Story(createdBy);
 
-        // Build translations
-        List<StoryTranslation> translations = new ArrayList<>();
+        // Build and add translations
         for (StoryTranslationRequest tr : request.getTranslations()) {
-            translations.addAll(buildTranslations(story, tr));
+            for (StoryTranslation translation : buildTranslations(story, tr)) {
+                story.addTranslation(translation);
+            }
         }
-        story.setTranslations(translations);
 
         // Save story first to generate the ID
         Story savedStory = storyRepository.save(story);
@@ -85,13 +83,15 @@ public class StoryService {
             }
 
             String mediaType = determineMediaType(file.getContentType());
-            String url = "/" + STATIC_STORY_PATH + "/" + savedStory.getId() + "/" + savedFileName;
+            String url = "/story/" + savedStory.getId() + "/" + savedFileName;
 
-            StoryMedia storyMedia = new StoryMedia(savedStory.getId(), mediaType, url, null, orderIndex);
+            StoryMedia storyMedia = new StoryMedia(savedStory, mediaType, url, null, orderIndex);
             mediaList.add(storyMedia);
         }
 
-        savedStory.setMedia(mediaList);
+        for (StoryMedia media : mediaList) {
+            savedStory.addMedia(media);
+        }
         storyRepository.save(savedStory);
 
         return savedStory;
@@ -141,7 +141,7 @@ public class StoryService {
                             .stream()
                             .filter(t -> t.getLanguage() == language)
                             .findFirst()
-                            .orElse(null); // fallback if missing
+                            .orElse(null);
 
                     StoryMedia thumbnail = story.getMedia()
                             .stream()
@@ -162,6 +162,112 @@ public class StoryService {
         return ApiResponse.success(
                 responses,
                 responses.isEmpty() ? "No stories found." : "Stories fetched successfully");
+    }
+
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<StoryResponse>> getStoryDetails(Language language, UUID storyId) {
+        return storyRepository.findById(storyId)
+                .map(story -> {
+                    StoryResponse response = StoryResponse.from(story, language);
+                    return ApiResponse.success(response, "Story fetched successfully");
+                })
+                .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
+    }
+
+    @Transactional
+    public void activateStory(UUID storyId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+
+        if (story.getStatus() == StoryStatus.ACTIVE) {
+            return;
+        }
+
+        story.activate();
+        storyRepository.save(story);
+    }
+
+    @Transactional
+    public void deActivateStory(UUID storyId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+
+        if (story.getStatus() == StoryStatus.INACTIVE || story.getStatus() == StoryStatus.EXPIRED) {
+            return;
+        }
+
+        story.deactivate();
+    }
+
+    @Transactional
+    public void deleteStory(UUID storyId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+
+        // Delete media files from disk
+        Path storyDir = Paths.get(STATIC_STORY_PATH, storyId.toString());
+        if (Files.exists(storyDir)) {
+            try (var files = Files.walk(storyDir)) {
+                files.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(path -> {
+                            try {
+                                Files.delete(path);
+                            } catch (IOException e) {
+                                throw new RuntimeException("Failed to delete file: " + path, e);
+                            }
+                        });
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to delete story media directory", e);
+            }
+        }
+
+        storyRepository.delete(story);
+    }
+
+    @Transactional
+    public Story addMediaToStory(UUID storyId, List<MultipartFile> mediaFiles) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+
+        // Determine the next order index based on existing media
+        int nextOrderIndex = story.getMedia().stream()
+                .mapToInt(StoryMedia::getOrderIndex)
+                .max()
+                .orElse(-1) + 1;
+
+        Path storyDir = Paths.get(STATIC_STORY_PATH, storyId.toString());
+        try {
+            Files.createDirectories(storyDir);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create story media directory", e);
+        }
+
+        for (int i = 0; i < mediaFiles.size(); i++) {
+            MultipartFile file = mediaFiles.get(i);
+            int orderIndex = nextOrderIndex + i;
+
+            String originalFilename = file.getOriginalFilename();
+            String extension = "";
+            if (originalFilename != null && originalFilename.contains(".")) {
+                extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            }
+            String savedFileName = orderIndex + extension;
+            Path filePath = storyDir.resolve(savedFileName);
+
+            try {
+                Files.write(filePath, file.getBytes());
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to save media file: " + originalFilename, e);
+            }
+
+            String mediaType = determineMediaType(file.getContentType());
+            String url = "/story/" + storyId + "/" + savedFileName;
+
+            StoryMedia storyMedia = new StoryMedia(story, mediaType, url, null, orderIndex);
+            story.addMedia(storyMedia);
+        }
+
+        return storyRepository.save(story);
     }
 
 }

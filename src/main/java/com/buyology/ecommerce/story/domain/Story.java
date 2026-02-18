@@ -2,6 +2,7 @@ package com.buyology.ecommerce.story.domain;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,24 +15,48 @@ public class Story {
     private UUID id;
 
     @Enumerated(EnumType.STRING)
-    @Column(length = 20)
+    @Column(length = 20, nullable = false)
     private StoryStatus status = StoryStatus.ACTIVE;
 
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @OneToMany(mappedBy = "story", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<StoryTranslation> translations;
+    // ========================
+    // Relationships
+    // ========================
 
-    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "story_id")
-    private List<StoryMedia> media;
+    @OneToMany(
+            mappedBy = "story",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private List<StoryTranslation> translations = new ArrayList<>();
+
+    @OneToMany(
+            mappedBy = "story",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private List<StoryMedia> media = new ArrayList<>();
+
+    // ========================
+    // Constructors
+    // ========================
+
+    protected Story() {
+        // JPA only
+    }
+
+    public Story(UUID createdBy) {
+        this.createdBy = createdBy;
+        this.status = StoryStatus.ACTIVE;
+    }
 
     // ========================
     // Lifecycle Hooks
@@ -39,8 +64,9 @@ public class Story {
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
         if (this.status == null) {
             this.status = StoryStatus.ACTIVE;
         }
@@ -52,31 +78,43 @@ public class Story {
     }
 
     // ========================
-    // Getters & Setters
+    // Relationship Helpers
+    // ========================
+
+    public void addTranslation(StoryTranslation translation) {
+        translation.setStory(this);
+        this.translations.add(translation);
+    }
+
+    public void removeTranslation(StoryTranslation translation) {
+        translation.setStory(null);
+        this.translations.remove(translation);
+    }
+
+    public void addMedia(StoryMedia media) {
+        media.setStory(this);
+        this.media.add(media);
+    }
+
+    public void removeMedia(StoryMedia media) {
+        media.setStory(null);
+        this.media.remove(media);
+    }
+
+    // ========================
+    // Getters
     // ========================
 
     public UUID getId() {
         return id;
     }
 
-    public void setId(UUID id) {
-        this.id = id;
-    }
-
     public StoryStatus getStatus() {
         return status;
     }
 
-    public void setStatus(StoryStatus status) {
-        this.status = status;
-    }
-    
     public UUID getCreatedBy() {
         return createdBy;
-    }
-
-    public void setCreatedBy(UUID createdBy) {
-        this.createdBy = createdBy;
     }
 
     public LocalDateTime getCreatedAt() {
@@ -91,15 +129,19 @@ public class Story {
         return translations;
     }
 
-    public void setTranslations(List<StoryTranslation> translations) {
-        this.translations = translations;
-    }
-
     public List<StoryMedia> getMedia() {
         return media;
     }
 
-    public void setMedia(List<StoryMedia> media) {
-        this.media = media;
+    // ========================
+    // Business Methods
+    // ========================
+
+    public void activate() {
+        this.status = StoryStatus.ACTIVE;
+    }
+
+    public void deactivate() {
+        this.status = StoryStatus.INACTIVE;
     }
 }

@@ -5,16 +5,19 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "story_media", 
-       uniqueConstraints = {@UniqueConstraint(columnNames = {"story_id", "order_index"})})
+@Table(name = "story_media", uniqueConstraints = {
+        @UniqueConstraint(columnNames = { "story_id", "order_index" })
+})
 public class StoryMedia {
 
     @Id
     @GeneratedValue
     private UUID id;
 
-    @Column(name = "story_id", nullable = false)
-    private UUID storyId;
+    // ✅ Owning side of the relationship
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "story_id", nullable = false)
+    private Story story;
 
     @Column(name = "media_type", nullable = false, length = 10)
     private String mediaType;
@@ -28,16 +31,23 @@ public class StoryMedia {
     @Column(name = "order_index", nullable = false)
     private int orderIndex = 0;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     // ----------------------
     // Constructors
     // ----------------------
-    public StoryMedia() {}
 
-    public StoryMedia(UUID storyId, String mediaType, String url, String thumbnailUrl, int orderIndex) {
-        this.storyId = storyId;
+    protected StoryMedia() {
+        // JPA only
+    }
+
+    public StoryMedia(Story story,
+            String mediaType,
+            String url,
+            String thumbnailUrl,
+            int orderIndex) {
+        this.story = story;
         this.mediaType = mediaType;
         this.url = url;
         this.thumbnailUrl = thumbnailUrl;
@@ -47,8 +57,9 @@ public class StoryMedia {
     // ----------------------
     // Lifecycle Callbacks
     // ----------------------
+
     @PrePersist
-    public void prePersist() {
+    protected void prePersist() {
         if (createdAt == null) {
             createdAt = Instant.now();
         }
@@ -57,20 +68,17 @@ public class StoryMedia {
     // ----------------------
     // Getters & Setters
     // ----------------------
+
     public UUID getId() {
         return id;
     }
 
-    public void setId(UUID id) {
-        this.id = id;
+    public Story getStory() {
+        return story;
     }
 
-    public UUID getStoryId() {
-        return storyId;
-    }
-
-    public void setStoryId(UUID storyId) {
-        this.storyId = storyId;
+    public void setStory(Story story) {
+        this.story = story;
     }
 
     public String getMediaType() {
@@ -107,9 +115,5 @@ public class StoryMedia {
 
     public Instant getCreatedAt() {
         return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
     }
 }

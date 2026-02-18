@@ -1,27 +1,22 @@
 package com.buyology.ecommerce.story.controller;
 
-import com.buyology.ecommerce.common.enums.Language;
-import com.buyology.ecommerce.common.response.ApiResponse;
-import com.buyology.ecommerce.common.utils.LangUtil;
-import com.buyology.ecommerce.story.domain.Story;
-import com.buyology.ecommerce.story.dto.CreateStoryRequest;
-import com.buyology.ecommerce.story.dto.StoryResponse;
-import com.buyology.ecommerce.story.dto.StorySummaryResponse;
-import com.buyology.ecommerce.story.service.StoryService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.MediaType;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import com.buyology.ecommerce.story.domain.Story;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.story.dto.StoryResponse;
+import org.springframework.web.multipart.MultipartFile;
+import com.buyology.ecommerce.story.service.StoryService;
+import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.story.dto.CreateStoryRequest;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
 @RequestMapping("/api/story")
@@ -38,12 +33,7 @@ public class StoryController {
     @Operation(summary = "Create a new story")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Story> createStory(
-            @RequestPart("request") @io.swagger.v3.oas.annotations.media.Schema(
-                    type = "string",
-                    format = "json",
-                    description = "Story creation request as JSON",
-                    example = "{\"translations\":[{\"titleAz\":\"Yeni Hekayə\",\"titleEn\":\"New Story\",\"titleAr\":\"قصة جديدة\",\"descriptionAz\":\"Bu yeni hekayənin təsviridir\",\"descriptionEn\":\"This is the description of the new story\",\"descriptionAr\":\"هذا وصف القصة الجديدة\"}],\"status\":\"ACTIVE\"}"
-            ) String requestJson,
+            @RequestPart("request") @io.swagger.v3.oas.annotations.media.Schema(type = "string", format = "json", description = "Story creation request as JSON", example = "{\"translations\":[{\"titleAz\":\"Yeni Hekayə\",\"titleEn\":\"New Story\",\"titleAr\":\"قصة جديدة\",\"descriptionAz\":\"Bu yeni hekayənin təsviridir\",\"descriptionEn\":\"This is the description of the new story\",\"descriptionAr\":\"هذا وصف القصة الجديدة\"}],\"status\":\"ACTIVE\"}") String requestJson,
             @RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
             @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
 
@@ -57,6 +47,46 @@ public class StoryController {
             @RequestParam Language language) {
 
         return storyService.getStories(language);
+    }
+
+    @GetMapping("/{storyId}")
+    public ResponseEntity<ApiResponse<StoryResponse>> getStoryDetails(
+            @RequestParam Language language,
+            @PathVariable UUID storyId) {
+        return storyService.getStoryDetails(language, storyId);
+    }
+
+    @PostMapping("/{storyId}/activate")
+    public ResponseEntity<ApiResponse<Void>> activateStory(@PathVariable UUID storyId) {
+        // ✅ Call the service to actually activate the story
+        storyService.activateStory(storyId);
+
+        // Return success message
+        return ApiResponse.success(null, "Story activated successfully.");
+    }
+
+    @PostMapping("/{storyId}/deactivate")
+    public ResponseEntity<ApiResponse<Void>> deActivateStory(@PathVariable UUID storyId) {
+        storyService.deActivateStory(storyId);
+
+        return ApiResponse.success(null, "Story deactivated successfully.");
+    }
+
+    @Operation(summary = "Add media files to an existing story")
+    @PostMapping(value = "/{storyId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<Void>> addMediaToStory(
+            @PathVariable UUID storyId,
+            @RequestPart("mediaFiles") List<MultipartFile> mediaFiles) {
+        storyService.addMediaToStory(storyId, mediaFiles);
+        return ApiResponse.success(null, "Media added to story successfully.");
+    }
+
+    @Operation(summary = "Delete a story with all its translations and media")
+    @DeleteMapping("/{storyId}")
+    public ResponseEntity<ApiResponse<Void>> deleteStory(@PathVariable UUID storyId) {
+        storyService.deleteStory(storyId);
+
+        return ApiResponse.success(null, "Story deleted successfully.");
     }
 
 }
