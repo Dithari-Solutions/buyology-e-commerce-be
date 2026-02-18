@@ -20,12 +20,6 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
 @RequestMapping("/api/story")
-@CrossOrigin(
-        origins = "*",
-        allowedHeaders = "*",
-        allowCredentials = "true",
-        methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS}
-)
 @Tag(name = "Story", description = "APIs for stories")
 public class StoryController {
 
