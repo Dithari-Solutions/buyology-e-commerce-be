@@ -16,6 +16,8 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/product")
@@ -53,6 +56,19 @@ public class ProductController {
 
         CreateProductRequest request = objectMapper.readValue(requestJson, CreateProductRequest.class);
         return productService.createProduct(request, mediaFiles);
+    }
+
+    @Operation(summary = "Get all products")
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts() {
+        return productService.getAllProducts();
+    }
+
+    @Operation(summary = "Get products by category")
+    @GetMapping("/category/{categoryId}")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(
+            @PathVariable UUID categoryId) {
+        return productService.getProductsByCategory(categoryId);
     }
 
     /**

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify your Buyology account</title>
+    <style>
+        body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+        img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+
+        @media only screen and (max-width: 620px) {
+            .email-wrapper  { padding: 16px 0 !important; }
+            .email-container { width: 100% !important; border-radius: 0 !important; }
+            .logo-cell      { padding: 36px 24px 24px !important; }
+            .title-cell     { padding: 0 24px 16px !important; }
+            .title-cell h1  { font-size: 26px !important; }
+            .body-cell      { padding: 0 24px 20px !important; }
+            .otp-cell       { padding: 0 24px 32px !important; }
+            .otp-box        { font-size: 36px !important; letter-spacing: 12px !important; padding: 20px 24px !important; }
+            .footer-cell    { padding: 0 24px 36px !important; }
+        }
+    </style>
+</head>
+
+<body style="margin: 0; padding: 0; background-color: #f0f0f0; font-family: Arial, sans-serif;">
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"
+        class="email-wrapper"
+        style="background-color: #f0f0f0; padding: 40px 0;">
+        <tr>
+            <td align="center" style="padding: 0 16px;">
+
+                <!-- Email Container -->
+                <table class="email-container" cellpadding="0" cellspacing="0" border="0"
+                    style="background-color: #3a3180; border-radius: 16px; overflow: hidden; max-width: 600px; width: 100%;">
+
+                    <!-- Logo -->
+                    <tr>
+                        <td class="logo-cell" align="center" style="padding: 48px 40px 32px;">
+                            <table cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                    <td align="center">
+                                        <span style="font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #ffffff; font-family: Arial, sans-serif; text-transform: uppercase;">
+                                            BUY<span style="color: #f5c842;">O</span>L<span style="color: #f5c842;">O</span>GY
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td align="center" style="padding-top: 6px;">
+                                        <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEyIiB2aWV3Qm94PSIwIDAgMTYwIDEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxwYXRoIGQ9Ik0wIDZDMjAgNiAyMCAxIDQwIDFDNjAgMSA2MCAxMSA4MCAxMUMxMDAgMTEgMTAwIDEgMTIwIDFDMTQwIDEgMTQwIDYgMTYwIDYiIHN0cm9rZT0iI2Y1Yzg0MiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8L3N2Zz4="
+                                            alt="wave" width="160" height="12" style="display: block;" />
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Title -->
+                    <tr>
+                        <td class="title-cell" align="center" style="padding: 0 40px 16px;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 30px; font-weight: 800; font-family: Arial, sans-serif; line-height: 1.2;">
+                                Verify your account
+                            </h1>
+                        </td>
+                    </tr>
+
+                    <!-- Subtitle -->
+                    <tr>
+                        <td class="body-cell" align="center" style="padding: 0 60px 24px;">
+                            <p style="margin: 0; color: #ffffff; font-size: 16px; line-height: 1.6; font-family: Arial, sans-serif; text-align: center;">
+                                Use the code below to complete your registration. It expires in <strong>{{EXPIRY_MINUTES}} minutes</strong>.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Divider -->
+                    <tr>
+                        <td style="padding: 0 40px 28px;">
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 0;" />
+                        </td>
+                    </tr>
+
+                    <!-- OTP Code Box -->
+                    <tr>
+                        <td class="otp-cell" align="center" style="padding: 0 40px 36px;">
+                            <div class="otp-box" style="
+                                display: inline-block;
+                                background-color: rgba(255, 255, 255, 0.08);
+                                border: 2px solid rgba(245, 200, 66, 0.5);
+                                border-radius: 14px;
+                                padding: 24px 48px;
+                                font-size: 44px;
+                                font-weight: 800;
+                                letter-spacing: 16px;
+                                color: #f5c842;
+                                font-family: 'Courier New', Courier, monospace;
+                                text-align: center;
+                                text-indent: 16px;
+                            ">{{OTP_CODE}}</div>
+                        </td>
+                    </tr>
+
+                    <!-- Divider -->
+                    <tr>
+                        <td style="padding: 0 40px 28px;">
+                            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 0;" />
+                        </td>
+                    </tr>
+
+                    <!-- Security Notice -->
+                    <tr>
+                        <td class="footer-cell" align="center" style="padding: 0 60px 48px;">
+                            <p style="margin: 0 0 12px 0; color: rgba(255,255,255,0.6); font-size: 13px; line-height: 1.6; font-family: Arial, sans-serif; text-align: center;">
+                                If you did not create an account with Buyology, you can safely ignore this email.
+                            </p>
+                            <p style="margin: 0; color: rgba(255,255,255,0.4); font-size: 12px; font-family: Arial, sans-serif; text-align: center;">
+                                For your security, never share this code with anyone.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- End Email Container -->
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>

@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.product.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.product.dto.CategoryLocalizedResponse;
 import com.buyology.ecommerce.product.dto.CategoryResponse;
 import com.buyology.ecommerce.product.dto.CreateCategoryRequest;
 import com.buyology.ecommerce.product.service.ProductCategoryService;
@@ -8,10 +9,14 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/category")
@@ -22,6 +27,15 @@ public class ProductCategoryController {
 
     public ProductCategoryController(ProductCategoryService categoryService) {
         this.categoryService = categoryService;
+    }
+
+    @Operation(summary = "Get all categories in a specific language",
+            description = "Returns all categories with only the translation for the requested language. "
+                    + "Accepted values for lang: AZ, EN, AR (case-insensitive).")
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<CategoryLocalizedResponse>>> getCategories(
+            @RequestParam String lang) {
+        return categoryService.getCategories(lang);
     }
 
     @Operation(

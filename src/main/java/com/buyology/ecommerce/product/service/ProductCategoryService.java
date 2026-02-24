@@ -1,8 +1,10 @@
 package com.buyology.ecommerce.product.service;
 
+import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.ProductCategory;
 import com.buyology.ecommerce.product.domain.ProductCategoryTranslation;
+import com.buyology.ecommerce.product.dto.CategoryLocalizedResponse;
 import com.buyology.ecommerce.product.dto.CategoryResponse;
 import com.buyology.ecommerce.product.dto.CategoryTranslationRequest;
 import com.buyology.ecommerce.product.dto.CreateCategoryRequest;
@@ -61,6 +63,37 @@ public class ProductCategoryService {
         CategoryResponse response = buildResponse(savedCategory, savedTranslations);
         String message = parent == null ? "Category created successfully" : "Subcategory created successfully";
         return ApiResponse.success(response, message);
+    }
+
+    public ResponseEntity<ApiResponse<List<CategoryLocalizedResponse>>> getCategories(String language) {
+        Language lang;
+        try {
+            lang = Language.valueOf(language.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Unsupported language '" + language + "'. Accepted values: AZ, EN, AR");
+        }
+
+        List<CategoryLocalizedResponse> responses = categoryRepository.findAll().stream()
+                .map(category -> {
+                    ProductCategoryTranslation tr = translationRepository
+                            .findByCategoryIdAndLanguage(category.getId(), lang.name())
+                            .orElseThrow(() -> new IllegalStateException(
+                                    "Missing " + lang + " translation for category: " + category.getId()));
+
+                    return new CategoryLocalizedResponse(
+                            category.getId(),
+                            category.getParent() != null ? category.getParent().getId() : null,
+                            category.getStatus(),
+                            tr.getName(),
+                            tr.getDescription(),
+                            tr.getSlug(),
+                            category.getCreatedAt(),
+                            category.getUpdatedAt());
+                })
+                .toList();
+
+        return ApiResponse.success(responses, "Categories fetched successfully");
     }
 
     // ========================

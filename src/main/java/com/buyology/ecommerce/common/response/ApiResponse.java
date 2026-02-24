@@ -27,6 +27,14 @@ public class ApiResponse<T> {
     }
 
     // ------------------------
+    // 201 Created
+    // ------------------------
+    public static <T> ResponseEntity<ApiResponse<T>> created(T data, String message) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new ApiResponse<>(201, message, data));
+    }
+
+    // ------------------------
     // Generic failure
     // ------------------------
     public static <T> ResponseEntity<ApiResponse<T>> failure(HttpStatus status, String message) {

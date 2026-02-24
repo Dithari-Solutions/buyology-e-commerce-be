@@ -38,7 +38,7 @@ import java.util.UUID;
 @Service
 public class ProductService {
 
-    private static final String STATIC_PRODUCT_PATH = "/opt/uploads/product";
+    private static final String STATIC_PRODUCT_PATH = "/static/product";
 
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
@@ -119,12 +119,55 @@ public class ProductService {
         ProductResponse response = buildResponse(
                 savedProduct, savedTranslations, mediaDtos, variantDtos, resolvedAccessoryIds);
 
-        return ApiResponse.success(response, "Product created successfully");
+        return ApiResponse.created(response, "Product created successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts() {
+        List<ProductResponse> responses = productRepository.findAll().stream()
+                .map(this::toResponse)
+                .toList();
+        return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(UUID categoryId) {
+        categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Category not found with id: " + categoryId));
+
+        List<ProductResponse> responses = productRepository.findByCategoryId(categoryId).stream()
+                .map(this::toResponse)
+                .toList();
+        return ApiResponse.success(responses, "Products fetched successfully");
     }
 
     // ========================
     // Private helpers
     // ========================
+
+    private ProductResponse toResponse(Product product) {
+        List<ProductTranslation> translations = translationRepository.findByProductId(product.getId());
+
+        List<ProductResponse.MediaDto> mediaDtos = mediaRepository.findByProductId(product.getId()).stream()
+                .map(m -> new ProductResponse.MediaDto(
+                        m.getId(), m.getMediaType().name(), m.getUrl(),
+                        m.getThumbnailUrl(), m.getIsPrimary(), m.getOrderIndex()))
+                .toList();
+
+        List<ProductResponse.VariantDto> variantDtos = variantRepository.findByProductId(product.getId()).stream()
+                .map(v -> {
+                    List<UUID> optionIds = variantOptionRepository.findByVariantId(v.getId()).stream()
+                            .map(vo -> vo.getOption().getId())
+                            .toList();
+                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), v.getPrice(), v.getStock(), optionIds);
+                })
+                .toList();
+
+        List<UUID> accessoryIds = accessoryRepository.findByProductId(product.getId()).stream()
+                .map(a -> a.getAccessory().getId())
+                .toList();
+
+        return buildResponse(product, translations, mediaDtos, variantDtos, accessoryIds);
+    }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
         List<ProductTranslation> translations = List.of(
