@@ -45,6 +45,7 @@ public class AuthController {
      * Step 2 — Submit the OTP received by email.
      * If valid, creates the user account and returns JWT tokens.
      */
+    // test
     @Operation(summary = "Verify OTP", description = "Verifies the OTP sent to the user's email and completes registration")
     @PostMapping("/verify-otp")
     public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(@RequestBody OtpVerifyRequest request) {
