@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.story.dto.CreateStoryRequest;
 import com.buyology.ecommerce.story.domain.StoryTranslation;
+import java.util.Comparator;
 import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 import com.buyology.ecommerce.story.repository.StoryRepository;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
@@ -141,18 +142,26 @@ public class StoryService {
                             .findFirst()
                             .orElse(null);
 
-                    StoryMedia thumbnail = story.getMedia()
+                    List<StoryMedia> sortedMedia = story.getMedia()
                             .stream()
                             .filter(m -> m.getUrl() != null && !m.getUrl().isEmpty())
-                            .findFirst()
-                            .orElse(null);
+                            .sorted(Comparator.comparingInt(StoryMedia::getOrderIndex))
+                            .toList();
+
+                    StoryMedia thumbnail = sortedMedia.isEmpty() ? null : sortedMedia.get(0);
 
                     if (translation == null || thumbnail == null)
                         return null;
 
+                    List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
+                            .map(StoryResponse.MediaItem::from)
+                            .toList();
+
                     return new StorySummaryResponse(
+                            story.getId(),
                             translation.getTitle(),
-                            thumbnail.getUrl());
+                            thumbnail.getUrl(),
+                            mediaItems);
                 })
                 .filter(r -> r != null)
                 .toList();

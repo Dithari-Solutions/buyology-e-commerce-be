@@ -1,14 +1,14 @@
 package com.buyology.ecommerce.infrastructure.config;
 
 import org.springframework.context.annotation.Bean;
-import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 
-import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 public class SecurityConfig {
@@ -19,10 +19,15 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ Allow access to static story resources
-                        .requestMatchers("/story/**").permitAll()
-                        // Optionally allow other common static resources
-                        .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
+                        // Allow access to Swagger endpoints
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/webjars/**"
+                        ).permitAll()
+                        // Allow static resources
+                        .requestMatchers("/story/**", "/css/**", "/js/**", "/images/**").permitAll()
                         // All other requests
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())
@@ -34,22 +39,21 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "http://5.189.132.250:3000",
-                "http://5.189.132.250:5173",
-                "http://5.189.132.250",
-                "https://dev.dithari.com",
-                "http://dev.dithari.com",
+
+        // ✅ Only allow HTTPS origins in production
+        configuration.setAllowedOrigins(List.of(
                 "https://api-dev.dithari.com",
-                "http://api-dev.dithari.com"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("*"));
+                "https://dev.dithari.com",
+                "https://your-frontend.com" // add any production frontends here
+        ));
+
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
+
         return source;
     }
 }
