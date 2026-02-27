@@ -44,7 +44,8 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
                 "https://api-dev.dithari.com",
                 "https://dev.dithari.com",
-                "https://your-frontend.com" // add any production frontends here
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173"
         ));
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
