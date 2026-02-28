@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.auth.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +23,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @RequestMapping("/auth")
 @Tag(name = "Authentication", description = "Authentication APIs for users")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthService authService;
     private final GoogleOAuthService googleOAuthService;
@@ -70,7 +74,7 @@ public class AuthController {
         } catch (IllegalArgumentException e) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Google OAuth callback failed: {}", e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
         }
     }

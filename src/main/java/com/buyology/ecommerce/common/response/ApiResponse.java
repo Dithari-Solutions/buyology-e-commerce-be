@@ -2,6 +2,7 @@ package com.buyology.ecommerce.common.response;
 
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 
 public class ApiResponse<T> {
@@ -37,7 +38,7 @@ public class ApiResponse<T> {
     // ------------------------
     // Generic failure
     // ------------------------
-    public static <T> ResponseEntity<ApiResponse<T>> failure(HttpStatus status, String message) {
+    public static <T> ResponseEntity<ApiResponse<T>> failure(HttpStatusCode status, String message) {
         return ResponseEntity.status(status)
                 .body(new ApiResponse<>(status.value(), message, null));
     }

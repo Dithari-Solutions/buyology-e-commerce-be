@@ -204,6 +204,7 @@ public class StoryService {
         }
 
         story.deactivate();
+        storyRepository.save(story);
     }
 
     @Transactional

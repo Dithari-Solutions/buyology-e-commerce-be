@@ -5,7 +5,6 @@ import com.buyology.ecommerce.product.dto.CreateProductRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
 import com.buyology.ecommerce.product.service.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -33,10 +32,11 @@ import java.util.UUID;
 public class ProductController {
 
     private final ProductService productService;
-    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ObjectMapper objectMapper;
 
-    public ProductController(ProductService productService) {
+    public ProductController(ProductService productService, ObjectMapper objectMapper) {
         this.productService = productService;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "Create a new product with translations (AZ/EN/AR), media files, variants, and accessories")

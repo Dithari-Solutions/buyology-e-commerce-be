@@ -62,7 +62,7 @@ public class ProductCategoryService {
         // 5. Build and return the response
         CategoryResponse response = buildResponse(savedCategory, savedTranslations);
         String message = parent == null ? "Category created successfully" : "Subcategory created successfully";
-        return ApiResponse.success(response, message);
+        return ApiResponse.created(response, message);
     }
 
     public ResponseEntity<ApiResponse<List<CategoryLocalizedResponse>>> getCategories(String language) {

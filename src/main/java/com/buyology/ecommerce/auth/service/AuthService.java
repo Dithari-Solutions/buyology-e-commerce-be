@@ -225,7 +225,7 @@ public class AuthService {
                     tokenService.getAccessTokenExpirySeconds());
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Signin failed for {}: {}", request.getEmail(), e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during signin");
         }
     }

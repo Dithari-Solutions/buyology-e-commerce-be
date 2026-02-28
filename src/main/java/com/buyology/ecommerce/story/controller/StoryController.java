@@ -7,15 +7,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.buyology.ecommerce.story.domain.Story;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.story.domain.Story;
 import com.buyology.ecommerce.story.dto.StoryResponse;
 import org.springframework.web.multipart.MultipartFile;
 import com.buyology.ecommerce.story.service.StoryService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.story.dto.CreateStoryRequest;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
@@ -24,22 +23,24 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 public class StoryController {
 
     private final StoryService storyService;
-    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ObjectMapper objectMapper;
 
-    public StoryController(StoryService storyService) {
+    public StoryController(StoryService storyService, ObjectMapper objectMapper) {
         this.storyService = storyService;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "Create a new story")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Story> createStory(
+    public ResponseEntity<ApiResponse<StoryResponse>> createStory(
             @RequestPart("request") String requestJson,
             @RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
             @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
 
         CreateStoryRequest request = objectMapper.readValue(requestJson, CreateStoryRequest.class);
         Story story = storyService.createStory(request, mediaFiles, createdBy);
-        return ResponseEntity.ok(story);
+        StoryResponse response = StoryResponse.from(story, Language.AZ);
+        return ApiResponse.created(response, "Story created successfully");
     }
 
     @GetMapping

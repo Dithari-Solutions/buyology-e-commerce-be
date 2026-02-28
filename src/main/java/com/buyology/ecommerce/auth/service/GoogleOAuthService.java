@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.MultiValueMap;
 import com.buyology.ecommerce.user.domain.Users;
 import org.springframework.web.client.RestTemplate;
@@ -26,15 +27,20 @@ public class GoogleOAuthService {
     @Value("${google.redirect-uri}")
     private String redirectUri;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final UserRepository userRepository;
     private final AuthCredentialRepository authCredentialRepository;
 
-    public GoogleOAuthService(UserRepository userRepository, AuthCredentialRepository authCredentialRepository) {
+    public GoogleOAuthService(
+            RestTemplate restTemplate,
+            UserRepository userRepository,
+            AuthCredentialRepository authCredentialRepository) {
+        this.restTemplate = restTemplate;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
     }
 
+    @Transactional
     public Users processGoogleOAuth(String code) {
         if (code == null || code.isEmpty()) {
             throw new IllegalArgumentException("Authorization code cannot be null or empty");
