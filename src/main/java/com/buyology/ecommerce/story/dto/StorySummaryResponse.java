@@ -7,5 +7,6 @@ public record StorySummaryResponse(
         UUID id,
         String title,
         String thumbnailUrl,
+        String status,
         List<StoryResponse.MediaItem> media) {
 }

@@ -131,38 +131,10 @@ public class StoryService {
     }
 
     @Transactional(readOnly = true)
-    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getStories(Language language) {
-
+    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getPublicStories(Language language) {
         List<StorySummaryResponse> responses = storyRepository.findByStatus(StoryStatus.ACTIVE)
                 .stream()
-                .map(story -> {
-                    StoryTranslation translation = story.getTranslations()
-                            .stream()
-                            .filter(t -> t.getLanguage() == language)
-                            .findFirst()
-                            .orElse(null);
-
-                    List<StoryMedia> sortedMedia = story.getMedia()
-                            .stream()
-                            .filter(m -> m.getUrl() != null && !m.getUrl().isEmpty())
-                            .sorted(Comparator.comparingInt(StoryMedia::getOrderIndex))
-                            .toList();
-
-                    StoryMedia thumbnail = sortedMedia.isEmpty() ? null : sortedMedia.get(0);
-
-                    if (translation == null || thumbnail == null)
-                        return null;
-
-                    List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
-                            .map(StoryResponse.MediaItem::from)
-                            .toList();
-
-                    return new StorySummaryResponse(
-                            story.getId(),
-                            translation.getTitle(),
-                            thumbnail.getUrl(),
-                            mediaItems);
-                })
+                .map(story -> toSummaryResponse(story, language))
                 .filter(r -> r != null)
                 .toList();
 
@@ -172,13 +144,61 @@ public class StoryService {
     }
 
     @Transactional(readOnly = true)
-    public ResponseEntity<ApiResponse<StoryResponse>> getStoryDetails(Language language, UUID storyId) {
+    public ResponseEntity<ApiResponse<StoryResponse>> getPublicStoryDetails(Language language, UUID storyId) {
         return storyRepository.findById(storyId)
-                .map(story -> {
-                    StoryResponse response = StoryResponse.from(story, language);
-                    return ApiResponse.success(response, "Story fetched successfully");
-                })
+                .filter(story -> story.getStatus() == StoryStatus.ACTIVE)
+                .map(story -> ApiResponse.success(StoryResponse.from(story, language), "Story fetched successfully"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
+    }
+
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getAdminStories(Language language) {
+        List<StorySummaryResponse> responses = storyRepository.findAll()
+                .stream()
+                .map(story -> toSummaryResponse(story, language))
+                .filter(r -> r != null)
+                .toList();
+
+        return ApiResponse.success(
+                responses,
+                responses.isEmpty() ? "No stories found." : "Stories fetched successfully");
+    }
+
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<StoryResponse>> getAdminStoryDetails(Language language, UUID storyId) {
+        return storyRepository.findById(storyId)
+                .map(story -> ApiResponse.success(StoryResponse.from(story, language), "Story fetched successfully"))
+                .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
+    }
+
+    private StorySummaryResponse toSummaryResponse(Story story, Language language) {
+        StoryTranslation translation = story.getTranslations()
+                .stream()
+                .filter(t -> t.getLanguage() == language)
+                .findFirst()
+                .orElse(null);
+
+        List<StoryMedia> sortedMedia = story.getMedia()
+                .stream()
+                .filter(m -> m.getUrl() != null && !m.getUrl().isEmpty())
+                .sorted(Comparator.comparingInt(StoryMedia::getOrderIndex))
+                .toList();
+
+        StoryMedia thumbnail = sortedMedia.isEmpty() ? null : sortedMedia.get(0);
+
+        if (translation == null || thumbnail == null)
+            return null;
+
+        List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
+                .map(StoryResponse.MediaItem::from)
+                .toList();
+
+        return new StorySummaryResponse(
+                story.getId(),
+                translation.getTitle(),
+                thumbnail.getUrl(),
+                story.getStatus().name(),
+                mediaItems);
     }
 
     @Transactional
