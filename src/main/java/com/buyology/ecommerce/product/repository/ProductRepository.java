@@ -10,4 +10,8 @@ import com.buyology.ecommerce.product.domain.Product;
 public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     List<Product> findByCategoryId(UUID categoryId);
+
+    List<Product> findByStatus(String status);
+
+    List<Product> findByStatusAndCategoryId(String status, UUID categoryId);
 }

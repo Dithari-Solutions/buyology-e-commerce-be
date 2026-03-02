@@ -36,6 +36,13 @@ public class Product {
     @Column(name = "base_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal basePrice;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "discount_type", length = 20)
+    private DiscountType discountType;
+
+    @Column(name = "discount_value", precision = 12, scale = 2)
+    private BigDecimal discountValue;
+
     @Column(name = "sku", nullable = false, unique = true, length = 255)
     private String sku;
 
@@ -61,17 +68,25 @@ public class Product {
         C
     }
 
+    public enum DiscountType {
+        FIXED,
+        PERCENTAGE
+    }
+
     // Constructors
     public Product() {
     }
 
     public Product(ProductCategory category, ProductType productType, Boolean isRefurbished,
-            RefurbGrade refurbGrade, BigDecimal basePrice, String sku, String status) {
+            RefurbGrade refurbGrade, BigDecimal basePrice, DiscountType discountType, BigDecimal discountValue,
+            String sku, String status) {
         this.category = category;
         this.productType = productType;
         this.isRefurbished = isRefurbished != null ? isRefurbished : false;
         this.refurbGrade = refurbGrade;
         this.basePrice = basePrice;
+        this.discountType = discountType;
+        this.discountValue = discountValue;
         this.sku = sku;
         this.status = status != null ? status : "ACTIVE";
     }
@@ -140,6 +155,22 @@ public class Product {
 
     public void setBasePrice(BigDecimal basePrice) {
         this.basePrice = basePrice;
+    }
+
+    public DiscountType getDiscountType() {
+        return discountType;
+    }
+
+    public void setDiscountType(DiscountType discountType) {
+        this.discountType = discountType;
+    }
+
+    public BigDecimal getDiscountValue() {
+        return discountValue;
+    }
+
+    public void setDiscountValue(BigDecimal discountValue) {
+        this.discountValue = discountValue;
     }
 
     public String getSku() {

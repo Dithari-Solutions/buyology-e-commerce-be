@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
@@ -16,12 +17,17 @@ public class ProductResponse {
     private Boolean isRefurbished;
     private String refurbGrade;
     private BigDecimal basePrice;
+    private String discountType;
+    private BigDecimal discountValue;
+    private BigDecimal effectivePrice;
     private String sku;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
     private Instant createdAt;
     private Instant updatedAt;
 
-    private List<TranslationDto> translations;
+    private String title;
+    private String description;
     private List<MediaDto> media;
     private List<VariantDto> variants;
     private List<UUID> accessoryIds;
@@ -29,47 +35,6 @@ public class ProductResponse {
     // ========================
     // Nested DTOs
     // ========================
-
-    @Schema(description = "Product translation in a single language")
-    public static class TranslationDto {
-
-        private String language;
-        private String title;
-        private String description;
-
-        public TranslationDto() {
-        }
-
-        public TranslationDto(String language, String title, String description) {
-            this.language = language;
-            this.title = title;
-            this.description = description;
-        }
-
-        public String getLanguage() {
-            return language;
-        }
-
-        public void setLanguage(String language) {
-            this.language = language;
-        }
-
-        public String getTitle() {
-            return title;
-        }
-
-        public void setTitle(String title) {
-            this.title = title;
-        }
-
-        public String getDescription() {
-            return description;
-        }
-
-        public void setDescription(String description) {
-            this.description = description;
-        }
-    }
 
     @Schema(description = "Product media item (image or video)")
     public static class MediaDto {
@@ -256,6 +221,30 @@ public class ProductResponse {
         this.basePrice = basePrice;
     }
 
+    public String getDiscountType() {
+        return discountType;
+    }
+
+    public void setDiscountType(String discountType) {
+        this.discountType = discountType;
+    }
+
+    public BigDecimal getDiscountValue() {
+        return discountValue;
+    }
+
+    public void setDiscountValue(BigDecimal discountValue) {
+        this.discountValue = discountValue;
+    }
+
+    public BigDecimal getEffectivePrice() {
+        return effectivePrice;
+    }
+
+    public void setEffectivePrice(BigDecimal effectivePrice) {
+        this.effectivePrice = effectivePrice;
+    }
+
     public String getSku() {
         return sku;
     }
@@ -288,12 +277,20 @@ public class ProductResponse {
         this.updatedAt = updatedAt;
     }
 
-    public List<TranslationDto> getTranslations() {
-        return translations;
+    public String getTitle() {
+        return title;
     }
 
-    public void setTranslations(List<TranslationDto> translations) {
-        this.translations = translations;
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 
     public List<MediaDto> getMedia() {

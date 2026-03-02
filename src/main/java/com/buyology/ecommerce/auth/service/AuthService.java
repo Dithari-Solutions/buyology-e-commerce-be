@@ -1,33 +1,31 @@
 package com.buyology.ecommerce.auth.service;
 
-import java.security.SecureRandom;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Optional;
-
 import org.slf4j.Logger;
+import java.time.Instant;
+import java.util.Optional;
 import org.slf4j.LoggerFactory;
+import java.security.SecureRandom;
+import java.time.temporal.ChronoUnit;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
-
-import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import org.springframework.http.ResponseEntity;
+import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.auth.domain.EmailOtp;
-import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
-import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
-import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
-import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
+import com.buyology.ecommerce.auth.dto.SignInResponse;
+import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
+import com.buyology.ecommerce.common.utils.PasswordUtils;
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
-import com.buyology.ecommerce.common.utils.PasswordUtils;
-import com.buyology.ecommerce.infrastructure.config.OtpProperties;
-import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import org.springframework.transaction.annotation.Transactional;
+import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
+import com.buyology.ecommerce.infrastructure.config.OtpProperties;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 @Service
 public class AuthService {

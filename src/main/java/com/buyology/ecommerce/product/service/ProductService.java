@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -92,6 +93,24 @@ public class ProductService {
                     "Refurb grade (A, B, or C) is required when isRefurbished is true");
         }
 
+        // 2b. Business rules for discount
+        if (request.getDiscountType() != null) {
+            if (request.getDiscountValue() == null) {
+                throw new IllegalArgumentException("discountValue is required when discountType is set");
+            }
+            if (request.getDiscountType() == Product.DiscountType.FIXED
+                    && request.getDiscountValue().compareTo(request.getBasePrice()) >= 0) {
+                throw new IllegalArgumentException("Fixed discount value must be lower than base price");
+            }
+            if (request.getDiscountType() == Product.DiscountType.PERCENTAGE
+                    && (request.getDiscountValue().compareTo(BigDecimal.ZERO) <= 0
+                            || request.getDiscountValue().compareTo(new BigDecimal("100")) > 0)) {
+                throw new IllegalArgumentException("Percentage discount must be between 0 and 100");
+            }
+        } else if (request.getDiscountValue() != null) {
+            throw new IllegalArgumentException("discountType is required when discountValue is set");
+        }
+
         // 3. Persist the base product so that we have a UUID for all child entities
         Product product = new Product(
                 category,
@@ -99,6 +118,8 @@ public class ProductService {
                 request.getIsRefurbished(),
                 request.getRefurbGrade(),
                 request.getBasePrice(),
+                request.getDiscountType(),
+                request.getDiscountValue(),
                 request.getSku(),
                 request.getStatus());
         Product savedProduct = productRepository.save(product);
@@ -115,27 +136,46 @@ public class ProductService {
         // 7. Link accessory products
         List<UUID> resolvedAccessoryIds = saveAccessories(savedProduct, request.getAccessoryIds());
 
-        // 8. Build and return the response
+        // 8. Build and return the response — use first saved translation for title/description
+        ProductTranslation first = savedTranslations.get(0);
         ProductResponse response = buildResponse(
-                savedProduct, savedTranslations, mediaDtos, variantDtos, resolvedAccessoryIds);
+                savedProduct, first.getTitle(), first.getDescription(), mediaDtos, variantDtos, resolvedAccessoryIds, true);
 
         return ApiResponse.created(response, "Product created successfully");
     }
 
-    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts() {
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsAdmin(String lang) {
         List<ProductResponse> responses = productRepository.findAll().stream()
-                .map(this::toResponse)
+                .map(p -> toResponse(p, lang, true))
                 .toList();
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
-    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(UUID categoryId) {
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryAdmin(UUID categoryId, String lang) {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Category not found with id: " + categoryId));
 
         List<ProductResponse> responses = productRepository.findByCategoryId(categoryId).stream()
-                .map(this::toResponse)
+                .map(p -> toResponse(p, lang, true))
+                .toList();
+        return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(String lang) {
+        List<ProductResponse> responses = productRepository.findByStatus("ACTIVE").stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(UUID categoryId, String lang) {
+        categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Category not found with id: " + categoryId));
+
+        List<ProductResponse> responses = productRepository.findByStatusAndCategoryId("ACTIVE", categoryId).stream()
+                .map(p -> toResponse(p, lang, false))
                 .toList();
         return ApiResponse.success(responses, "Products fetched successfully");
     }
@@ -144,8 +184,14 @@ public class ProductService {
     // Private helpers
     // ========================
 
-    private ProductResponse toResponse(Product product) {
-        List<ProductTranslation> translations = translationRepository.findByProductId(product.getId());
+    private ProductResponse toResponse(Product product, String lang, boolean includeStatus) {
+        List<ProductTranslation> translations = translationRepository.findByProductId(product.getId())
+                .stream()
+                .filter(t -> t.getLanguage().equalsIgnoreCase(lang))
+                .toList();
+        if (translations.isEmpty()) {
+            throw new IllegalArgumentException("No translation found for language: " + lang);
+        }
 
         List<ProductResponse.MediaDto> mediaDtos = mediaRepository.findByProductId(product.getId()).stream()
                 .map(m -> new ProductResponse.MediaDto(
@@ -166,7 +212,8 @@ public class ProductService {
                 .map(a -> a.getAccessory().getId())
                 .toList();
 
-        return buildResponse(product, translations, mediaDtos, variantDtos, accessoryIds);
+        ProductTranslation translation = translations.get(0);
+        return buildResponse(product, translation.getTitle(), translation.getDescription(), mediaDtos, variantDtos, accessoryIds, includeStatus);
     }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
@@ -291,17 +338,27 @@ public class ProductService {
         return ProductMedia.MediaType.IMAGE;
     }
 
+    private BigDecimal computeEffectivePrice(Product product) {
+        if (product.getDiscountType() == null || product.getDiscountValue() == null) {
+            return product.getBasePrice();
+        }
+        return switch (product.getDiscountType()) {
+            case FIXED -> product.getDiscountValue();
+            case PERCENTAGE -> product.getBasePrice()
+                    .multiply(BigDecimal.ONE.subtract(
+                            product.getDiscountValue().divide(new BigDecimal("100"))))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        };
+    }
+
     private ProductResponse buildResponse(
             Product product,
-            List<ProductTranslation> translations,
+            String title,
+            String description,
             List<ProductResponse.MediaDto> mediaDtos,
             List<ProductResponse.VariantDto> variantDtos,
-            List<UUID> accessoryIds) {
-
-        List<ProductResponse.TranslationDto> translationDtos = translations.stream()
-                .map(t -> new ProductResponse.TranslationDto(
-                        t.getLanguage(), t.getTitle(), t.getDescription()))
-                .toList();
+            List<UUID> accessoryIds,
+            boolean includeStatus) {
 
         ProductResponse response = new ProductResponse();
         response.setId(product.getId());
@@ -310,11 +367,17 @@ public class ProductService {
         response.setIsRefurbished(product.getIsRefurbished());
         response.setRefurbGrade(product.getRefurbGrade() != null ? product.getRefurbGrade().name() : null);
         response.setBasePrice(product.getBasePrice());
+        response.setDiscountType(product.getDiscountType() != null ? product.getDiscountType().name() : null);
+        response.setDiscountValue(product.getDiscountValue());
+        response.setEffectivePrice(computeEffectivePrice(product));
         response.setSku(product.getSku());
-        response.setStatus(product.getStatus());
+        if (includeStatus) {
+            response.setStatus(product.getStatus());
+        }
         response.setCreatedAt(product.getCreatedAt());
         response.setUpdatedAt(product.getUpdatedAt());
-        response.setTranslations(translationDtos);
+        response.setTitle(title);
+        response.setDescription(description);
         response.setMedia(mediaDtos);
         response.setVariants(variantDtos);
         response.setAccessoryIds(accessoryIds);

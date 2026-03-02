@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.dto;
 
+import com.buyology.ecommerce.product.domain.Product.DiscountType;
 import com.buyology.ecommerce.product.domain.Product.ProductType;
 import com.buyology.ecommerce.product.domain.Product.RefurbGrade;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,6 +35,13 @@ public class CreateProductRequest {
     @DecimalMin(value = "0.00", message = "Base price must be non-negative")
     @Schema(description = "Base price of the product", example = "299.99")
     private BigDecimal basePrice;
+
+    @Schema(description = "Discount type — FIXED sets an absolute discounted price, PERCENTAGE applies a % off", allowableValues = {"FIXED", "PERCENTAGE"})
+    private DiscountType discountType;
+
+    @DecimalMin(value = "0.00", message = "Discount value must be non-negative")
+    @Schema(description = "Discount value: the discounted price when FIXED, or the percentage (0–100) when PERCENTAGE", example = "249.99")
+    private BigDecimal discountValue;
 
     @NotBlank(message = "SKU is required")
     @Size(max = 255, message = "SKU must not exceed 255 characters")
@@ -97,6 +105,22 @@ public class CreateProductRequest {
 
     public void setBasePrice(BigDecimal basePrice) {
         this.basePrice = basePrice;
+    }
+
+    public DiscountType getDiscountType() {
+        return discountType;
+    }
+
+    public void setDiscountType(DiscountType discountType) {
+        this.discountType = discountType;
+    }
+
+    public BigDecimal getDiscountValue() {
+        return discountValue;
+    }
+
+    public void setDiscountValue(BigDecimal discountValue) {
+        this.discountValue = discountValue;
     }
 
     public String getSku() {
