@@ -7,8 +7,7 @@ import jakarta.persistence.*;
 @Entity
 @Table(name = "\"auth_credentials\"",
        uniqueConstraints = {
-           @UniqueConstraint(columnNames = {"provider", "provider_user_id"}),
-           @UniqueConstraint(columnNames = {"email", "provider"})
+           @UniqueConstraint(columnNames = {"provider", "provider_user_id"})
        })
 public class AuthCredentials {
 

@@ -66,6 +66,14 @@ public class AdminProductController {
         return productService.getAllProductsAdmin(lang);
     }
 
+    @Operation(summary = "Get product by ID with all details including media (all statuses)")
+    @GetMapping("/{productId}")
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductById(
+            @PathVariable UUID productId,
+            @RequestParam String lang) {
+        return productService.getProductByIdAdmin(productId, lang);
+    }
+
     @Operation(summary = "Get all products by category (all statuses)")
     @GetMapping("/category/{categoryId}")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(

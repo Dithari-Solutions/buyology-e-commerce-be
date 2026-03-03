@@ -11,5 +11,7 @@ public class StoryResourceConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/story/**")
                 .addResourceLocations("file:/opt/uploads/story/");
+        registry.addResourceHandler("/product/**")
+                .addResourceLocations("file:/opt/uploads/product/");
     }
 }

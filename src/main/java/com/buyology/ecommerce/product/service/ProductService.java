@@ -39,7 +39,7 @@ import java.util.UUID;
 @Service
 public class ProductService {
 
-    private static final String STATIC_PRODUCT_PATH = "/static/product";
+    private static final String PRODUCT_UPLOAD_PATH = "/opt/uploads/product";
 
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
@@ -162,6 +162,12 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdAdmin(UUID id, String lang) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        return ApiResponse.success(toResponse(product, lang, true), "Product fetched successfully");
+    }
+
     public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdPublic(UUID id, String lang) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
@@ -238,7 +244,7 @@ public class ProductService {
             return List.of();
         }
 
-        Path productDir = Paths.get(STATIC_PRODUCT_PATH, product.getId().toString());
+        Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, product.getId().toString());
         try {
             Files.createDirectories(productDir);
         } catch (IOException e) {

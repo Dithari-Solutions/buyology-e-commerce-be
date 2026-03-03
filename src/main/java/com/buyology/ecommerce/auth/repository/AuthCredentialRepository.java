@@ -14,4 +14,6 @@ public interface AuthCredentialRepository extends JpaRepository<AuthCredentials,
     List<AuthCredentials> findByUserId(UUID userId);
 
     Optional<AuthCredentials> findByEmailAndProvider(String email, String provider);
+
+    List<AuthCredentials> findAllByEmailAndProvider(String email, String provider);
 }

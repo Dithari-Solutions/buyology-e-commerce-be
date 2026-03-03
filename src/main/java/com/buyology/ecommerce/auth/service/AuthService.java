@@ -73,9 +73,16 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        // Reject if the email is already registered
-        if (authCredentialRepository.findByEmailAndProvider(request.getEmail(), "LOCAL").isPresent()) {
-            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
+        // Reject if a customer account with this email is already registered
+        boolean customerExists = authCredentialRepository
+                .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
+                .stream()
+                .anyMatch(cred -> {
+                    Users user = userRepository.findById(cred.getUserId()).orElse(null);
+                    return user != null && user.getUserType() == Users.UserType.CUSTOMER;
+                });
+        if (customerExists) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "A customer account with this email already exists");
         }
 
         // Rate-limit: don't allow a new OTP if one was issued within the cooldown window
@@ -170,6 +177,7 @@ public class AuthService {
 
         // Create the user account
         Users newUser = new Users();
+        newUser.setUserType(Users.UserType.CUSTOMER);
         newUser.setIsGuest(false);
         newUser.setStatus("ACTIVE");
         userRepository.save(newUser);
@@ -220,8 +228,16 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        if (authCredentialRepository.findByEmailAndProvider(request.getEmail(), "LOCAL").isPresent()) {
-            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
+        // Reject only if an admin account with this email is already registered
+        boolean adminExists = authCredentialRepository
+                .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
+                .stream()
+                .anyMatch(cred -> {
+                    Users user = userRepository.findById(cred.getUserId()).orElse(null);
+                    return user != null && user.getUserType() == Users.UserType.ADMIN;
+                });
+        if (adminExists) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "An admin account with this email already exists");
         }
 
         Optional<EmailOtp> existingOtp = emailOtpRepository
