@@ -9,27 +9,41 @@ import jakarta.persistence.*;
 @Table(name = "\"users\"")
 public class Users {
 
+    public enum UserType {
+        CUSTOMER, ADMIN
+    }
+
     @Id
     @GeneratedValue
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @Column(name = "first_name")
+    @Column(name = "first_name", length = 100)
     private String firstName;
 
-    @Column(name = "last_name")
+    @Column(name = "last_name", length = 100)
     private String lastName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type", nullable = false, length = 30)
+    private UserType userType;
 
     @Column(name = "is_guest", nullable = false)
     private Boolean isGuest = false;
 
-    @Column(name = "status")
-    private String status = "ACTIVE"; // default, SUSPENDED, DELETED
+    @Column(name = "status", nullable = false, length = 20)
+    private String status = "ACTIVE"; // ACTIVE, SUSPENDED
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
     // =====================
@@ -39,9 +53,10 @@ public class Users {
     public Users() {
     }
 
-    public Users(String firstName, String lastName, Boolean isGuest, String status) {
+    public Users(String firstName, String lastName, UserType userType, Boolean isGuest, String status) {
         this.firstName = firstName;
         this.lastName = lastName;
+        this.userType = userType;
         this.isGuest = isGuest;
         this.status = status;
     }
@@ -97,6 +112,14 @@ public class Users {
         this.lastName = lastName;
     }
 
+    public UserType getUserType() {
+        return userType;
+    }
+
+    public void setUserType(UserType userType) {
+        this.userType = userType;
+    }
+
     public Boolean getIsGuest() {
         return isGuest;
     }
@@ -111,6 +134,22 @@ public class Users {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public Instant getLastLoginAt() {
+        return lastLoginAt;
+    }
+
+    public void setLastLoginAt(Instant lastLoginAt) {
+        this.lastLoginAt = lastLoginAt;
     }
 
     public Instant getCreatedAt() {

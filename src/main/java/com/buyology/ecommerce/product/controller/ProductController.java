@@ -33,6 +33,14 @@ public class ProductController {
         return productService.getAllProductsPublic(lang);
     }
 
+    @Operation(summary = "Get active product by ID with all related details")
+    @GetMapping("/{productId}")
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductById(
+            @PathVariable UUID productId,
+            @RequestParam String lang) {
+        return productService.getProductByIdPublic(productId, lang);
+    }
+
     @Operation(summary = "Get active products by category")
     @GetMapping("/category/{categoryId}")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(

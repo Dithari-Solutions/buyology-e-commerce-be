@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.http.ResponseEntity;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.auth.domain.EmailOtp;
+import com.buyology.ecommerce.auth.dto.AdminSignUpRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
@@ -185,6 +186,146 @@ public class AuthService {
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
 
         // Issue tokens
+        String accessToken = tokenService.generateAccessToken(credentials);
+        var refreshToken = tokenService.generateRefreshToken(credentials);
+
+        return ApiResponse.signinSuccess(
+                accessToken,
+                refreshToken.getToken(),
+                tokenService.getAccessTokenExpirySeconds());
+    }
+
+    // ── Admin / Superadmin Signup ─────────────────────────────────────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> adminSignup(AdminSignUpRequest request) {
+
+        if (request.getFirstName() == null || request.getFirstName().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "First name is required");
+        }
+
+        if (request.getLastName() == null || request.getLastName().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Last name is required");
+        }
+
+        if (!EmailValidation.isValid(request.getEmail())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+        }
+
+        if (request.getPassword() == null || request.getPassword().length() < 8) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        }
+
+        if (!request.getPassword().equals(request.getRepeatedPassword())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
+        }
+
+        if (authCredentialRepository.findByEmailAndProvider(request.getEmail(), "LOCAL").isPresent()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
+        }
+
+        Optional<EmailOtp> existingOtp = emailOtpRepository
+                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+
+        if (existingOtp.isPresent()) {
+            EmailOtp otp = existingOtp.get();
+            Instant cooldownEnds = otp.getCreatedAt().plus(otpProperties.getResendCooldownSeconds(), ChronoUnit.SECONDS);
+            if (!otp.isExpired() && Instant.now().isBefore(cooldownEnds)) {
+                long secondsLeft = Instant.now().until(cooldownEnds, ChronoUnit.SECONDS);
+                return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                        "Please wait " + secondsLeft + " seconds before requesting a new OTP");
+            }
+        }
+
+        emailOtpRepository.invalidateAllForEmail(request.getEmail());
+
+        String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+
+        EmailOtp newOtp = new EmailOtp();
+        newOtp.setEmail(request.getEmail());
+        newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
+        newOtp.setFirstName(request.getFirstName());
+        newOtp.setLastName(request.getLastName());
+        newOtp.setOtpCode(otpCode);
+        newOtp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
+        emailOtpRepository.save(newOtp);
+
+        try {
+            emailService.sendOtpEmail(request.getEmail(), otpCode);
+        } catch (RuntimeException e) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            log.error("Email delivery failed for {}: {}", request.getEmail(), e.getMessage());
+            return ApiResponse.failure(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Could not deliver the verification email. Please try again later.");
+        }
+
+        return ApiResponse.success(
+                "OTP sent to " + request.getEmail(),
+                "Verification code sent. Please check your inbox.");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<SignInResponse>> adminVerifyOtp(OtpVerifyRequest request) {
+
+        if (!EmailValidation.isValid(request.getEmail())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+        }
+
+        if (request.getOtpCode() == null || request.getOtpCode().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "OTP code is required");
+        }
+
+        Optional<EmailOtp> otpRecord = emailOtpRepository
+                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+
+        if (otpRecord.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "No pending verification found. Please sign up again.");
+        }
+
+        EmailOtp otp = otpRecord.get();
+
+        if (otp.isExpired()) {
+            otp.setUsed(true);
+            emailOtpRepository.save(otp);
+            return ApiResponse.failure(HttpStatus.GONE, "OTP has expired. Please sign up again to receive a new code.");
+        }
+
+        if (otp.isMaxAttemptsReached()) {
+            otp.setUsed(true);
+            emailOtpRepository.save(otp);
+            return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                    "Too many incorrect attempts. Please sign up again.");
+        }
+
+        if (!otp.getOtpCode().equals(request.getOtpCode())) {
+            otp.setAttempts(otp.getAttempts() + 1);
+            emailOtpRepository.save(otp);
+            int remaining = 5 - otp.getAttempts();
+            return ApiResponse.failure(HttpStatus.UNAUTHORIZED,
+                    "Invalid OTP. " + remaining + " attempt(s) remaining.");
+        }
+
+        otp.setUsed(true);
+        emailOtpRepository.save(otp);
+
+        Users newUser = new Users();
+        newUser.setFirstName(otp.getFirstName());
+        newUser.setLastName(otp.getLastName());
+        newUser.setUserType(Users.UserType.ADMIN);
+        newUser.setIsGuest(false);
+        newUser.setStatus("ACTIVE");
+        userRepository.save(newUser);
+
+        AuthCredentials credentials = new AuthCredentials();
+        credentials.setUserId(newUser.getId());
+        credentials.setEmail(otp.getEmail());
+        credentials.setPasswordHash(otp.getPasswordHash());
+        credentials.setProvider("LOCAL");
+        credentials.setIsActive(true);
+        authCredentialRepository.save(credentials);
+
+        emailService.sendRegistrationSuccessEmail(otp.getEmail());
+
         String accessToken = tokenService.generateAccessToken(credentials);
         var refreshToken = tokenService.generateRefreshToken(credentials);
 

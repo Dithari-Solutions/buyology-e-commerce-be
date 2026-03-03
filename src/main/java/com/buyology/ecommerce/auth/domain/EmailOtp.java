@@ -27,6 +27,13 @@ public class EmailOtp {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
+    // Optional: stored for admin signup flows so they are available at verify time
+    @Column(name = "first_name", length = 100)
+    private String firstName;
+
+    @Column(name = "last_name", length = 100)
+    private String lastName;
+
     // 6-digit numeric OTP code
     @Column(name = "otp_code", nullable = false, length = 6)
     private String otpCode;
@@ -71,6 +78,12 @@ public class EmailOtp {
 
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+
+    public String getFirstName() { return firstName; }
+    public void setFirstName(String firstName) { this.firstName = firstName; }
+
+    public String getLastName() { return lastName; }
+    public void setLastName(String lastName) { this.lastName = lastName; }
 
     public String getOtpCode() { return otpCode; }
     public void setOtpCode(String otpCode) { this.otpCode = otpCode; }

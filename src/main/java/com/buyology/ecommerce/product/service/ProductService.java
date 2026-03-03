@@ -162,6 +162,15 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdPublic(UUID id, String lang) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        if (!"ACTIVE".equals(product.getStatus())) {
+            throw new ProductNotFoundException(id);
+        }
+        return ApiResponse.success(toResponse(product, lang, false), "Product fetched successfully");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(String lang) {
         List<ProductResponse> responses = productRepository.findByStatus("ACTIVE").stream()
                 .map(p -> toResponse(p, lang, false))
