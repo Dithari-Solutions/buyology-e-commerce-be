@@ -1,32 +1,37 @@
 package com.buyology.ecommerce.auth.service;
 
-import org.slf4j.Logger;
 import java.time.Instant;
-import java.util.Optional;
-import org.slf4j.LoggerFactory;
-import java.security.SecureRandom;
 import java.time.temporal.ChronoUnit;
+import java.util.Optional;
+import java.security.SecureRandom;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
 import org.springframework.http.ResponseEntity;
-import com.buyology.ecommerce.user.domain.Users;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.domain.EmailOtp;
 import com.buyology.ecommerce.auth.dto.AdminSignUpRequest;
-import com.buyology.ecommerce.auth.dto.SignInRequest;
-import com.buyology.ecommerce.auth.dto.SignUpRequest;
-import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
-import com.buyology.ecommerce.common.utils.PasswordUtils;
-import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.dto.SignInRequest;
+import com.buyology.ecommerce.auth.dto.SignInResponse;
+import com.buyology.ecommerce.auth.dto.SignUpRequest;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
-import com.buyology.ecommerce.user.repository.UserRepository;
-import org.springframework.transaction.annotation.Transactional;
-import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
+import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.infrastructure.config.OtpProperties;
-import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.repository.UserRepository;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 @Service
 public class AuthService {
@@ -56,7 +61,7 @@ public class AuthService {
         this.otpProperties = otpProperties;
     }
 
-    // ── Step 1: Initiate signup — validate, store OTP, send email ─────────────
+    // ── Step 1: Initiate signup ───────────────────────────────────────────────
 
     @Transactional
     public ResponseEntity<ApiResponse<String>> signup(SignUpRequest request) {
@@ -73,7 +78,6 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        // Reject if a customer account with this email is already registered
         boolean customerExists = authCredentialRepository
                 .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
                 .stream()
@@ -85,7 +89,6 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "A customer account with this email already exists");
         }
 
-        // Rate-limit: don't allow a new OTP if one was issued within the cooldown window
         Optional<EmailOtp> existingOtp = emailOtpRepository
                 .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
 
@@ -99,12 +102,9 @@ public class AuthService {
             }
         }
 
-        // Invalidate any previous unused OTPs for this email before issuing a new one
         emailOtpRepository.invalidateAllForEmail(request.getEmail());
 
-        // Generate a cryptographically secure 6-digit OTP
         String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
-
         EmailOtp newOtp = new EmailOtp();
         newOtp.setEmail(request.getEmail());
         newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
@@ -112,26 +112,24 @@ public class AuthService {
         newOtp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
         emailOtpRepository.save(newOtp);
 
-        // Send OTP via Twilio SendGrid
         try {
             emailService.sendOtpEmail(request.getEmail(), otpCode);
         } catch (RuntimeException e) {
-            // Roll back the OTP record so the user can cleanly retry
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             log.error("Email delivery failed for {}: {}", request.getEmail(), e.getMessage());
             return ApiResponse.failure(HttpStatus.SERVICE_UNAVAILABLE,
                     "Could not deliver the verification email. Please try again later.");
         }
 
-        return ApiResponse.success(
-                "OTP sent to " + request.getEmail(),
+        return ApiResponse.success("OTP sent to " + request.getEmail(),
                 "Verification code sent. Please check your inbox.");
     }
 
-    // ── Step 2: Verify OTP — create account, return JWT tokens ───────────────
+    // ── Step 2: Verify OTP — creates account and issues tokens ───────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(OtpVerifyRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(
+            OtpVerifyRequest request, HttpServletRequest httpRequest) {
 
         if (!EmailValidation.isValid(request.getEmail())) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
@@ -145,7 +143,8 @@ public class AuthService {
                 .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
 
         if (otpRecord.isEmpty()) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "No pending verification found. Please sign up again.");
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "No pending verification found. Please sign up again.");
         }
 
         EmailOtp otp = otpRecord.get();
@@ -153,7 +152,8 @@ public class AuthService {
         if (otp.isExpired()) {
             otp.setUsed(true);
             emailOtpRepository.save(otp);
-            return ApiResponse.failure(HttpStatus.GONE, "OTP has expired. Please sign up again to receive a new code.");
+            return ApiResponse.failure(HttpStatus.GONE,
+                    "OTP has expired. Please sign up again to receive a new code.");
         }
 
         if (otp.isMaxAttemptsReached()) {
@@ -171,11 +171,9 @@ public class AuthService {
                     "Invalid OTP. " + remaining + " attempt(s) remaining.");
         }
 
-        // OTP is valid — mark it used immediately to prevent replay attacks
         otp.setUsed(true);
         emailOtpRepository.save(otp);
 
-        // Create the user account
         Users newUser = new Users();
         newUser.setUserType(Users.UserType.CUSTOMER);
         newUser.setIsGuest(false);
@@ -190,20 +188,12 @@ public class AuthService {
         credentials.setIsActive(true);
         authCredentialRepository.save(credentials);
 
-        // Send welcome email (best-effort — failure does not block the response)
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
 
-        // Issue tokens
-        String accessToken = tokenService.generateAccessToken(credentials);
-        var refreshToken = tokenService.generateRefreshToken(credentials);
-
-        return ApiResponse.signinSuccess(
-                accessToken,
-                refreshToken.getToken(),
-                tokenService.getAccessTokenExpirySeconds());
+        return buildSigninResponse(credentials, httpRequest);
     }
 
-    // ── Admin / Superadmin Signup ─────────────────────────────────────────────
+    // ── Admin Signup ──────────────────────────────────────────────────────────
 
     @Transactional
     public ResponseEntity<ApiResponse<String>> adminSignup(AdminSignUpRequest request) {
@@ -228,7 +218,6 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        // Reject only if an admin account with this email is already registered
         boolean adminExists = authCredentialRepository
                 .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
                 .stream()
@@ -256,7 +245,6 @@ public class AuthService {
         emailOtpRepository.invalidateAllForEmail(request.getEmail());
 
         String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
-
         EmailOtp newOtp = new EmailOtp();
         newOtp.setEmail(request.getEmail());
         newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
@@ -275,13 +263,13 @@ public class AuthService {
                     "Could not deliver the verification email. Please try again later.");
         }
 
-        return ApiResponse.success(
-                "OTP sent to " + request.getEmail(),
+        return ApiResponse.success("OTP sent to " + request.getEmail(),
                 "Verification code sent. Please check your inbox.");
     }
 
     @Transactional
-    public ResponseEntity<ApiResponse<SignInResponse>> adminVerifyOtp(OtpVerifyRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> adminVerifyOtp(
+            OtpVerifyRequest request, HttpServletRequest httpRequest) {
 
         if (!EmailValidation.isValid(request.getEmail())) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
@@ -295,7 +283,8 @@ public class AuthService {
                 .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
 
         if (otpRecord.isEmpty()) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "No pending verification found. Please sign up again.");
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "No pending verification found. Please sign up again.");
         }
 
         EmailOtp otp = otpRecord.get();
@@ -303,7 +292,8 @@ public class AuthService {
         if (otp.isExpired()) {
             otp.setUsed(true);
             emailOtpRepository.save(otp);
-            return ApiResponse.failure(HttpStatus.GONE, "OTP has expired. Please sign up again to receive a new code.");
+            return ApiResponse.failure(HttpStatus.GONE,
+                    "OTP has expired. Please sign up again to receive a new code.");
         }
 
         if (otp.isMaxAttemptsReached()) {
@@ -342,18 +332,13 @@ public class AuthService {
 
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
 
-        String accessToken = tokenService.generateAccessToken(credentials);
-        var refreshToken = tokenService.generateRefreshToken(credentials);
-
-        return ApiResponse.signinSuccess(
-                accessToken,
-                refreshToken.getToken(),
-                tokenService.getAccessTokenExpirySeconds());
+        return buildSigninResponse(credentials, httpRequest);
     }
 
-    // ── Signin ───────────────────────────────────────────────────────────────
+    // ── Signin ────────────────────────────────────────────────────────────────
 
-    public ResponseEntity<ApiResponse<SignInResponse>> signin(SignInRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> signin(
+            SignInRequest request, HttpServletRequest httpRequest) {
         try {
             if (!EmailValidation.isValid(request.getEmail())) {
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
@@ -371,17 +356,38 @@ public class AuthService {
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
-            String accessToken = tokenService.generateAccessToken(authCredentials);
-            var refreshToken = tokenService.generateRefreshToken(authCredentials);
-
-            return ApiResponse.signinSuccess(
-                    accessToken,
-                    refreshToken.getToken(),
-                    tokenService.getAccessTokenExpirySeconds());
+            return buildSigninResponse(authCredentials, httpRequest);
 
         } catch (Exception e) {
             log.error("Signin failed for {}: {}", request.getEmail(), e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during signin");
         }
+    }
+
+    // ── Shared token issuance ─────────────────────────────────────────────────
+
+    /**
+     * Generates access + refresh tokens and returns a ResponseEntity that includes
+     * the Set-Cookie header directly (not via HttpServletResponse side-effect).
+     * Spring will reliably send this header because it is part of the ResponseEntity.
+     */
+    private ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
+            AuthCredentials credentials, HttpServletRequest httpRequest) {
+
+        String accessToken = tokenService.generateAccessToken(credentials);
+        var refreshToken = tokenService.generateRefreshToken(credentials, extractDeviceInfo(httpRequest));
+        String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.getToken());
+
+        SignInResponse body = new SignInResponse(accessToken, tokenService.getAccessTokenExpirySeconds());
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookieHeader)
+                .body(new ApiResponse<>(200, "Signin successful", body));
+    }
+
+    private String extractDeviceInfo(HttpServletRequest request) {
+        String ua = request.getHeader("User-Agent");
+        if (ua == null) return null;
+        return ua.length() > 500 ? ua.substring(0, 500) : ua;
     }
 }

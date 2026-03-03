@@ -26,6 +26,9 @@ public class RefreshToken {
     @Column(nullable = false)
     private boolean revoked = false;
 
+    @Column(name = "device_info", length = 500)
+    private String deviceInfo;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -38,10 +41,11 @@ public class RefreshToken {
     public RefreshToken() {
     }
 
-    public RefreshToken(AuthCredentials authCredentials, String token, Instant expiresAt) {
+    public RefreshToken(AuthCredentials authCredentials, String token, Instant expiresAt, String deviceInfo) {
         this.authCredentials = authCredentials;
         this.token = token;
         this.expiresAt = expiresAt;
+        this.deviceInfo = deviceInfo;
     }
 
     // ----------------------
@@ -85,6 +89,14 @@ public class RefreshToken {
 
     public void setRevoked(boolean revoked) {
         this.revoked = revoked;
+    }
+
+    public String getDeviceInfo() {
+        return deviceInfo;
+    }
+
+    public void setDeviceInfo(String deviceInfo) {
+        this.deviceInfo = deviceInfo;
     }
 
     public Instant getCreatedAt() {

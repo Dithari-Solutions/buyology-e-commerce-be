@@ -45,7 +45,7 @@ public class SecurityConfig {
                 "https://api-dev.dithari.com",
                 "https://dev.dithari.com",
                 "http://127.0.0.1:3000",
-                "http://127.0.0.1:5173"
+                "http://localhost:5173"
         ));
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));

@@ -44,11 +44,11 @@ public class ApiResponse<T> {
     }
 
     // ------------------------
-    // Convenience for signin success
+    // Convenience for signin success (refresh token delivered via HttpOnly cookie)
     // ------------------------
     public static ResponseEntity<ApiResponse<SignInResponse>> signinSuccess(
-            String accessToken, String refreshToken, long expiresIn) {
-        SignInResponse response = new SignInResponse(accessToken, refreshToken, expiresIn);
+            String accessToken, long expiresIn) {
+        SignInResponse response = new SignInResponse(accessToken, expiresIn);
         return ResponseEntity.ok(new ApiResponse<>(200, "Signin successful", response));
     }
 

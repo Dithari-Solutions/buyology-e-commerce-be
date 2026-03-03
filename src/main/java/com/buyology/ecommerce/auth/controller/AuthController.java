@@ -2,6 +2,7 @@ package com.buyology.ecommerce.auth.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,11 +14,14 @@ import com.buyology.ecommerce.auth.dto.SignUpRequest;
 import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.auth.service.GoogleOAuthService;
+import com.buyology.ecommerce.auth.service.TokenService;
+import com.buyology.ecommerce.auth.service.TokenService.RotateTokensResult;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.user.domain.Users;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/auth")
@@ -28,39 +32,101 @@ public class AuthController {
 
     private final AuthService authService;
     private final GoogleOAuthService googleOAuthService;
+    private final TokenService tokenService;
 
-    public AuthController(AuthService authService, GoogleOAuthService googleOAuthService) {
+    public AuthController(AuthService authService, GoogleOAuthService googleOAuthService,
+            TokenService tokenService) {
         this.authService = authService;
         this.googleOAuthService = googleOAuthService;
+        this.tokenService = tokenService;
     }
 
-    /**
-     * Step 1 — Submit email + password.
-     * Validates input, then sends a 6-digit OTP to the provided email.
-     * No account is created yet.
-     */
-    @Operation(summary = "Initiate registration", description = "Validates credentials and sends an OTP to the user's email")
+    // ── Registration ──────────────────────────────────────────────────────────
+
+    @Operation(summary = "Initiate registration",
+            description = "Validates credentials and sends an OTP to the user's email")
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<String>> signup(@RequestBody SignUpRequest request) {
         return authService.signup(request);
     }
 
-    /**
-     * Step 2 — Submit the OTP received by email.
-     * If valid, creates the user account and returns JWT tokens.
-     */
-    // test
-    @Operation(summary = "Verify OTP", description = "Verifies the OTP sent to the user's email and completes registration")
+    @Operation(summary = "Verify OTP",
+            description = "Verifies the OTP and completes registration. " +
+                    "Access token is returned in the JSON body. " +
+                    "Refresh token is delivered as an HttpOnly Set-Cookie header " +
+                    "(Path=/auth/refresh, MaxAge=7d). " +
+                    "NOTE: Swagger UI cannot display HttpOnly cookies — use curl or Postman to inspect.")
     @PostMapping("/verify-otp")
-    public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(@RequestBody OtpVerifyRequest request) {
-        return authService.verifyOtp(request);
+    public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(
+            @RequestBody OtpVerifyRequest request,
+            HttpServletRequest httpRequest) {
+        return authService.verifyOtp(request, httpRequest);
     }
 
-    @Operation(summary = "Sign in", description = "Authenticate with email and password")
+    // ── Signin ────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Sign in",
+            description = "Authenticate with email and password. " +
+                    "Access token is returned in the JSON body. " +
+                    "Refresh token is delivered as an HttpOnly Set-Cookie header " +
+                    "(Path=/auth/refresh, MaxAge=7d). " +
+                    "NOTE: Swagger UI cannot display HttpOnly cookies — use curl or Postman to inspect.")
     @PostMapping("/signin")
-    public ResponseEntity<ApiResponse<SignInResponse>> signin(@RequestBody SignInRequest request) {
-        return authService.signin(request);
+    public ResponseEntity<ApiResponse<SignInResponse>> signin(
+            @RequestBody SignInRequest request,
+            HttpServletRequest httpRequest) {
+        return authService.signin(request, httpRequest);
     }
+
+    // ── Token refresh ─────────────────────────────────────────────────────────
+
+    @Operation(summary = "Refresh access token",
+            description = "Reads the refresh_token HttpOnly cookie (Path=/auth/refresh), validates it, " +
+                    "rotates it (old token revoked), and returns a new access token in JSON. " +
+                    "A new HttpOnly cookie with the rotated refresh token is also set.")
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<SignInResponse>> refresh(
+            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            HttpServletRequest httpRequest) {
+
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "No refresh token provided");
+        }
+
+        try {
+            String deviceInfo = httpRequest.getHeader("User-Agent");
+            RotateTokensResult result = tokenService.rotateTokens(refreshToken, deviceInfo);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, result.refreshCookieHeader())
+                    .body(new ApiResponse<>(200, "Token refreshed successfully", result.signInResponse()));
+
+        } catch (SecurityException e) {
+            return ApiResponse.failure(HttpStatus.UNAUTHORIZED, e.getMessage());
+        } catch (Exception e) {
+            log.error("Token refresh failed: {}", e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
+        }
+    }
+
+    // ── Logout ────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Logout",
+            description = "Revokes the refresh token in the database and clears the HttpOnly cookie.")
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<String>> logout(
+            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
+
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            tokenService.revokeRefreshToken(refreshToken);
+        }
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, tokenService.buildClearRefreshTokenCookieString())
+                .body(new ApiResponse<>(200, "Logged out successfully", null));
+    }
+
+    // ── Google OAuth ──────────────────────────────────────────────────────────
 
     @PostMapping("/google/callback")
     public ResponseEntity<ApiResponse<Users>> googleCallback(@RequestBody GoogleOAuthRequest request) {

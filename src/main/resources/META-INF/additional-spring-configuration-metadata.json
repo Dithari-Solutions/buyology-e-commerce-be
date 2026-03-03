@@ -1,0 +1,10 @@
+{
+  "properties": [
+    {
+      "name": "cookie.secure",
+      "type": "java.lang.Boolean",
+      "description": "Whether to set the Secure flag on auth cookies. Set to false for local HTTP development, true in production (HTTPS).",
+      "defaultValue": true
+    }
+  ]
+}
