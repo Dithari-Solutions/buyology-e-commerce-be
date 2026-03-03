@@ -7,11 +7,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.buyology.ecommerce.auth.dto.ForgotPasswordRequest;
+import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
+import com.buyology.ecommerce.auth.dto.ResetPasswordRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
-import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.auth.service.GoogleOAuthService;
 import com.buyology.ecommerce.auth.service.TokenService;
@@ -76,6 +78,27 @@ public class AuthController {
             @RequestBody SignInRequest request,
             HttpServletRequest httpRequest) {
         return authService.signin(request, httpRequest);
+    }
+
+    // ── Forgot / Reset password ───────────────────────────────────────────────
+
+    @Operation(summary = "Forgot password",
+            description = "Sends a 6-digit OTP to the registered email. " +
+                    "Always returns 200 OK regardless of whether the email is registered " +
+                    "(prevents user-enumeration). OTP expires in 10 minutes, max 5 attempts.")
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<String>> forgotPassword(
+            @RequestBody ForgotPasswordRequest request) {
+        return authService.forgotPassword(request);
+    }
+
+    @Operation(summary = "Reset password",
+            description = "Verifies the OTP sent to the email and updates the password. " +
+                    "All active refresh tokens are revoked on success (forces re-login on every device).")
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<String>> resetPassword(
+            @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
     }
 
     // ── Token refresh ─────────────────────────────────────────────────────────

@@ -57,6 +57,21 @@ public class EmailService {
     }
 
     /**
+     * Send a 6-digit OTP for the forgot-password flow.
+     * Uses the same OTP template as signup but with a different subject line.
+     */
+    public void sendPasswordResetOtpEmail(String toEmail, String otpCode) {
+        try {
+            String htmlBody = buildOtpEmailHtml(otpCode);
+            send(toEmail, "Reset your Buyology password", htmlBody);
+            log.info("Password reset OTP email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.error("Failed to send password reset OTP email to {}: {}", toEmail, e.getMessage());
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    /**
      * Send the registration success email after OTP verification.
      */
     public void sendRegistrationSuccessEmail(String toEmail) {

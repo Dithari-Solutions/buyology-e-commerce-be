@@ -9,43 +9,55 @@ import jakarta.persistence.*;
     name = "email_otp",
     indexes = {
         @Index(name = "idx_email_otp_email", columnList = "email"),
-        @Index(name = "idx_email_otp_expires_at", columnList = "expires_at")
+        @Index(name = "idx_email_otp_expires_at", columnList = "expires_at"),
+        @Index(name = "idx_email_otp_type", columnList = "type")
     }
 )
 public class EmailOtp {
+
+    public enum OtpType {
+        SIGNUP,
+        PASSWORD_RESET
+    }
 
     @Id
     @GeneratedValue
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    // The email being verified
     @Column(name = "email", nullable = false, length = 255)
     private String email;
 
-    // Pre-hashed password stored temporarily until OTP is verified
-    @Column(name = "password_hash", nullable = false)
-    private String passwordHash;
+    /**
+     * Discriminates between signup and password-reset OTPs so the two flows
+     * never consume each other's tokens. Defaults to SIGNUP for backward compatibility.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false, length = 20)
+    private OtpType type = OtpType.SIGNUP;
 
-    // Optional: stored for admin signup flows so they are available at verify time
+    /**
+     * Pre-hashed password stored temporarily until OTP is verified (signup flow).
+     * Stored as empty string "" for PASSWORD_RESET type — not needed until reset step.
+     */
+    @Column(name = "password_hash", nullable = false)
+    private String passwordHash = "";
+
     @Column(name = "first_name", length = 100)
     private String firstName;
 
     @Column(name = "last_name", length = 100)
     private String lastName;
 
-    // 6-digit numeric OTP code
     @Column(name = "otp_code", nullable = false, length = 6)
     private String otpCode;
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
-    // True once the OTP has been successfully used or explicitly invalidated
     @Column(name = "used", nullable = false)
     private Boolean used = false;
 
-    // Track wrong attempts to prevent brute-force
     @Column(name = "attempts", nullable = false)
     private Integer attempts = 0;
 
@@ -57,9 +69,11 @@ public class EmailOtp {
         createdAt = Instant.now();
         if (used == null) used = false;
         if (attempts == null) attempts = 0;
+        if (type == null) type = OtpType.SIGNUP;
+        if (passwordHash == null) passwordHash = "";
     }
 
-    // ── Domain helpers ──────────────────────────────────────────────────────
+    // ── Domain helpers ────────────────────────────────────────────────────────
 
     public boolean isExpired() {
         return Instant.now().isAfter(expiresAt);
@@ -69,9 +83,12 @@ public class EmailOtp {
         return attempts >= 5;
     }
 
-    // ── Getters & Setters ────────────────────────────────────────────────────
+    // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public UUID getId() { return id; }
+
+    public OtpType getType() { return type; }
+    public void setType(OtpType type) { this.type = type; }
 
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }

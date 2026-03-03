@@ -16,13 +16,17 @@ import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.domain.EmailOtp;
+import com.buyology.ecommerce.auth.domain.EmailOtp.OtpType;
 import com.buyology.ecommerce.auth.dto.AdminSignUpRequest;
+import com.buyology.ecommerce.auth.dto.ForgotPasswordRequest;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
+import com.buyology.ecommerce.auth.dto.ResetPasswordRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
+import com.buyology.ecommerce.auth.repository.RefreshTokenRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
@@ -43,6 +47,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final AuthCredentialRepository authCredentialRepository;
     private final EmailOtpRepository emailOtpRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final EmailService emailService;
     private final OtpProperties otpProperties;
 
@@ -51,12 +56,14 @@ public class AuthService {
             UserRepository userRepository,
             AuthCredentialRepository authCredentialRepository,
             EmailOtpRepository emailOtpRepository,
+            RefreshTokenRepository refreshTokenRepository,
             EmailService emailService,
             OtpProperties otpProperties) {
         this.tokenService = tokenService;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
         this.emailOtpRepository = emailOtpRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
         this.emailService = emailService;
         this.otpProperties = otpProperties;
     }
@@ -89,8 +96,9 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "A customer account with this email already exists");
         }
 
+        // Rate-limit: scoped to SIGNUP type only so a pending password-reset OTP isn't affected
         Optional<EmailOtp> existingOtp = emailOtpRepository
-                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.SIGNUP);
 
         if (existingOtp.isPresent()) {
             EmailOtp otp = existingOtp.get();
@@ -102,10 +110,11 @@ public class AuthService {
             }
         }
 
-        emailOtpRepository.invalidateAllForEmail(request.getEmail());
+        emailOtpRepository.invalidateAllForEmailAndType(request.getEmail(), OtpType.SIGNUP);
 
         String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
         EmailOtp newOtp = new EmailOtp();
+        newOtp.setType(OtpType.SIGNUP);
         newOtp.setEmail(request.getEmail());
         newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
         newOtp.setOtpCode(otpCode);
@@ -125,7 +134,7 @@ public class AuthService {
                 "Verification code sent. Please check your inbox.");
     }
 
-    // ── Step 2: Verify OTP — creates account and issues tokens ───────────────
+    // ── Step 2: Verify OTP — create account, return tokens ───────────────────
 
     @Transactional
     public ResponseEntity<ApiResponse<SignInResponse>> verifyOtp(
@@ -140,7 +149,7 @@ public class AuthService {
         }
 
         Optional<EmailOtp> otpRecord = emailOtpRepository
-                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.SIGNUP);
 
         if (otpRecord.isEmpty()) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
@@ -230,7 +239,7 @@ public class AuthService {
         }
 
         Optional<EmailOtp> existingOtp = emailOtpRepository
-                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.SIGNUP);
 
         if (existingOtp.isPresent()) {
             EmailOtp otp = existingOtp.get();
@@ -242,10 +251,11 @@ public class AuthService {
             }
         }
 
-        emailOtpRepository.invalidateAllForEmail(request.getEmail());
+        emailOtpRepository.invalidateAllForEmailAndType(request.getEmail(), OtpType.SIGNUP);
 
         String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
         EmailOtp newOtp = new EmailOtp();
+        newOtp.setType(OtpType.SIGNUP);
         newOtp.setEmail(request.getEmail());
         newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
         newOtp.setFirstName(request.getFirstName());
@@ -280,7 +290,7 @@ public class AuthService {
         }
 
         Optional<EmailOtp> otpRecord = emailOtpRepository
-                .findTopByEmailAndUsedFalseOrderByCreatedAtDesc(request.getEmail());
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.SIGNUP);
 
         if (otpRecord.isEmpty()) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
@@ -364,13 +374,146 @@ public class AuthService {
         }
     }
 
+    // ── Forgot Password — Step 1: Send reset OTP ─────────────────────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> forgotPassword(ForgotPasswordRequest request) {
+
+        if (!EmailValidation.isValid(request.getEmail())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+        }
+
+        // Intentionally vague: don't reveal whether the email is registered
+        // to prevent user-enumeration attacks.
+        Optional<AuthCredentials> existing = authCredentialRepository
+                .findByEmailAndProvider(request.getEmail(), "LOCAL");
+
+        if (existing.isEmpty()) {
+            // Return the same 200 OK so the caller can't tell if the email exists
+            return ApiResponse.success(null,
+                    "If this email is registered, a reset code has been sent.");
+        }
+
+        // Rate-limit: scoped to PASSWORD_RESET type only
+        Optional<EmailOtp> existingOtp = emailOtpRepository
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.PASSWORD_RESET);
+
+        if (existingOtp.isPresent()) {
+            EmailOtp otp = existingOtp.get();
+            Instant cooldownEnds = otp.getCreatedAt().plus(otpProperties.getResendCooldownSeconds(), ChronoUnit.SECONDS);
+            if (!otp.isExpired() && Instant.now().isBefore(cooldownEnds)) {
+                long secondsLeft = Instant.now().until(cooldownEnds, ChronoUnit.SECONDS);
+                return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                        "Please wait " + secondsLeft + " seconds before requesting a new reset code");
+            }
+        }
+
+        // Invalidate any previous unused reset OTPs for this email
+        emailOtpRepository.invalidateAllForEmailAndType(request.getEmail(), OtpType.PASSWORD_RESET);
+
+        String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+        EmailOtp newOtp = new EmailOtp();
+        newOtp.setType(OtpType.PASSWORD_RESET);
+        newOtp.setEmail(request.getEmail());
+        // passwordHash is not needed for PASSWORD_RESET — entity default ("") satisfies NOT NULL
+        newOtp.setOtpCode(otpCode);
+        newOtp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
+        emailOtpRepository.save(newOtp);
+
+        try {
+            emailService.sendPasswordResetOtpEmail(request.getEmail(), otpCode);
+        } catch (RuntimeException e) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            log.error("Password reset email delivery failed for {}: {}", request.getEmail(), e.getMessage());
+            return ApiResponse.failure(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Could not deliver the reset email. Please try again later.");
+        }
+
+        return ApiResponse.success(null,
+                "If this email is registered, a reset code has been sent.");
+    }
+
+    // ── Forgot Password — Step 2: Verify OTP + set new password ──────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> resetPassword(ResetPasswordRequest request) {
+
+        if (!EmailValidation.isValid(request.getEmail())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+        }
+
+        if (request.getOtpCode() == null || request.getOtpCode().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Reset code is required");
+        }
+
+        if (request.getNewPassword() == null || request.getNewPassword().length() < 8) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        }
+
+        if (!request.getNewPassword().equals(request.getRepeatPassword())) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
+        }
+
+        Optional<EmailOtp> otpRecord = emailOtpRepository
+                .findTopByEmailAndUsedFalseAndTypeOrderByCreatedAtDesc(request.getEmail(), OtpType.PASSWORD_RESET);
+
+        if (otpRecord.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "No pending reset found. Please request a new reset code.");
+        }
+
+        EmailOtp otp = otpRecord.get();
+
+        if (otp.isExpired()) {
+            otp.setUsed(true);
+            emailOtpRepository.save(otp);
+            return ApiResponse.failure(HttpStatus.GONE,
+                    "Reset code has expired. Please request a new one.");
+        }
+
+        if (otp.isMaxAttemptsReached()) {
+            otp.setUsed(true);
+            emailOtpRepository.save(otp);
+            return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                    "Too many incorrect attempts. Please request a new reset code.");
+        }
+
+        if (!otp.getOtpCode().equals(request.getOtpCode())) {
+            otp.setAttempts(otp.getAttempts() + 1);
+            emailOtpRepository.save(otp);
+            int remaining = 5 - otp.getAttempts();
+            return ApiResponse.failure(HttpStatus.UNAUTHORIZED,
+                    "Invalid code. " + remaining + " attempt(s) remaining.");
+        }
+
+        // OTP is valid — consume it immediately to prevent replay
+        otp.setUsed(true);
+        emailOtpRepository.save(otp);
+
+        Optional<AuthCredentials> existing = authCredentialRepository
+                .findByEmailAndProvider(request.getEmail(), "LOCAL");
+
+        if (existing.isEmpty()) {
+            // This path is theoretically unreachable (forgotPassword already checked),
+            // but handled defensively.
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Account not found");
+        }
+
+        AuthCredentials credentials = existing.get();
+
+        // Update the password
+        credentials.setPasswordHash(PasswordUtils.hashPassword(request.getNewPassword()));
+        authCredentialRepository.save(credentials);
+
+        // Revoke all active refresh tokens so every device must re-authenticate
+        int revoked = refreshTokenRepository.revokeAllActiveByAuthCredential(credentials, Instant.now());
+        log.info("Revoked {} active refresh token(s) for {} after password reset", revoked, request.getEmail());
+
+        return ApiResponse.success(null, "Password reset successfully. Please sign in with your new password.");
+    }
+
     // ── Shared token issuance ─────────────────────────────────────────────────
 
-    /**
-     * Generates access + refresh tokens and returns a ResponseEntity that includes
-     * the Set-Cookie header directly (not via HttpServletResponse side-effect).
-     * Spring will reliably send this header because it is part of the ResponseEntity.
-     */
     private ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
             AuthCredentials credentials, HttpServletRequest httpRequest) {
 
