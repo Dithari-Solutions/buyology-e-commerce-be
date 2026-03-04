@@ -11,6 +11,7 @@ import com.buyology.ecommerce.product.domain.ProductTranslation;
 import com.buyology.ecommerce.product.domain.ProductVariant;
 import com.buyology.ecommerce.product.domain.ProductVariantOption;
 import com.buyology.ecommerce.product.dto.CreateProductRequest;
+import com.buyology.ecommerce.common.utils.SlugUtils;
 import com.buyology.ecommerce.product.dto.CreateVariantRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
 import com.buyology.ecommerce.product.dto.ProductTranslationRequest;
@@ -139,7 +140,7 @@ public class ProductService {
         // 8. Build and return the response — use first saved translation for title/description
         ProductTranslation first = savedTranslations.get(0);
         ProductResponse response = buildResponse(
-                savedProduct, first.getTitle(), first.getDescription(), mediaDtos, variantDtos, resolvedAccessoryIds, true);
+                savedProduct, first.getTitle(), first.getDescription(), first.getSlug(), mediaDtos, variantDtos, resolvedAccessoryIds, true);
 
         return ApiResponse.created(response, "Product created successfully");
     }
@@ -228,14 +229,14 @@ public class ProductService {
                 .toList();
 
         ProductTranslation translation = translations.get(0);
-        return buildResponse(product, translation.getTitle(), translation.getDescription(), mediaDtos, variantDtos, accessoryIds, includeStatus);
+        return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(), mediaDtos, variantDtos, accessoryIds, includeStatus);
     }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
-        List<ProductTranslation> translations = List.of(
-                new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz()),
-                new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn()),
-                new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr()));
+        List<ProductTranslation> translations = new ArrayList<>();
+        translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), SlugUtils.toSlug(tr.getTitleAz())));
+        translations.add(new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn(), SlugUtils.toSlug(tr.getTitleEn())));
+        translations.add(new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr(), SlugUtils.toSlug(tr.getTitleAr())));
         return translationRepository.saveAll(translations);
     }
 
@@ -370,6 +371,7 @@ public class ProductService {
             Product product,
             String title,
             String description,
+            String slug,
             List<ProductResponse.MediaDto> mediaDtos,
             List<ProductResponse.VariantDto> variantDtos,
             List<UUID> accessoryIds,
@@ -393,6 +395,7 @@ public class ProductService {
         response.setUpdatedAt(product.getUpdatedAt());
         response.setTitle(title);
         response.setDescription(description);
+        response.setSlug(slug);
         response.setMedia(mediaDtos);
         response.setVariants(variantDtos);
         response.setAccessoryIds(accessoryIds);

@@ -6,7 +6,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "product_translations", uniqueConstraints = {
-        @UniqueConstraint(columnNames = { "product_id", "language" })
+        @UniqueConstraint(columnNames = { "product_id", "language" }),
+        @UniqueConstraint(columnNames = { "language", "slug" })
 })
 public class ProductTranslation {
 
@@ -29,6 +30,9 @@ public class ProductTranslation {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    @Column(name = "slug", nullable = false, length = 255)
+    private String slug;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -40,11 +44,12 @@ public class ProductTranslation {
     public ProductTranslation() {
     }
 
-    public ProductTranslation(Product product, String language, String title, String description) {
+    public ProductTranslation(Product product, String language, String title, String description, String slug) {
         this.product = product;
         this.language = language;
         this.title = title;
         this.description = description;
+        this.slug = slug;
     }
 
     // Lifecycle hooks
@@ -101,6 +106,14 @@ public class ProductTranslation {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public void setSlug(String slug) {
+        this.slug = slug;
     }
 
     public Instant getCreatedAt() {

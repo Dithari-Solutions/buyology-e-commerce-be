@@ -28,6 +28,7 @@ public class ProductResponse {
 
     private String title;
     private String description;
+    private String slug;
     private List<MediaDto> media;
     private List<VariantDto> variants;
     private List<UUID> accessoryIds;
@@ -291,6 +292,14 @@ public class ProductResponse {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public void setSlug(String slug) {
+        this.slug = slug;
     }
 
     public List<MediaDto> getMedia() {
