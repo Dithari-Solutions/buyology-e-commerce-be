@@ -23,6 +23,10 @@ public class ProductSpecOption {
     @Column(name = "additional_price", nullable = false, precision = 10, scale = 2)
     private BigDecimal additionalPrice = BigDecimal.ZERO;
 
+    // Optional hex color code — only populated for color-type options (e.g. "#C0C0C0")
+    @Column(name = "color_code", length = 20)
+    private String colorCode;
+
     // Constructors
     public ProductSpecOption() {
     }
@@ -31,6 +35,13 @@ public class ProductSpecOption {
         this.group = group;
         this.value = value;
         this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
+    }
+
+    public ProductSpecOption(ProductSpecGroup group, String value, BigDecimal additionalPrice, String colorCode) {
+        this.group = group;
+        this.value = value;
+        this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
+        this.colorCode = colorCode;
     }
 
     // Lifecycle hook
@@ -72,5 +83,13 @@ public class ProductSpecOption {
 
     public void setAdditionalPrice(BigDecimal additionalPrice) {
         this.additionalPrice = additionalPrice;
+    }
+
+    public String getColorCode() {
+        return colorCode;
+    }
+
+    public void setColorCode(String colorCode) {
+        this.colorCode = colorCode;
     }
 }

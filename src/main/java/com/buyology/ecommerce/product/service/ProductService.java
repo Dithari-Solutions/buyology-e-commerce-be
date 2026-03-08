@@ -1,17 +1,24 @@
 package com.buyology.ecommerce.product.service;
 
+import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductAccessory;
 import com.buyology.ecommerce.product.domain.ProductCategory;
 import com.buyology.ecommerce.product.domain.ProductMedia;
 import com.buyology.ecommerce.product.domain.ProductNotFoundException;
+import com.buyology.ecommerce.product.domain.ProductSpecGroup;
+import com.buyology.ecommerce.product.domain.ProductSpecGroupTranslation;
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
+import com.buyology.ecommerce.product.domain.ProductSpecOptionTranslation;
 import com.buyology.ecommerce.product.domain.ProductTranslation;
 import com.buyology.ecommerce.product.domain.ProductVariant;
 import com.buyology.ecommerce.product.domain.ProductVariantOption;
+import com.buyology.ecommerce.product.dto.CreateColorRequest;
 import com.buyology.ecommerce.product.dto.CreateProductRequest;
 import com.buyology.ecommerce.common.utils.SlugUtils;
+import com.buyology.ecommerce.product.dto.CreateSpecGroupRequest;
+import com.buyology.ecommerce.product.dto.CreateSpecOptionRequest;
 import com.buyology.ecommerce.product.dto.CreateVariantRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
 import com.buyology.ecommerce.product.dto.ProductTranslationRequest;
@@ -19,7 +26,10 @@ import com.buyology.ecommerce.product.repository.ProductAccessoryRepository;
 import com.buyology.ecommerce.product.repository.ProductCategoryRepository;
 import com.buyology.ecommerce.product.repository.ProductMediaRepository;
 import com.buyology.ecommerce.product.repository.ProductRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecGroupRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecGroupTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecOptionTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
@@ -34,7 +44,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -44,7 +58,10 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
+    private final ProductSpecGroupRepository specGroupRepository;
+    private final ProductSpecGroupTranslationRepository specGroupTranslationRepository;
     private final ProductSpecOptionRepository specOptionRepository;
+    private final ProductSpecOptionTranslationRepository specOptionTranslationRepository;
     private final ProductTranslationRepository translationRepository;
     private final ProductMediaRepository mediaRepository;
     private final ProductVariantRepository variantRepository;
@@ -54,7 +71,10 @@ public class ProductService {
     public ProductService(
             ProductRepository productRepository,
             ProductCategoryRepository categoryRepository,
+            ProductSpecGroupRepository specGroupRepository,
+            ProductSpecGroupTranslationRepository specGroupTranslationRepository,
             ProductSpecOptionRepository specOptionRepository,
+            ProductSpecOptionTranslationRepository specOptionTranslationRepository,
             ProductTranslationRepository translationRepository,
             ProductMediaRepository mediaRepository,
             ProductVariantRepository variantRepository,
@@ -62,7 +82,10 @@ public class ProductService {
             ProductAccessoryRepository accessoryRepository) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
+        this.specGroupRepository = specGroupRepository;
+        this.specGroupTranslationRepository = specGroupTranslationRepository;
         this.specOptionRepository = specOptionRepository;
+        this.specOptionTranslationRepository = specOptionTranslationRepository;
         this.translationRepository = translationRepository;
         this.mediaRepository = mediaRepository;
         this.variantRepository = variantRepository;
@@ -72,10 +95,11 @@ public class ProductService {
 
     /**
      * Creates a new product with all associated data in a single atomic transaction:
-     * translations (AZ, EN, AR), media files, variants with spec options, and accessories.
+     * translations (AZ, EN, AR), spec groups/options (with additionalPrice for upgrades),
+     * colors (each with their own media), remaining media, variants, and accessories.
      *
      * @param request    the product creation request
-     * @param mediaFiles optional list of uploaded media files
+     * @param mediaFiles flat list of uploaded media files; colors claim files by index
      * @return the created product wrapped in an ApiResponse
      */
     @Transactional
@@ -88,13 +112,13 @@ public class ProductService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Category not found with id: " + request.getCategoryId()));
 
-        // 2. Business rule: refurb grade is mandatory when the product is refurbished
+        // 2. Refurb grade is mandatory when the product is refurbished
         if (Boolean.TRUE.equals(request.getIsRefurbished()) && request.getRefurbGrade() == null) {
             throw new IllegalArgumentException(
                     "Refurb grade (A, B, or C) is required when isRefurbished is true");
         }
 
-        // 2b. Business rules for discount
+        // 3. Discount validation
         if (request.getDiscountType() != null) {
             if (request.getDiscountValue() == null) {
                 throw new IllegalArgumentException("discountValue is required when discountType is set");
@@ -112,7 +136,7 @@ public class ProductService {
             throw new IllegalArgumentException("discountType is required when discountValue is set");
         }
 
-        // 3. Persist the base product so that we have a UUID for all child entities
+        // 4. Persist base product
         Product product = new Product(
                 category,
                 request.getProductType(),
@@ -125,22 +149,32 @@ public class ProductService {
                 request.getStatus());
         Product savedProduct = productRepository.save(product);
 
-        // 4. Save translations — all three languages are required
+        // 5. Save translations
         List<ProductTranslation> savedTranslations = saveTranslations(savedProduct, request.getTranslations());
 
-        // 5. Save media files to disk and persist ProductMedia records
-        List<ProductResponse.MediaDto> mediaDtos = saveMediaFiles(savedProduct, mediaFiles);
+        // 6. Create inline spec groups/options — builds localKey → option map for variant resolution
+        Map<String, ProductSpecOption> localKeyToOption = new HashMap<>();
+        List<ProductResponse.SpecGroupDto> specGroupDtos = saveSpecs(request.getSpecs(), localKeyToOption);
 
-        // 6. Create variants and link them to existing spec options
-        List<ProductResponse.VariantDto> variantDtos = saveVariants(savedProduct, request.getVariants());
+        // 7. Create color spec options with their own media; track which file indices are claimed
+        Set<Integer> claimedMediaIndices = new HashSet<>();
+        List<ProductResponse.ColorOptionDto> colorDtos = saveColors(
+                savedProduct, request.getColors(), mediaFiles, localKeyToOption, claimedMediaIndices);
 
-        // 7. Link accessory products
+        // 8. Save remaining (product-level) media files — those not claimed by any color
+        List<ProductResponse.MediaDto> mediaDtos = saveProductMedia(savedProduct, mediaFiles, claimedMediaIndices);
+
+        // 9. Create variants — spec options resolved by existing UUID or inline localKey
+        List<ProductResponse.VariantDto> variantDtos = saveVariants(savedProduct, request.getVariants(), localKeyToOption);
+
+        // 10. Link accessories
         List<UUID> resolvedAccessoryIds = saveAccessories(savedProduct, request.getAccessoryIds());
 
-        // 8. Build and return the response — use first saved translation for title/description
+        // 11. Build response
         ProductTranslation first = savedTranslations.get(0);
         ProductResponse response = buildResponse(
-                savedProduct, first.getTitle(), first.getDescription(), first.getSlug(), mediaDtos, variantDtos, resolvedAccessoryIds, true);
+                savedProduct, first.getTitle(), first.getDescription(), first.getSlug(),
+                mediaDtos, specGroupDtos, colorDtos, variantDtos, resolvedAccessoryIds, true);
 
         return ApiResponse.created(response, "Product created successfully");
     }
@@ -154,8 +188,7 @@ public class ProductService {
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryAdmin(UUID categoryId, String lang) {
         categoryRepository.findById(categoryId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Category not found with id: " + categoryId));
+                .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
 
         List<ProductResponse> responses = productRepository.findByCategoryId(categoryId).stream()
                 .map(p -> toResponse(p, lang, true))
@@ -187,8 +220,7 @@ public class ProductService {
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(UUID categoryId, String lang) {
         categoryRepository.findById(categoryId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Category not found with id: " + categoryId));
+                .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
 
         List<ProductResponse> responses = productRepository.findByStatusAndCategoryId("ACTIVE", categoryId).stream()
                 .map(p -> toResponse(p, lang, false))
@@ -209,10 +241,33 @@ public class ProductService {
             throw new IllegalArgumentException("No translation found for language: " + lang);
         }
 
-        List<ProductResponse.MediaDto> mediaDtos = mediaRepository.findByProductId(product.getId()).stream()
-                .map(m -> new ProductResponse.MediaDto(
-                        m.getId(), m.getMediaType().name(), m.getUrl(),
-                        m.getThumbnailUrl(), m.getIsPrimary(), m.getOrderIndex()))
+        // Product-level media (not linked to a color)
+        List<ProductResponse.MediaDto> mediaDtos = mediaRepository
+                .findByProductIdAndColorOptionIsNull(product.getId()).stream()
+                .map(m -> toMediaDto(m))
+                .toList();
+
+        // Colors — each color option with its own media
+        List<ProductMedia> allMedia = mediaRepository.findByProductId(product.getId());
+        Map<UUID, List<ProductResponse.MediaDto>> colorMediaMap = new HashMap<>();
+        for (ProductMedia m : allMedia) {
+            if (m.getColorOption() != null) {
+                colorMediaMap
+                        .computeIfAbsent(m.getColorOption().getId(), k -> new ArrayList<>())
+                        .add(toMediaDto(m));
+            }
+        }
+
+        // Collect distinct color options from media
+        List<ProductResponse.ColorOptionDto> colorDtos = allMedia.stream()
+                .filter(m -> m.getColorOption() != null)
+                .map(m -> m.getColorOption())
+                .distinct()
+                .map(opt -> new ProductResponse.ColorOptionDto(
+                        opt.getId(),
+                        opt.getValue(),
+                        opt.getColorCode(),
+                        colorMediaMap.getOrDefault(opt.getId(), List.of())))
                 .toList();
 
         List<ProductResponse.VariantDto> variantDtos = variantRepository.findByProductId(product.getId()).stream()
@@ -229,7 +284,8 @@ public class ProductService {
                 .toList();
 
         ProductTranslation translation = translations.get(0);
-        return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(), mediaDtos, variantDtos, accessoryIds, includeStatus);
+        return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(),
+                mediaDtos, List.of(), colorDtos, variantDtos, accessoryIds, includeStatus);
     }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
@@ -240,58 +296,178 @@ public class ProductService {
         return translationRepository.saveAll(translations);
     }
 
-    private List<ProductResponse.MediaDto> saveMediaFiles(Product product, List<MultipartFile> mediaFiles) {
+    /**
+     * Creates spec groups and their options inline.
+     * additionalPrice = 0 means the spec is included in the base product price.
+     * additionalPrice > 0 means it is an upgrade option that costs extra.
+     */
+    private List<ProductResponse.SpecGroupDto> saveSpecs(
+            List<CreateSpecGroupRequest> specRequests,
+            Map<String, ProductSpecOption> localKeyToOption) {
+
+        if (specRequests == null || specRequests.isEmpty()) {
+            return List.of();
+        }
+
+        List<ProductResponse.SpecGroupDto> groupDtos = new ArrayList<>();
+
+        for (CreateSpecGroupRequest groupReq : specRequests) {
+            ProductSpecGroup group = specGroupRepository.save(new ProductSpecGroup(groupReq.getCode()));
+
+            specGroupTranslationRepository.saveAll(List.of(
+                    new ProductSpecGroupTranslation(group, "AZ", groupReq.getNameAz()),
+                    new ProductSpecGroupTranslation(group, "EN", groupReq.getNameEn()),
+                    new ProductSpecGroupTranslation(group, "AR", groupReq.getNameAr())
+            ));
+
+            List<ProductResponse.SpecOptionDto> optionDtos = new ArrayList<>();
+            for (CreateSpecOptionRequest optReq : groupReq.getOptions()) {
+                if (optReq.getLocalKey() != null && localKeyToOption.containsKey(optReq.getLocalKey())) {
+                    throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
+                }
+
+                ProductSpecOption option = specOptionRepository.save(
+                        new ProductSpecOption(group, optReq.getValueEn(), optReq.getAdditionalPrice()));
+
+                specOptionTranslationRepository.saveAll(List.of(
+                        new ProductSpecOptionTranslation(option, Language.AZ, optReq.getValueAz()),
+                        new ProductSpecOptionTranslation(option, Language.EN, optReq.getValueEn()),
+                        new ProductSpecOptionTranslation(option, Language.AR, optReq.getValueAr())
+                ));
+
+                if (optReq.getLocalKey() != null) {
+                    localKeyToOption.put(optReq.getLocalKey(), option);
+                }
+
+                optionDtos.add(new ProductResponse.SpecOptionDto(
+                        option.getId(), option.getValue(), option.getAdditionalPrice()));
+            }
+
+            groupDtos.add(new ProductResponse.SpecGroupDto(
+                    group.getId(), group.getCode(), groupReq.getNameEn(), optionDtos));
+        }
+
+        return groupDtos;
+    }
+
+    /**
+     * Creates a "color" spec group, saves each color as a spec option,
+     * and assigns the media files referenced by mediaIndices to that color.
+     * Claimed file indices are added to claimedMediaIndices so product-level
+     * media saving can skip them.
+     */
+    private List<ProductResponse.ColorOptionDto> saveColors(
+            Product product,
+            List<CreateColorRequest> colorRequests,
+            List<MultipartFile> mediaFiles,
+            Map<String, ProductSpecOption> localKeyToOption,
+            Set<Integer> claimedMediaIndices) {
+
+        if (colorRequests == null || colorRequests.isEmpty()) {
+            return List.of();
+        }
+
+        // Create a shared "color" spec group for this product's colors
+        ProductSpecGroup colorGroup = specGroupRepository.save(new ProductSpecGroup("color_" + product.getId()));
+        specGroupTranslationRepository.saveAll(List.of(
+                new ProductSpecGroupTranslation(colorGroup, "AZ", "Rəng"),
+                new ProductSpecGroupTranslation(colorGroup, "EN", "Color"),
+                new ProductSpecGroupTranslation(colorGroup, "AR", "اللون")
+        ));
+
+        Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, product.getId().toString());
+        ensureDirectory(productDir);
+
+        List<ProductResponse.ColorOptionDto> colorDtos = new ArrayList<>();
+
+        for (CreateColorRequest colorReq : colorRequests) {
+            if (colorReq.getLocalKey() != null && localKeyToOption.containsKey(colorReq.getLocalKey())) {
+                throw new IllegalArgumentException("Duplicate localKey in colors: " + colorReq.getLocalKey());
+            }
+
+            // Save the color as a spec option (colors have no additional price — price comes from variants)
+            ProductSpecOption colorOption = specOptionRepository.save(
+                    new ProductSpecOption(colorGroup, colorReq.getValueEn(), BigDecimal.ZERO, colorReq.getColorCode()));
+
+            specOptionTranslationRepository.saveAll(List.of(
+                    new ProductSpecOptionTranslation(colorOption, Language.AZ, colorReq.getValueAz()),
+                    new ProductSpecOptionTranslation(colorOption, Language.EN, colorReq.getValueEn()),
+                    new ProductSpecOptionTranslation(colorOption, Language.AR, colorReq.getValueAr())
+            ));
+
+            if (colorReq.getLocalKey() != null) {
+                localKeyToOption.put(colorReq.getLocalKey(), colorOption);
+            }
+
+            // Save media files claimed by this color
+            List<ProductResponse.MediaDto> colorMediaDtos = new ArrayList<>();
+            if (colorReq.getMediaIndices() != null && mediaFiles != null) {
+                for (int i = 0; i < colorReq.getMediaIndices().size(); i++) {
+                    int fileIndex = colorReq.getMediaIndices().get(i);
+                    if (fileIndex < 0 || fileIndex >= mediaFiles.size()) {
+                        throw new IllegalArgumentException(
+                                "mediaIndex " + fileIndex + " is out of range for color: " + colorReq.getValueEn());
+                    }
+                    if (claimedMediaIndices.contains(fileIndex)) {
+                        throw new IllegalArgumentException(
+                                "mediaIndex " + fileIndex + " is already claimed by another color");
+                    }
+                    claimedMediaIndices.add(fileIndex);
+
+                    MultipartFile file = mediaFiles.get(fileIndex);
+                    String url = saveFile(productDir, file, "color_" + colorOption.getId() + "_" + i);
+                    boolean isPrimary = (i == 0);
+                    ProductMedia media = mediaRepository.save(new ProductMedia(
+                            product, colorOption, resolveMediaType(file.getContentType()), url, null, isPrimary, i));
+                    colorMediaDtos.add(toMediaDto(media));
+                }
+            }
+
+            colorDtos.add(new ProductResponse.ColorOptionDto(
+                    colorOption.getId(), colorOption.getValue(), colorOption.getColorCode(), colorMediaDtos));
+        }
+
+        return colorDtos;
+    }
+
+    /**
+     * Saves media files that were NOT claimed by any color as product-level media.
+     */
+    private List<ProductResponse.MediaDto> saveProductMedia(
+            Product product,
+            List<MultipartFile> mediaFiles,
+            Set<Integer> claimedMediaIndices) {
+
         if (mediaFiles == null || mediaFiles.isEmpty()) {
             return List.of();
         }
 
         Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, product.getId().toString());
-        try {
-            Files.createDirectories(productDir);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create product media directory", e);
-        }
+        ensureDirectory(productDir);
 
         List<ProductMedia> mediaEntities = new ArrayList<>();
+        int orderIndex = 0;
         for (int i = 0; i < mediaFiles.size(); i++) {
+            if (claimedMediaIndices.contains(i)) {
+                continue; // skip files already owned by a color
+            }
             MultipartFile file = mediaFiles.get(i);
-
-            String originalFilename = file.getOriginalFilename();
-            String extension = "";
-            if (originalFilename != null && originalFilename.contains(".")) {
-                extension = originalFilename.substring(originalFilename.lastIndexOf("."));
-            }
-
-            String savedFileName = i + extension;
-            Path filePath = productDir.resolve(savedFileName);
-
-            try {
-                Files.write(filePath, file.getBytes());
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to save media file: " + originalFilename, e);
-            }
-
-            ProductMedia.MediaType mediaType = resolveMediaType(file.getContentType());
-            String url = "/product/" + product.getId() + "/" + savedFileName;
-            // First uploaded file becomes the primary image/video
-            boolean isPrimary = (i == 0);
-
-            mediaEntities.add(new ProductMedia(product, mediaType, url, null, isPrimary, i));
+            String url = saveFile(productDir, file, "product_" + orderIndex);
+            boolean isPrimary = (orderIndex == 0);
+            mediaEntities.add(new ProductMedia(product, resolveMediaType(file.getContentType()), url, null, isPrimary, orderIndex));
+            orderIndex++;
         }
 
-        List<ProductMedia> saved = mediaRepository.saveAll(mediaEntities);
-        return saved.stream()
-                .map(m -> new ProductResponse.MediaDto(
-                        m.getId(),
-                        m.getMediaType().name(),
-                        m.getUrl(),
-                        m.getThumbnailUrl(),
-                        m.getIsPrimary(),
-                        m.getOrderIndex()))
+        return mediaRepository.saveAll(mediaEntities).stream()
+                .map(m -> toMediaDto(m))
                 .toList();
     }
 
-    private List<ProductResponse.VariantDto> saveVariants(Product product, List<CreateVariantRequest> variantRequests) {
+    private List<ProductResponse.VariantDto> saveVariants(
+            Product product,
+            List<CreateVariantRequest> variantRequests,
+            Map<String, ProductSpecOption> localKeyToOption) {
+
         if (variantRequests == null || variantRequests.isEmpty()) {
             return List.of();
         }
@@ -299,30 +475,33 @@ public class ProductService {
         List<ProductResponse.VariantDto> variantDtos = new ArrayList<>();
 
         for (CreateVariantRequest variantReq : variantRequests) {
-            ProductVariant variant = new ProductVariant(
-                    product,
-                    variantReq.getSku(),
-                    variantReq.getPrice(),
-                    variantReq.getStock());
+            ProductVariant variant = new ProductVariant(product, variantReq.getSku(), variantReq.getPrice(), variantReq.getStock());
             ProductVariant savedVariant = variantRepository.save(variant);
 
             List<UUID> linkedOptionIds = new ArrayList<>();
+
             if (variantReq.getSpecOptionIds() != null) {
                 for (UUID optionId : variantReq.getSpecOptionIds()) {
                     ProductSpecOption option = specOptionRepository.findById(optionId)
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "Spec option not found with id: " + optionId));
+                            .orElseThrow(() -> new IllegalArgumentException("Spec option not found with id: " + optionId));
                     variantOptionRepository.save(new ProductVariantOption(savedVariant, option));
                     linkedOptionIds.add(optionId);
                 }
             }
 
+            if (variantReq.getSpecOptionLocalKeys() != null) {
+                for (String localKey : variantReq.getSpecOptionLocalKeys()) {
+                    ProductSpecOption option = localKeyToOption.get(localKey);
+                    if (option == null) {
+                        throw new IllegalArgumentException("No spec option found for localKey: " + localKey);
+                    }
+                    variantOptionRepository.save(new ProductVariantOption(savedVariant, option));
+                    linkedOptionIds.add(option.getId());
+                }
+            }
+
             variantDtos.add(new ProductResponse.VariantDto(
-                    savedVariant.getId(),
-                    savedVariant.getSku(),
-                    savedVariant.getPrice(),
-                    savedVariant.getStock(),
-                    linkedOptionIds));
+                    savedVariant.getId(), savedVariant.getSku(), savedVariant.getPrice(), savedVariant.getStock(), linkedOptionIds));
         }
 
         return variantDtos;
@@ -332,7 +511,6 @@ public class ProductService {
         if (accessoryIds == null || accessoryIds.isEmpty()) {
             return List.of();
         }
-
         List<UUID> resolvedIds = new ArrayList<>();
         for (UUID accessoryId : accessoryIds) {
             if (accessoryId.equals(product.getId())) {
@@ -343,8 +521,30 @@ public class ProductService {
             accessoryRepository.save(new ProductAccessory(product, accessory));
             resolvedIds.add(accessoryId);
         }
-
         return resolvedIds;
+    }
+
+    private String saveFile(Path dir, MultipartFile file, String baseName) {
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains(".")) {
+            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+        String fileName = baseName + extension;
+        try {
+            Files.write(dir.resolve(fileName), file.getBytes());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to save media file: " + originalFilename, e);
+        }
+        return "/product/" + dir.getFileName() + "/" + fileName;
+    }
+
+    private void ensureDirectory(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create product media directory", e);
+        }
     }
 
     private ProductMedia.MediaType resolveMediaType(String contentType) {
@@ -352,6 +552,12 @@ public class ProductService {
             return ProductMedia.MediaType.VIDEO;
         }
         return ProductMedia.MediaType.IMAGE;
+    }
+
+    private ProductResponse.MediaDto toMediaDto(ProductMedia m) {
+        return new ProductResponse.MediaDto(
+                m.getId(), m.getMediaType().name(), m.getUrl(),
+                m.getThumbnailUrl(), m.getIsPrimary(), m.getOrderIndex());
     }
 
     private BigDecimal computeEffectivePrice(Product product) {
@@ -373,6 +579,8 @@ public class ProductService {
             String description,
             String slug,
             List<ProductResponse.MediaDto> mediaDtos,
+            List<ProductResponse.SpecGroupDto> specGroupDtos,
+            List<ProductResponse.ColorOptionDto> colorDtos,
             List<ProductResponse.VariantDto> variantDtos,
             List<UUID> accessoryIds,
             boolean includeStatus) {
@@ -397,6 +605,8 @@ public class ProductService {
         response.setDescription(description);
         response.setSlug(slug);
         response.setMedia(mediaDtos);
+        response.setSpecs(specGroupDtos);
+        response.setColors(colorDtos);
         response.setVariants(variantDtos);
         response.setAccessoryIds(accessoryIds);
         return response;

@@ -9,4 +9,8 @@ import java.util.UUID;
 public interface ProductMediaRepository extends JpaRepository<ProductMedia, UUID> {
 
     List<ProductMedia> findByProductId(UUID productId);
+
+    List<ProductMedia> findByProductIdAndColorOptionId(UUID productId, UUID colorOptionId);
+
+    List<ProductMedia> findByProductIdAndColorOptionIsNull(UUID productId);
 }

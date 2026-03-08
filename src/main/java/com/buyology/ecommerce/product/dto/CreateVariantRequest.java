@@ -32,6 +32,9 @@ public class CreateVariantRequest {
     @Schema(description = "List of existing ProductSpecOption UUIDs that define this variant (e.g. color, size)")
     private List<UUID> specOptionIds;
 
+    @Schema(description = "List of localKeys referencing spec options defined inline in the same create-product request")
+    private List<String> specOptionLocalKeys;
+
     // ========================
     // Getters & Setters
     // ========================
@@ -66,5 +69,13 @@ public class CreateVariantRequest {
 
     public void setSpecOptionIds(List<UUID> specOptionIds) {
         this.specOptionIds = specOptionIds;
+    }
+
+    public List<String> getSpecOptionLocalKeys() {
+        return specOptionLocalKeys;
+    }
+
+    public void setSpecOptionLocalKeys(List<String> specOptionLocalKeys) {
+        this.specOptionLocalKeys = specOptionLocalKeys;
     }
 }

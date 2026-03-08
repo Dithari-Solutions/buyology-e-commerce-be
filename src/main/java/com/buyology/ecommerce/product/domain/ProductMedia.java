@@ -17,6 +17,11 @@ public class ProductMedia {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    // Optional link to a color spec option — set when this media belongs to a specific color
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "color_option_id", nullable = true)
+    private ProductSpecOption colorOption;
+
     // Media type enum
     @Enumerated(EnumType.STRING)
     @Column(name = "media_type", nullable = false, length = 10)
@@ -57,6 +62,17 @@ public class ProductMedia {
         this.orderIndex = orderIndex != null ? orderIndex : 0;
     }
 
+    public ProductMedia(Product product, ProductSpecOption colorOption, MediaType mediaType, String url,
+            String thumbnailUrl, Boolean isPrimary, Integer orderIndex) {
+        this.product = product;
+        this.colorOption = colorOption;
+        this.mediaType = mediaType;
+        this.url = url;
+        this.thumbnailUrl = thumbnailUrl;
+        this.isPrimary = isPrimary != null ? isPrimary : false;
+        this.orderIndex = orderIndex != null ? orderIndex : 0;
+    }
+
     // Lifecycle hook
     @PrePersist
     public void prePersist() {
@@ -82,6 +98,14 @@ public class ProductMedia {
 
     public void setProduct(Product product) {
         this.product = product;
+    }
+
+    public ProductSpecOption getColorOption() {
+        return colorOption;
+    }
+
+    public void setColorOption(ProductSpecOption colorOption) {
+        this.colorOption = colorOption;
     }
 
     public MediaType getMediaType() {

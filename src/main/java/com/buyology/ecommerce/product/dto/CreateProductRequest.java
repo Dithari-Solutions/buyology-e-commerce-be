@@ -57,6 +57,14 @@ public class CreateProductRequest {
     private ProductTranslationRequest translations;
 
     @Valid
+    @Schema(description = "Optional list of spec groups (e.g. RAM, Storage) with their options to create inline during product creation")
+    private List<CreateSpecGroupRequest> specs;
+
+    @Valid
+    @Schema(description = "Optional list of available colors, each mapped to specific uploaded media files via mediaIndices")
+    private List<CreateColorRequest> colors;
+
+    @Valid
     @Schema(description = "Optional list of product variants (e.g. different sizes or colors)")
     private List<CreateVariantRequest> variants;
 
@@ -145,6 +153,22 @@ public class CreateProductRequest {
 
     public void setTranslations(ProductTranslationRequest translations) {
         this.translations = translations;
+    }
+
+    public List<CreateSpecGroupRequest> getSpecs() {
+        return specs;
+    }
+
+    public void setSpecs(List<CreateSpecGroupRequest> specs) {
+        this.specs = specs;
+    }
+
+    public List<CreateColorRequest> getColors() {
+        return colors;
+    }
+
+    public void setColors(List<CreateColorRequest> colors) {
+        this.colors = colors;
     }
 
     public List<CreateVariantRequest> getVariants() {
