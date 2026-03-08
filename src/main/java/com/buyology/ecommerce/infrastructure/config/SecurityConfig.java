@@ -44,7 +44,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
                 "https://api-dev.dithari.com",
                 "https://dev.dithari.com",
-                "http://127.0.0.1:3000",
+                "http://localhost:3000",
                 "http://localhost:5173",
                 "https://admin-dev.dithari.com"
         ));
