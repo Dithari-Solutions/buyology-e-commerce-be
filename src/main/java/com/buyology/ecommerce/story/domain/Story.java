@@ -18,6 +18,9 @@ public class Story {
     @Column(length = 20, nullable = false)
     private StoryStatus status = StoryStatus.ACTIVE;
 
+    @Column(name = "thumbnail_url", columnDefinition = "TEXT")
+    private String thumbnailUrl;
+
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
@@ -111,6 +114,14 @@ public class Story {
 
     public StoryStatus getStatus() {
         return status;
+    }
+
+    public String getThumbnailUrl() {
+        return thumbnailUrl;
+    }
+
+    public void setThumbnailUrl(String thumbnailUrl) {
+        this.thumbnailUrl = thumbnailUrl;
     }
 
     public UUID getCreatedBy() {

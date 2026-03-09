@@ -13,6 +13,7 @@ public class StoryResponse {
     private UUID id;
     private String title;
     private String description;
+    private String thumbnailUrl;
     private String status;
     private List<MediaItem> media;
     private LocalDateTime createdAt;
@@ -20,6 +21,7 @@ public class StoryResponse {
     public static StoryResponse from(Story story, Language language) {
         StoryResponse response = new StoryResponse();
         response.id = story.getId();
+        response.thumbnailUrl = story.getThumbnailUrl();
         response.status = story.getStatus().name();
         response.createdAt = story.getCreatedAt();
 
@@ -58,6 +60,10 @@ public class StoryResponse {
 
     public String getDescription() {
         return description;
+    }
+
+    public String getThumbnailUrl() {
+        return thumbnailUrl;
     }
 
     public String getStatus() {

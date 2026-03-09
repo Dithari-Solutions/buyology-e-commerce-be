@@ -38,15 +38,13 @@ public class StoryService {
     }
 
     @Transactional
-    public Story createStory(CreateStoryRequest request, List<MultipartFile> mediaFiles,
-            UUID createdBy) {
+    public Story createStory(CreateStoryRequest request, MultipartFile thumbnail,
+            List<MultipartFile> mediaFiles, UUID createdBy) {
         Story story = new Story(createdBy);
 
-        // Build and add translations
-        for (StoryTranslationRequest tr : request.getTranslations()) {
-            for (StoryTranslation translation : buildTranslations(story, tr)) {
-                story.addTranslation(translation);
-            }
+        // Build and add translations from single translation object
+        for (StoryTranslation translation : buildTranslations(story, request.getTranslation())) {
+            story.addTranslation(translation);
         }
 
         // Save story first to generate the ID
@@ -58,6 +56,22 @@ public class StoryService {
             Files.createDirectories(storyDir);
         } catch (IOException e) {
             throw new RuntimeException("Failed to create story media directory", e);
+        }
+
+        // Save thumbnail separately
+        if (thumbnail != null && !thumbnail.isEmpty()) {
+            String thumbFilename = thumbnail.getOriginalFilename();
+            String thumbExt = (thumbFilename != null && thumbFilename.contains("."))
+                    ? thumbFilename.substring(thumbFilename.lastIndexOf("."))
+                    : "";
+            String savedThumbName = "thumbnail" + thumbExt;
+            Path thumbPath = storyDir.resolve(savedThumbName);
+            try {
+                Files.write(thumbPath, thumbnail.getBytes());
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to save thumbnail file", e);
+            }
+            savedStory.setThumbnailUrl("/story/" + savedStory.getId() + "/" + savedThumbName);
         }
 
         // Save each media file with its order
@@ -178,16 +192,14 @@ public class StoryService {
                 .findFirst()
                 .orElse(null);
 
+        if (translation == null)
+            return null;
+
         List<StoryMedia> sortedMedia = story.getMedia()
                 .stream()
                 .filter(m -> m.getUrl() != null && !m.getUrl().isEmpty())
                 .sorted(Comparator.comparingInt(StoryMedia::getOrderIndex))
                 .toList();
-
-        StoryMedia thumbnail = sortedMedia.isEmpty() ? null : sortedMedia.get(0);
-
-        if (translation == null || thumbnail == null)
-            return null;
 
         List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
                 .map(StoryResponse.MediaItem::from)
@@ -196,7 +208,7 @@ public class StoryService {
         return new StorySummaryResponse(
                 story.getId(),
                 translation.getTitle(),
-                thumbnail.getUrl(),
+                story.getThumbnailUrl(),
                 story.getStatus().name(),
                 mediaItems);
     }

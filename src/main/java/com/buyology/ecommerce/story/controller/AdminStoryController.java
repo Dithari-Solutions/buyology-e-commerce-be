@@ -5,10 +5,15 @@ import java.util.UUID;
 import org.springframework.http.MediaType;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Encoding;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.story.dto.CreateStoryFormData;
 import com.buyology.ecommerce.story.dto.StoryResponse;
 import org.springframework.web.multipart.MultipartFile;
 import com.buyology.ecommerce.story.service.StoryService;
@@ -45,15 +50,24 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Create a new story")
+    @RequestBody(
+        required = true,
+        content = @Content(
+            mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
+            schema = @Schema(implementation = CreateStoryFormData.class),
+            encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
+        )
+    )
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoryResponse>> createStory(
-            @RequestPart("request") String requestJson,
-            @RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
+            @org.springframework.web.bind.annotation.RequestPart("request") String requestJson,
+            @org.springframework.web.bind.annotation.RequestPart("thumbnail") MultipartFile thumbnail,
+            @org.springframework.web.bind.annotation.RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
             @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
 
         CreateStoryRequest request = objectMapper.readValue(requestJson, CreateStoryRequest.class);
         StoryResponse response = StoryResponse.from(
-                storyService.createStory(request, mediaFiles, createdBy), Language.AZ);
+                storyService.createStory(request, thumbnail, mediaFiles, createdBy), Language.AZ);
         return ApiResponse.created(response, "Story created successfully");
     }
 
