@@ -49,7 +49,7 @@ public class AdminProductController {
                     encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
             )
     )
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponse>> createProduct(
             @Parameter(hidden = true) @RequestPart("request") String requestJson,
             @Parameter(hidden = true) @RequestPart(value = "files", required = false) List<MultipartFile> mediaFiles)

@@ -58,7 +58,7 @@ public class AdminStoryController {
             encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
         )
     )
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoryResponse>> createStory(
             @org.springframework.web.bind.annotation.RequestPart("request") String requestJson,
             @org.springframework.web.bind.annotation.RequestPart("thumbnail") MultipartFile thumbnail,
