@@ -7,7 +7,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "product_spec_groups",
        uniqueConstraints = {
-           @UniqueConstraint(columnNames = "code")
+           @UniqueConstraint(columnNames = {"product_id", "code"})
        })
 public class ProductSpecGroup {
 
@@ -15,7 +15,11 @@ public class ProductSpecGroup {
     @GeneratedValue
     private UUID id;
 
-    @Column(name = "code", nullable = false, unique = true, length = 100)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "product_id", nullable = true)
+    private Product product;
+
+    @Column(name = "code", nullable = false, length = 100)
     private String code;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -29,6 +33,11 @@ public class ProductSpecGroup {
     }
 
     public ProductSpecGroup(String code) {
+        this.code = code;
+    }
+
+    public ProductSpecGroup(Product product, String code) {
+        this.product = product;
         this.code = code;
     }
 
@@ -52,6 +61,14 @@ public class ProductSpecGroup {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public Product getProduct() {
+        return product;
+    }
+
+    public void setProduct(Product product) {
+        this.product = product;
     }
 
     public String getCode() {

@@ -154,7 +154,7 @@ public class ProductService {
 
         // 6. Create inline spec groups/options — builds localKey → option map for variant resolution
         Map<String, ProductSpecOption> localKeyToOption = new HashMap<>();
-        List<ProductResponse.SpecGroupDto> specGroupDtos = saveSpecs(request.getSpecs(), localKeyToOption);
+        saveSpecs(savedProduct, request.getSpecs(), localKeyToOption);
 
         // 7. Create color spec options with their own media; track which file indices are claimed
         Set<Integer> claimedMediaIndices = new HashSet<>();
@@ -165,13 +165,22 @@ public class ProductService {
         List<ProductResponse.MediaDto> mediaDtos = saveProductMedia(savedProduct, mediaFiles, claimedMediaIndices);
 
         // 9. Create variants — spec options resolved by existing UUID or inline localKey
-        List<ProductResponse.VariantDto> variantDtos = saveVariants(savedProduct, request.getVariants(), localKeyToOption);
+        saveVariants(savedProduct, request.getVariants(), localKeyToOption);
 
         // 10. Link accessories
         List<UUID> resolvedAccessoryIds = saveAccessories(savedProduct, request.getAccessoryIds());
 
-        // 11. Build response
+        // 11. Build response — fetch all nested data from DB for a consistent response
         ProductTranslation first = savedTranslations.get(0);
+        List<ProductResponse.SpecGroupDto> specGroupDtos = buildSpecGroupDtos(savedProduct.getId(), "EN");
+        List<ProductResponse.VariantDto> variantDtos = variantRepository.findByProductId(savedProduct.getId()).stream()
+                .map(v -> {
+                    List<UUID> optionIds = variantOptionRepository.findByVariantId(v.getId()).stream()
+                            .map(vo -> vo.getOption().getId())
+                            .toList();
+                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), v.getPrice(), v.getStock(), optionIds);
+                })
+                .toList();
         ProductResponse response = buildResponse(
                 savedProduct, first.getTitle(), first.getDescription(), first.getSlug(),
                 mediaDtos, specGroupDtos, colorDtos, variantDtos, resolvedAccessoryIds, true);
@@ -283,9 +292,46 @@ public class ProductService {
                 .map(a -> a.getAccessory().getId())
                 .toList();
 
+        List<ProductResponse.SpecGroupDto> specGroupDtos = buildSpecGroupDtos(product.getId(), lang);
+
         ProductTranslation translation = translations.get(0);
         return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(),
-                mediaDtos, List.of(), colorDtos, variantDtos, accessoryIds, includeStatus);
+                mediaDtos, specGroupDtos, colorDtos, variantDtos, accessoryIds, includeStatus);
+    }
+
+    private List<ProductResponse.SpecGroupDto> buildSpecGroupDtos(UUID productId, String lang) {
+        Language language;
+        try {
+            language = Language.valueOf(lang.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            language = Language.EN;
+        }
+
+        List<ProductSpecGroup> groups = specGroupRepository.findByProduct_Id(productId).stream()
+                .filter(g -> !g.getCode().startsWith("color_"))
+                .toList();
+
+        List<ProductResponse.SpecGroupDto> groupDtos = new ArrayList<>();
+        for (ProductSpecGroup group : groups) {
+            String groupName = specGroupTranslationRepository
+                    .findByGroup_IdAndLanguageIgnoreCase(group.getId(), lang)
+                    .map(ProductSpecGroupTranslation::getName)
+                    .orElse(group.getCode());
+
+            Language finalLanguage = language;
+            List<ProductResponse.SpecOptionDto> optionDtos = specOptionRepository.findByGroup_Id(group.getId()).stream()
+                    .map(opt -> {
+                        String optValue = specOptionTranslationRepository
+                                .findByOption_IdAndLanguage(opt.getId(), finalLanguage)
+                                .map(ProductSpecOptionTranslation::getValue)
+                                .orElse(opt.getValue());
+                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, opt.getAdditionalPrice());
+                    })
+                    .toList();
+
+            groupDtos.add(new ProductResponse.SpecGroupDto(group.getId(), group.getCode(), groupName, optionDtos));
+        }
+        return groupDtos;
     }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
@@ -301,18 +347,17 @@ public class ProductService {
      * additionalPrice = 0 means the spec is included in the base product price.
      * additionalPrice > 0 means it is an upgrade option that costs extra.
      */
-    private List<ProductResponse.SpecGroupDto> saveSpecs(
+    private void saveSpecs(
+            Product product,
             List<CreateSpecGroupRequest> specRequests,
             Map<String, ProductSpecOption> localKeyToOption) {
 
         if (specRequests == null || specRequests.isEmpty()) {
-            return List.of();
+            return;
         }
 
-        List<ProductResponse.SpecGroupDto> groupDtos = new ArrayList<>();
-
         for (CreateSpecGroupRequest groupReq : specRequests) {
-            ProductSpecGroup group = specGroupRepository.save(new ProductSpecGroup(groupReq.getCode()));
+            ProductSpecGroup group = specGroupRepository.save(new ProductSpecGroup(product, groupReq.getCode()));
 
             specGroupTranslationRepository.saveAll(List.of(
                     new ProductSpecGroupTranslation(group, "AZ", groupReq.getNameAz()),
@@ -320,7 +365,6 @@ public class ProductService {
                     new ProductSpecGroupTranslation(group, "AR", groupReq.getNameAr())
             ));
 
-            List<ProductResponse.SpecOptionDto> optionDtos = new ArrayList<>();
             for (CreateSpecOptionRequest optReq : groupReq.getOptions()) {
                 if (optReq.getLocalKey() != null && localKeyToOption.containsKey(optReq.getLocalKey())) {
                     throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
@@ -338,16 +382,8 @@ public class ProductService {
                 if (optReq.getLocalKey() != null) {
                     localKeyToOption.put(optReq.getLocalKey(), option);
                 }
-
-                optionDtos.add(new ProductResponse.SpecOptionDto(
-                        option.getId(), option.getValue(), option.getAdditionalPrice()));
             }
-
-            groupDtos.add(new ProductResponse.SpecGroupDto(
-                    group.getId(), group.getCode(), groupReq.getNameEn(), optionDtos));
         }
-
-        return groupDtos;
     }
 
     /**
@@ -368,7 +404,7 @@ public class ProductService {
         }
 
         // Create a shared "color" spec group for this product's colors
-        ProductSpecGroup colorGroup = specGroupRepository.save(new ProductSpecGroup("color_" + product.getId()));
+        ProductSpecGroup colorGroup = specGroupRepository.save(new ProductSpecGroup(product, "color_" + product.getId()));
         specGroupTranslationRepository.saveAll(List.of(
                 new ProductSpecGroupTranslation(colorGroup, "AZ", "Rəng"),
                 new ProductSpecGroupTranslation(colorGroup, "EN", "Color"),
