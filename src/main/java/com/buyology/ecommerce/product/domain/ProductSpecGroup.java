@@ -15,8 +15,8 @@ public class ProductSpecGroup {
     @GeneratedValue
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "product_id", nullable = true)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
     @Column(name = "code", nullable = false, length = 100)
@@ -30,10 +30,6 @@ public class ProductSpecGroup {
 
     // Constructors
     public ProductSpecGroup() {
-    }
-
-    public ProductSpecGroup(String code) {
-        this.code = code;
     }
 
     public ProductSpecGroup(Product product, String code) {
