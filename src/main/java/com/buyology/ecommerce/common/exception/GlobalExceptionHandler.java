@@ -5,6 +5,7 @@ import com.buyology.ecommerce.product.domain.ProductNotFoundException;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -79,12 +80,18 @@ public class GlobalExceptionHandler {
         return ApiResponse.failure(HttpStatusCode.valueOf(413), "Upload size exceeds the maximum allowed limit");
     }
 
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation: {}", ex.getMessage());
+        return ApiResponse.failure(HttpStatus.CONFLICT, "A record with the same unique value already exists");
+    }
+
     // ── Server-side errors ────────────────────────────────────────────────────
 
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         log.error("Illegal state: {}", ex.getMessage(), ex);
-        return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "An internal error occurred");
+        return ApiResponse.failure(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

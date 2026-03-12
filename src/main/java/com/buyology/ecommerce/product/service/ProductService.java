@@ -213,11 +213,20 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
         if ("DELETED".equals(product.getStatus())) {
-            throw new IllegalStateException("Product is already in trash");
+            throw new IllegalArgumentException("Product is already in trash");
         }
         product.setStatus("DELETED");
         product.setDeletedAt(Instant.now());
         productRepository.save(product);
+
+        // Free up slugs so the same product name can be reused after deletion
+        String idSuffix = "-" + id.toString().replace("-", "").substring(0, 8);
+        List<ProductTranslation> translations = translationRepository.findByProductId(id);
+        for (ProductTranslation translation : translations) {
+            translation.setSlug(translation.getSlug() + idSuffix);
+        }
+        translationRepository.saveAll(translations);
+
         return ApiResponse.success(null, "Product moved to trash");
     }
 
@@ -233,7 +242,7 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
         if (!"DELETED".equals(product.getStatus())) {
-            throw new IllegalStateException("Product is not in trash");
+            throw new IllegalArgumentException("Product is not in trash");
         }
         product.setStatus("ACTIVE");
         product.setDeletedAt(null);
@@ -431,10 +440,24 @@ public class ProductService {
     }
 
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
+        String slugAz = SlugUtils.toSlug(tr.getTitleAz());
+        String slugEn = SlugUtils.toSlug(tr.getTitleEn());
+        String slugAr = SlugUtils.toSlug(tr.getTitleAr());
+
+        if (translationRepository.existsActiveByLanguageAndSlug("AZ", slugAz)) {
+            throw new IllegalArgumentException("A product with the name '" + tr.getTitleAz() + "' already exists");
+        }
+        if (translationRepository.existsActiveByLanguageAndSlug("EN", slugEn)) {
+            throw new IllegalArgumentException("A product with the name '" + tr.getTitleEn() + "' already exists");
+        }
+        if (translationRepository.existsActiveByLanguageAndSlug("AR", slugAr)) {
+            throw new IllegalArgumentException("A product with the name '" + tr.getTitleAr() + "' already exists");
+        }
+
         List<ProductTranslation> translations = new ArrayList<>();
-        translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), SlugUtils.toSlug(tr.getTitleAz())));
-        translations.add(new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn(), SlugUtils.toSlug(tr.getTitleEn())));
-        translations.add(new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr(), SlugUtils.toSlug(tr.getTitleAr())));
+        translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), slugAz));
+        translations.add(new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn(), slugEn));
+        translations.add(new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr(), slugAr));
         return translationRepository.saveAll(translations);
     }
 
