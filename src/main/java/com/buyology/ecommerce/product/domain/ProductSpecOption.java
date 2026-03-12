@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.domain;
 
+import com.buyology.ecommerce.common.enums.SpecUnit;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -20,6 +21,10 @@ public class ProductSpecOption {
     @Column(name = "value", nullable = false, length = 100)
     private String value;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "unit", length = 20)
+    private SpecUnit unit;
+
     @Column(name = "additional_price", nullable = false, precision = 10, scale = 2)
     private BigDecimal additionalPrice = BigDecimal.ZERO;
 
@@ -34,6 +39,13 @@ public class ProductSpecOption {
     public ProductSpecOption(ProductSpecGroup group, String value, BigDecimal additionalPrice) {
         this.group = group;
         this.value = value;
+        this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
+    }
+
+    public ProductSpecOption(ProductSpecGroup group, String value, SpecUnit unit, BigDecimal additionalPrice) {
+        this.group = group;
+        this.value = value;
+        this.unit = unit;
         this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
     }
 
@@ -75,6 +87,14 @@ public class ProductSpecOption {
 
     public void setValue(String value) {
         this.value = value;
+    }
+
+    public SpecUnit getUnit() {
+        return unit;
+    }
+
+    public void setUnit(SpecUnit unit) {
+        this.unit = unit;
     }
 
     public BigDecimal getAdditionalPrice() {

@@ -1,12 +1,13 @@
 package com.buyology.ecommerce.product.dto;
 
+import com.buyology.ecommerce.common.enums.SpecUnit;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
 
-@Schema(description = "Inline spec option to create during product creation (e.g. 16GB, 512GB SSD)")
+@Schema(description = "Inline spec option to create during product creation (e.g. 16, 512, 1)")
 public class CreateSpecOptionRequest {
 
     @NotBlank(message = "Spec option localKey is required")
@@ -14,16 +15,23 @@ public class CreateSpecOptionRequest {
     private String localKey;
 
     @NotBlank(message = "Spec option value (AZ) is required")
-    @Schema(description = "Option value in Azerbaijani", example = "16 GB")
+    @Schema(description = "Option value in Azerbaijani (numeric part only when unit is provided, e.g. \"16\")", example = "16")
     private String valueAz;
 
     @NotBlank(message = "Spec option value (EN) is required")
-    @Schema(description = "Option value in English", example = "16 GB")
+    @Schema(description = "Option value in English (numeric part only when unit is provided, e.g. \"16\")", example = "16")
     private String valueEn;
 
     @NotBlank(message = "Spec option value (AR) is required")
-    @Schema(description = "Option value in Arabic", example = "16 جيجابايت")
+    @Schema(description = "Option value in Arabic (numeric part only when unit is provided, e.g. \"16\")", example = "16")
     private String valueAr;
+
+    @Schema(
+            description = "Unit for numeric spec values. Must be one of the allowed enum values: " +
+                    "KB, MB, GB, TB, MHz, GHz, mAh, Wh, W, INCH, MP, Mbps, Gbps, G, KG, HZ, RPM",
+            example = "GB"
+    )
+    private SpecUnit unit;
 
     @DecimalMin(value = "0.00", message = "Additional price must be non-negative")
     @Schema(description = "Additional price added to the base price for this option (default 0)", example = "50.00")
@@ -63,6 +71,14 @@ public class CreateSpecOptionRequest {
 
     public void setValueAr(String valueAr) {
         this.valueAr = valueAr;
+    }
+
+    public SpecUnit getUnit() {
+        return unit;
+    }
+
+    public void setUnit(SpecUnit unit) {
+        this.unit = unit;
     }
 
     public BigDecimal getAdditionalPrice() {

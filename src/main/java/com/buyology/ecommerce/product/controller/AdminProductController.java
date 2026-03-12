@@ -15,9 +15,11 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -74,12 +76,32 @@ public class AdminProductController {
         return productService.getProductByIdAdmin(productId, lang);
     }
 
-    @Operation(summary = "Get all products by category (all statuses)")
+    @Operation(summary = "Get all products by category (excludes trash)")
     @GetMapping("/category/{categoryId}")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(
             @PathVariable UUID categoryId,
             @RequestParam String lang) {
         return productService.getProductsByCategoryAdmin(categoryId, lang);
+    }
+
+    @Operation(summary = "Soft-delete a product — moves it to trash (auto-purged after 30 days)")
+    @DeleteMapping("/{productId}")
+    public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable UUID productId) {
+        return productService.softDeleteProduct(productId);
+    }
+
+    @Operation(summary = "Get all products in trash")
+    @GetMapping("/trash")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getTrash(@RequestParam String lang) {
+        return productService.getTrash(lang);
+    }
+
+    @Operation(summary = "Restore a trashed product back to active")
+    @PutMapping("/{productId}/restore")
+    public ResponseEntity<ApiResponse<ProductResponse>> restoreProduct(
+            @PathVariable UUID productId,
+            @RequestParam String lang) {
+        return productService.restoreFromTrash(productId, lang);
     }
 
     private static class CreateProductForm {

@@ -34,6 +34,7 @@ import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -43,6 +44,8 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -189,7 +192,7 @@ public class ProductService {
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsAdmin(String lang) {
-        List<ProductResponse> responses = productRepository.findAll().stream()
+        List<ProductResponse> responses = productRepository.findByStatusNot("DELETED").stream()
                 .map(p -> toResponse(p, lang, true))
                 .toList();
         return ApiResponse.success(responses, "Products fetched successfully");
@@ -199,10 +202,103 @@ public class ProductService {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
 
-        List<ProductResponse> responses = productRepository.findByCategoryId(categoryId).stream()
+        List<ProductResponse> responses = productRepository.findByStatusNotAndCategoryId("DELETED", categoryId).stream()
                 .map(p -> toResponse(p, lang, true))
                 .toList();
         return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> softDeleteProduct(UUID id) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        if ("DELETED".equals(product.getStatus())) {
+            throw new IllegalStateException("Product is already in trash");
+        }
+        product.setStatus("DELETED");
+        product.setDeletedAt(Instant.now());
+        productRepository.save(product);
+        return ApiResponse.success(null, "Product moved to trash");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getTrash(String lang) {
+        List<ProductResponse> responses = productRepository.findByStatus("DELETED").stream()
+                .map(p -> toResponse(p, lang, true))
+                .toList();
+        return ApiResponse.success(responses, "Trash fetched successfully");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<ProductResponse>> restoreFromTrash(UUID id, String lang) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        if (!"DELETED".equals(product.getStatus())) {
+            throw new IllegalStateException("Product is not in trash");
+        }
+        product.setStatus("ACTIVE");
+        product.setDeletedAt(null);
+        productRepository.save(product);
+        return ApiResponse.success(toResponse(product, lang, true), "Product restored successfully");
+    }
+
+    @Transactional
+    @Scheduled(cron = "0 0 2 * * *")
+    public void purgeTrashedProducts() {
+        Instant cutoff = Instant.now().minus(30, ChronoUnit.DAYS);
+        List<Product> expired = productRepository.findByStatusAndDeletedAtBefore("DELETED", cutoff);
+        for (Product product : expired) {
+            hardDeleteProduct(product);
+        }
+    }
+
+    private void hardDeleteProduct(Product product) {
+        UUID productId = product.getId();
+
+        // 1. Variant options → variants
+        List<ProductVariant> variants = variantRepository.findByProductId(productId);
+        for (ProductVariant variant : variants) {
+            variantOptionRepository.deleteAllInBatch(variantOptionRepository.findByVariantId(variant.getId()));
+        }
+        variantRepository.deleteAllInBatch(variants);
+
+        // 2. Spec options (with translations) → spec groups (with translations)
+        List<ProductSpecGroup> groups = specGroupRepository.findByProduct_Id(productId);
+        for (ProductSpecGroup group : groups) {
+            List<ProductSpecOption> options = specOptionRepository.findByGroup_Id(group.getId());
+            for (ProductSpecOption option : options) {
+                specOptionTranslationRepository.deleteAllInBatch(
+                        specOptionTranslationRepository.findAllByOption_Id(option.getId()));
+            }
+            specOptionRepository.deleteAllInBatch(options);
+            specGroupTranslationRepository.deleteAllInBatch(
+                    specGroupTranslationRepository.findAllByGroup_Id(group.getId()));
+        }
+        specGroupRepository.deleteAllInBatch(groups);
+
+        // 3. Media
+        mediaRepository.deleteAllInBatch(mediaRepository.findByProductId(productId));
+
+        // 4. Accessory links (where this product is the main product or the accessory)
+        accessoryRepository.deleteAllInBatch(accessoryRepository.findByProductId(productId));
+        accessoryRepository.deleteAllInBatch(accessoryRepository.findByAccessoryId(productId));
+
+        // 5. Translations
+        translationRepository.deleteAllInBatch(translationRepository.findByProductId(productId));
+
+        // 6. Product
+        productRepository.delete(product);
+
+        // 7. Remove media files from disk
+        try {
+            Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, productId.toString());
+            if (Files.exists(productDir)) {
+                Files.walk(productDir)
+                        .sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.delete(p); } catch (IOException ignored) {}
+                        });
+            }
+        } catch (IOException ignored) {}
     }
 
     public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdAdmin(UUID id, String lang) {
@@ -325,7 +421,7 @@ public class ProductService {
                                 .findByOption_IdAndLanguage(opt.getId(), finalLanguage)
                                 .map(ProductSpecOptionTranslation::getValue)
                                 .orElse(opt.getValue());
-                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, opt.getAdditionalPrice());
+                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, opt.getUnit(), opt.getAdditionalPrice());
                     })
                     .toList();
 
@@ -371,7 +467,7 @@ public class ProductService {
                 }
 
                 ProductSpecOption option = specOptionRepository.save(
-                        new ProductSpecOption(group, optReq.getValueEn(), optReq.getAdditionalPrice()));
+                        new ProductSpecOption(group, optReq.getValueEn(), optReq.getUnit(), optReq.getAdditionalPrice()));
 
                 specOptionTranslationRepository.saveAll(List.of(
                         new ProductSpecOptionTranslation(option, Language.AZ, optReq.getValueAz()),
@@ -634,6 +730,7 @@ public class ProductService {
         response.setSku(product.getSku());
         if (includeStatus) {
             response.setStatus(product.getStatus());
+            response.setDeletedAt(product.getDeletedAt());
         }
         response.setCreatedAt(product.getCreatedAt());
         response.setUpdatedAt(product.getUpdatedAt());

@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.dto;
 
+import com.buyology.ecommerce.common.enums.SpecUnit;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -23,6 +24,8 @@ public class ProductResponse {
     private String sku;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Instant deletedAt;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -81,14 +84,17 @@ public class ProductResponse {
 
         private UUID id;
         private String value;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private SpecUnit unit;
         private BigDecimal additionalPrice;
 
         public SpecOptionDto() {
         }
 
-        public SpecOptionDto(UUID id, String value, BigDecimal additionalPrice) {
+        public SpecOptionDto(UUID id, String value, SpecUnit unit, BigDecimal additionalPrice) {
             this.id = id;
             this.value = value;
+            this.unit = unit;
             this.additionalPrice = additionalPrice;
         }
 
@@ -96,6 +102,8 @@ public class ProductResponse {
         public void setId(UUID id) { this.id = id; }
         public String getValue() { return value; }
         public void setValue(String value) { this.value = value; }
+        public SpecUnit getUnit() { return unit; }
+        public void setUnit(SpecUnit unit) { this.unit = unit; }
         public BigDecimal getAdditionalPrice() { return additionalPrice; }
         public void setAdditionalPrice(BigDecimal additionalPrice) { this.additionalPrice = additionalPrice; }
     }
@@ -214,6 +222,8 @@ public class ProductResponse {
     public void setSku(String sku) { this.sku = sku; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
