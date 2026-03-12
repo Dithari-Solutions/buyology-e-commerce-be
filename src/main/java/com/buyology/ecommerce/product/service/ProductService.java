@@ -455,10 +455,13 @@ public class ProductService {
             throw new IllegalArgumentException("A product with the name '" + tr.getTitleAr() + "' already exists");
         }
 
-        // If a deleted product holds the same slug, free it up before inserting
+        // If a deleted product holds the same slug, free it up before inserting.
+        // flush() is required to push the UPDATEs to the DB immediately so the
+        // unique constraint is released before the INSERTs below run.
         freeDeletedSlug("AZ", slugAz);
         freeDeletedSlug("EN", slugEn);
         freeDeletedSlug("AR", slugAr);
+        translationRepository.flush();
 
         List<ProductTranslation> translations = new ArrayList<>();
         translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), slugAz));
