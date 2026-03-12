@@ -444,6 +444,7 @@ public class ProductService {
         String slugEn = SlugUtils.toSlug(tr.getTitleEn());
         String slugAr = SlugUtils.toSlug(tr.getTitleAr());
 
+        // Reject if an active product already uses the same name/slug
         if (translationRepository.existsActiveByLanguageAndSlug("AZ", slugAz)) {
             throw new IllegalArgumentException("A product with the name '" + tr.getTitleAz() + "' already exists");
         }
@@ -454,11 +455,23 @@ public class ProductService {
             throw new IllegalArgumentException("A product with the name '" + tr.getTitleAr() + "' already exists");
         }
 
+        // If a deleted product holds the same slug, free it up before inserting
+        freeDeletedSlug("AZ", slugAz);
+        freeDeletedSlug("EN", slugEn);
+        freeDeletedSlug("AR", slugAr);
+
         List<ProductTranslation> translations = new ArrayList<>();
         translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), slugAz));
         translations.add(new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn(), slugEn));
         translations.add(new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr(), slugAr));
         return translationRepository.saveAll(translations);
+    }
+
+    private void freeDeletedSlug(String language, String slug) {
+        translationRepository.findByLanguageAndSlug(language, slug).ifPresent(existing -> {
+            existing.setSlug(slug + "-" + existing.getProduct().getId().toString().replace("-", "").substring(0, 8));
+            translationRepository.save(existing);
+        });
     }
 
     /**

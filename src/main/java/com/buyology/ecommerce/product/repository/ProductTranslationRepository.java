@@ -6,11 +6,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ProductTranslationRepository extends JpaRepository<ProductTranslation, UUID> {
 
     List<ProductTranslation> findByProductId(UUID productId);
+
+    Optional<ProductTranslation> findByLanguageAndSlug(String language, String slug);
 
     @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END " +
            "FROM ProductTranslation t " +
