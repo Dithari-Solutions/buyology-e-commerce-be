@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.cart.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.cart.domain.CartItemSpecSelection;
@@ -14,8 +16,6 @@ import com.buyology.ecommerce.product.domain.ProductVariant;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
-import com.buyology.ecommerce.user.domain.Users;
-import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -33,7 +33,7 @@ public class CartService {
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
     private final CartItemSpecSelectionRepository specSelectionRepository;
-    private final UserRepository userRepository;
+    private final AuthCredentialRepository authCredentialRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ProductSpecOptionRepository specOptionRepository;
@@ -42,14 +42,14 @@ public class CartService {
             CartRepository cartRepository,
             CartItemRepository cartItemRepository,
             CartItemSpecSelectionRepository specSelectionRepository,
-            UserRepository userRepository,
+            AuthCredentialRepository authCredentialRepository,
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
             ProductSpecOptionRepository specOptionRepository) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
-        this.userRepository = userRepository;
+        this.authCredentialRepository = authCredentialRepository;
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.specOptionRepository = specOptionRepository;
@@ -57,18 +57,18 @@ public class CartService {
 
     // ─── Get or create active cart ────────────────────────────────────────────
 
-    public ResponseEntity<ApiResponse<CartResponse>> getCart(UUID userId) {
-        if (!userRepository.existsById(userId)) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+    public ResponseEntity<ApiResponse<CartResponse>> getCart(UUID authCredentialId) {
+        if (!authCredentialRepository.existsById(authCredentialId)) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
         }
-        Cart cart = findOrCreateActiveCart(userId);
+        Cart cart = findOrCreateActiveCart(authCredentialId);
         return ApiResponse.success(buildCartResponse(cart), "Cart retrieved successfully");
     }
 
     // ─── Add item to cart ─────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<CartResponse>> addItem(UUID userId, AddToCartRequest request) {
+    public ResponseEntity<ApiResponse<CartResponse>> addItem(UUID authCredentialId, AddToCartRequest request) {
         if (request.getProductId() == null) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "productId is required");
         }
@@ -76,14 +76,12 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
-        Users user = userRepository.findById(userId)
-                .orElse(null);
-        if (user == null) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        AuthCredentials authCredential = authCredentialRepository.findById(authCredentialId).orElse(null);
+        if (authCredential == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
         }
 
-        Product product = productRepository.findById(request.getProductId())
-                .orElse(null);
+        Product product = productRepository.findById(request.getProductId()).orElse(null);
         if (product == null || "DELETED".equals(product.getStatus())) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
         }
@@ -91,8 +89,7 @@ public class CartService {
         // Resolve variant if provided
         ProductVariant variant = null;
         if (request.getVariantId() != null) {
-            variant = variantRepository.findById(request.getVariantId())
-                    .orElse(null);
+            variant = variantRepository.findById(request.getVariantId()).orElse(null);
             if (variant == null || !variant.getProduct().getId().equals(product.getId())) {
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Variant does not belong to the given product");
             }
@@ -102,8 +99,7 @@ public class CartService {
         List<ProductSpecOption> selectedSpecOptions = new ArrayList<>();
         if (request.getSpecOptionIds() != null && !request.getSpecOptionIds().isEmpty()) {
             for (UUID specOptionId : request.getSpecOptionIds()) {
-                ProductSpecOption option = specOptionRepository.findById(specOptionId)
-                        .orElse(null);
+                ProductSpecOption option = specOptionRepository.findById(specOptionId).orElse(null);
                 if (option == null) {
                     return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Spec option not found: " + specOptionId);
                 }
@@ -118,7 +114,7 @@ public class CartService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal unitPrice = basePrice.add(specAdditional);
 
-        Cart cart = findOrCreateActiveCart(user);
+        Cart cart = findOrCreateActiveCart(authCredential);
 
         // If same product+variant already in cart and no custom specs, increment quantity
         if (selectedSpecOptions.isEmpty()) {
@@ -152,13 +148,12 @@ public class CartService {
     // ─── Update item quantity ─────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<CartResponse>> updateItemQuantity(UUID userId, UUID cartItemId, UpdateCartItemRequest request) {
+    public ResponseEntity<ApiResponse<CartResponse>> updateItemQuantity(UUID authCredentialId, UUID cartItemId, UpdateCartItemRequest request) {
         if (request.getQuantity() == null || request.getQuantity() < 1) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
-        Cart cart = cartRepository.findByUserIdAndStatus(userId, Cart.CartStatus.ACTIVE)
-                .orElse(null);
+        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -179,9 +174,8 @@ public class CartService {
     // ─── Remove item ──────────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<CartResponse>> removeItem(UUID userId, UUID cartItemId) {
-        Cart cart = cartRepository.findByUserIdAndStatus(userId, Cart.CartStatus.ACTIVE)
-                .orElse(null);
+    public ResponseEntity<ApiResponse<CartResponse>> removeItem(UUID authCredentialId, UUID cartItemId) {
+        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -201,9 +195,8 @@ public class CartService {
     // ─── Clear cart ───────────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<Void>> clearCart(UUID userId) {
-        Cart cart = cartRepository.findByUserIdAndStatus(userId, Cart.CartStatus.ACTIVE)
-                .orElse(null);
+    public ResponseEntity<ApiResponse<Void>> clearCart(UUID authCredentialId) {
+        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -223,9 +216,8 @@ public class CartService {
     // ─── Checkout ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<CartResponse>> checkout(UUID userId) {
-        Cart cart = cartRepository.findByUserIdAndStatus(userId, Cart.CartStatus.ACTIVE)
-                .orElse(null);
+    public ResponseEntity<ApiResponse<CartResponse>> checkout(UUID authCredentialId) {
+        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -243,17 +235,17 @@ public class CartService {
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
-    private Cart findOrCreateActiveCart(UUID userId) {
-        return cartRepository.findByUserIdAndStatus(userId, Cart.CartStatus.ACTIVE)
+    private Cart findOrCreateActiveCart(UUID authCredentialId) {
+        return cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
                 .orElseGet(() -> {
-                    Users user = userRepository.findById(userId).orElseThrow();
-                    return cartRepository.save(new Cart(user));
+                    AuthCredentials cred = authCredentialRepository.findById(authCredentialId).orElseThrow();
+                    return cartRepository.save(new Cart(cred));
                 });
     }
 
-    private Cart findOrCreateActiveCart(Users user) {
-        return cartRepository.findByUserIdAndStatus(user.getId(), Cart.CartStatus.ACTIVE)
-                .orElseGet(() -> cartRepository.save(new Cart(user)));
+    private Cart findOrCreateActiveCart(AuthCredentials authCredential) {
+        return cartRepository.findByAuthCredentialIdAndStatus(authCredential.getId(), Cart.CartStatus.ACTIVE)
+                .orElseGet(() -> cartRepository.save(new Cart(authCredential)));
     }
 
     private void recalculateCartTotal(Cart cart) {
@@ -283,7 +275,7 @@ public class CartService {
     private CartResponse buildCartResponse(Cart cart) {
         CartResponse response = new CartResponse();
         response.setId(cart.getId());
-        response.setUserId(cart.getUser().getId());
+        response.setAuthCredentialId(cart.getAuthCredential().getId());
         response.setStatus(cart.getStatus().name());
         response.setTotalPrice(cart.getTotalPrice());
         response.setCreatedAt(cart.getCreatedAt());

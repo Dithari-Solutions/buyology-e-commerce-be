@@ -8,7 +8,7 @@ import java.util.UUID;
 public class CartResponse {
 
     private UUID id;
-    private UUID userId;
+    private UUID authCredentialId;
     private String status;
     private BigDecimal totalPrice;
     private List<CartItemResponse> items;
@@ -21,8 +21,8 @@ public class CartResponse {
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
-    public UUID getUserId() { return userId; }
-    public void setUserId(UUID userId) { this.userId = userId; }
+    public UUID getAuthCredentialId() { return authCredentialId; }
+    public void setAuthCredentialId(UUID authCredentialId) { this.authCredentialId = authCredentialId; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

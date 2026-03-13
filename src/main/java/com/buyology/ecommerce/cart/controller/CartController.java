@@ -24,45 +24,45 @@ public class CartController {
     }
 
     @Operation(summary = "Get the active cart for a user")
-    @GetMapping("/{userId}")
-    public ResponseEntity<ApiResponse<CartResponse>> getCart(@PathVariable UUID userId) {
-        return cartService.getCart(userId);
+    @GetMapping("/{authCredentialId}")
+    public ResponseEntity<ApiResponse<CartResponse>> getCart(@PathVariable UUID authCredentialId) {
+        return cartService.getCart(authCredentialId);
     }
 
     @Operation(summary = "Add a product (with optional variant and spec selections) to the cart")
-    @PostMapping("/{userId}/items")
+    @PostMapping("/{authCredentialId}/items")
     public ResponseEntity<ApiResponse<CartResponse>> addItem(
-            @PathVariable UUID userId,
+            @PathVariable UUID authCredentialId,
             @RequestBody AddToCartRequest request) {
-        return cartService.addItem(userId, request);
+        return cartService.addItem(authCredentialId, request);
     }
 
     @Operation(summary = "Update the quantity of a cart item")
-    @PatchMapping("/{userId}/items/{cartItemId}")
+    @PatchMapping("/{authCredentialId}/items/{cartItemId}")
     public ResponseEntity<ApiResponse<CartResponse>> updateItemQuantity(
-            @PathVariable UUID userId,
+            @PathVariable UUID authCredentialId,
             @PathVariable UUID cartItemId,
             @RequestBody UpdateCartItemRequest request) {
-        return cartService.updateItemQuantity(userId, cartItemId, request);
+        return cartService.updateItemQuantity(authCredentialId, cartItemId, request);
     }
 
     @Operation(summary = "Remove a specific item from the cart")
-    @DeleteMapping("/{userId}/items/{cartItemId}")
+    @DeleteMapping("/{authCredentialId}/items/{cartItemId}")
     public ResponseEntity<ApiResponse<CartResponse>> removeItem(
-            @PathVariable UUID userId,
+            @PathVariable UUID authCredentialId,
             @PathVariable UUID cartItemId) {
-        return cartService.removeItem(userId, cartItemId);
+        return cartService.removeItem(authCredentialId, cartItemId);
     }
 
     @Operation(summary = "Clear all items from the active cart")
-    @DeleteMapping("/{userId}")
-    public ResponseEntity<ApiResponse<Void>> clearCart(@PathVariable UUID userId) {
-        return cartService.clearCart(userId);
+    @DeleteMapping("/{authCredentialId}")
+    public ResponseEntity<ApiResponse<Void>> clearCart(@PathVariable UUID authCredentialId) {
+        return cartService.clearCart(authCredentialId);
     }
 
     @Operation(summary = "Checkout the active cart")
-    @PostMapping("/{userId}/checkout")
-    public ResponseEntity<ApiResponse<CartResponse>> checkout(@PathVariable UUID userId) {
-        return cartService.checkout(userId);
+    @PostMapping("/{authCredentialId}/checkout")
+    public ResponseEntity<ApiResponse<CartResponse>> checkout(@PathVariable UUID authCredentialId) {
+        return cartService.checkout(authCredentialId);
     }
 }

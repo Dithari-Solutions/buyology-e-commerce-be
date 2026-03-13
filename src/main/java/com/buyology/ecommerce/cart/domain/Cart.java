@@ -1,6 +1,6 @@
 package com.buyology.ecommerce.cart.domain;
 
-import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -19,8 +19,8 @@ public class Cart {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
-    private Users user;
+    @JoinColumn(name = "auth_credential_id", nullable = false)
+    private AuthCredentials authCredential;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
@@ -38,8 +38,8 @@ public class Cart {
     public Cart() {
     }
 
-    public Cart(Users user) {
-        this.user = user;
+    public Cart(AuthCredentials authCredential) {
+        this.authCredential = authCredential;
         this.status = CartStatus.ACTIVE;
         this.totalPrice = BigDecimal.ZERO;
     }
@@ -61,8 +61,8 @@ public class Cart {
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
-    public Users getUser() { return user; }
-    public void setUser(Users user) { this.user = user; }
+    public AuthCredentials getAuthCredential() { return authCredential; }
+    public void setAuthCredential(AuthCredentials authCredential) { this.authCredential = authCredential; }
 
     public CartStatus getStatus() { return status; }
     public void setStatus(CartStatus status) { this.status = status; }
