@@ -72,10 +72,10 @@ public class ProductCategoryController {
         return categoryService.updateCategory(id, request);
     }
 
-    @Operation(summary = "Delete (deactivate) a category",
-            description = "Soft-deletes the category by setting its status to INACTIVE.")
-    @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> deleteCategory(@PathVariable UUID id) {
-        return categoryService.deleteCategory(id);
-    }
+    // @Operation(summary = "Delete (deactivate) a category",
+    //         description = "Soft-deletes the category by setting its status to INACTIVE.")
+    // @DeleteMapping("/{id}")
+    // public ResponseEntity<ApiResponse<Void>> deleteCategory(@PathVariable UUID id) {
+    //     return categoryService.deleteCategory(id);
+    // }
 }
