@@ -42,6 +42,19 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
 
+    env:
+      DB_URL: ${{ secrets.DB_URL }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+      REDIS_HOST: ${{ secrets.REDIS_HOST }}
+      REDIS_PORT: ${{ secrets.REDIS_PORT }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -49,8 +62,9 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME
           script: |
-            docker pull ${{ secrets.DOCKER_USERNAME }}/ecommerce-app:latest
+            docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
 
             docker stop ecommerce-app || true
             docker rm ecommerce-app || true
@@ -61,15 +75,15 @@ jobs:
               --restart always \
               --network ecommerce-network \
               -e SPRING_PROFILES_ACTIVE=prod \
-              -e SPRING_DATASOURCE_URL=${{ secrets.DB_URL }} \
-              -e SPRING_DATASOURCE_USERNAME=${{ secrets.DB_USERNAME }} \
-              -e SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }} \
-              -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
-              -e SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }} \
-              -e GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }} \
-              -e GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }} \
-              -e GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI }} \
-              -e REDIS_HOST=${{ secrets.REDIS_HOST }} \
-              -e REDIS_PORT=${{ secrets.REDIS_PORT }} \
+              -e "SPRING_DATASOURCE_URL=$DB_URL" \
+              -e "SPRING_DATASOURCE_USERNAME=$DB_USERNAME" \
+              -e "SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD" \
+              -e "JWT_SECRET=$JWT_SECRET" \
+              -e "SENDGRID_API_KEY=$SENDGRID_API_KEY" \
+              -e "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
+              -e "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET" \
+              -e "GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI" \
+              -e "REDIS_HOST=$REDIS_HOST" \
+              -e "REDIS_PORT=$REDIS_PORT" \
               -e COOKIE_SECURE=true \
-              ${{ secrets.DOCKER_USERNAME }}/ecommerce-app:latest
+              "$DOCKER_USERNAME/ecommerce-app:latest"
