@@ -8,13 +8,16 @@ import com.buyology.ecommerce.product.dto.CategoryLocalizedResponse;
 import com.buyology.ecommerce.product.dto.CategoryResponse;
 import com.buyology.ecommerce.product.dto.CategoryTranslationRequest;
 import com.buyology.ecommerce.product.dto.CreateCategoryRequest;
+import com.buyology.ecommerce.product.dto.UpdateCategoryRequest;
 import com.buyology.ecommerce.product.repository.ProductCategoryRepository;
 import com.buyology.ecommerce.product.repository.ProductCategoryTranslationRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class ProductCategoryService {
@@ -96,9 +99,84 @@ public class ProductCategoryService {
         return ApiResponse.success(responses, "Categories fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<CategoryResponse>> getCategoryById(UUID id) {
+        ProductCategory category = categoryRepository.findById(id).orElse(null);
+        if (category == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Category not found with id: " + id);
+        }
+        List<ProductCategoryTranslation> translations = translationRepository.findAllByCategoryId(id);
+        return ApiResponse.success(buildResponse(category, translations), "Category fetched successfully");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(UUID id, UpdateCategoryRequest request) {
+        ProductCategory category = categoryRepository.findById(id).orElse(null);
+        if (category == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Category not found with id: " + id);
+        }
+
+        // Update parent if provided in request body
+        if (request.getParentId() != null) {
+            if (request.getParentId().equals(id)) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "A category cannot be its own parent");
+            }
+            ProductCategory parent = categoryRepository.findById(request.getParentId()).orElse(null);
+            if (parent == null) {
+                return ApiResponse.failure(HttpStatus.NOT_FOUND, "Parent category not found with id: " + request.getParentId());
+            }
+            category.setParent(parent);
+        }
+
+        // Update status if provided
+        if (request.getStatus() != null) {
+            category.setStatus(request.getStatus());
+        }
+
+        categoryRepository.save(category);
+
+        // Update translations if provided
+        if (request.getTranslations() != null) {
+            UpdateCategoryRequest.Translations tr = request.getTranslations();
+            updateTranslation(id, "AZ", tr.getNameAz(), tr.getDescriptionAz(), tr.getSlugAz());
+            updateTranslation(id, "EN", tr.getNameEn(), tr.getDescriptionEn(), tr.getSlugEn());
+            updateTranslation(id, "AR", tr.getNameAr(), tr.getDescriptionAr(), tr.getSlugAr());
+        }
+
+        List<ProductCategoryTranslation> updatedTranslations = translationRepository.findAllByCategoryId(id);
+        return ApiResponse.success(buildResponse(category, updatedTranslations), "Category updated successfully");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> deleteCategory(UUID id) {
+        ProductCategory category = categoryRepository.findById(id).orElse(null);
+        if (category == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Category not found with id: " + id);
+        }
+        category.setStatus("INACTIVE");
+        categoryRepository.save(category);
+        return ApiResponse.success(null, "Category deleted successfully");
+    }
+
     // ========================
     // Private helpers
     // ========================
+
+    private void updateTranslation(UUID categoryId, String language, String name, String description, String slug) {
+        ProductCategoryTranslation translation = translationRepository
+                .findByCategoryIdAndLanguage(categoryId, language)
+                .orElse(null);
+        if (translation == null) return;
+
+        if (slug != null && !slug.equals(translation.getSlug())) {
+            if (translationRepository.existsBySlugAndLanguageAndIdNot(slug, language, translation.getId())) {
+                throw new IllegalArgumentException("Slug '" + slug + "' is already taken for language " + language);
+            }
+            translation.setSlug(slug);
+        }
+        if (name != null) translation.setName(name);
+        if (description != null) translation.setDescription(description);
+        translationRepository.save(translation);
+    }
 
     /**
      * Validates that no slug already exists for each language.
