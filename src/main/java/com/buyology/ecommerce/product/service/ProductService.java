@@ -218,7 +218,7 @@ public class ProductService {
                 .toList();
         ProductResponse response = buildResponse(
                 savedProduct, first.getTitle(), first.getDescription(), first.getSlug(),
-                mediaDtos, specGroupDtos, colorDtos, variantDtos, resolvedAccessoryIds, true);
+                mediaDtos, specGroupDtos, colorDtos, variantDtos, resolvedAccessoryIds, true, "EN");
 
         return ApiResponse.created(response, "Product created successfully");
     }
@@ -441,7 +441,7 @@ public class ProductService {
 
         ProductTranslation translation = translations.get(0);
         return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(),
-                mediaDtos, specGroupDtos, colorDtos, variantDtos, accessoryIds, includeStatus);
+                mediaDtos, specGroupDtos, colorDtos, variantDtos, accessoryIds, includeStatus, lang);
     }
 
     private List<ProductResponse.SpecGroupDto> buildSpecGroupDtos(UUID productId, String lang) {
@@ -816,7 +816,8 @@ public class ProductService {
             List<ProductResponse.ColorOptionDto> colorDtos,
             List<ProductResponse.VariantDto> variantDtos,
             List<UUID> accessoryIds,
-            boolean includeStatus) {
+            boolean includeStatus,
+            String lang) {
 
         ProductResponse response = new ProductResponse();
         response.setId(product.getId());
