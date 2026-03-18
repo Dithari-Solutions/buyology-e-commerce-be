@@ -2,26 +2,18 @@ package com.buyology.ecommerce.product.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
+import java.util.UUID;
 
-@Schema(description = "Inline spec group to create during product creation (e.g. RAM, Storage)")
+@Schema(description = "Spec group to attach to a product — must reference an existing global spec group")
 public class CreateSpecGroupRequest {
 
-    @NotBlank(message = "Spec group code is required")
-    @Schema(description = "Unique code for the spec group", example = "ram")
-    private String code;
-
-    @Schema(description = "Group name in Azerbaijani — required only when code does not match a global spec group", example = "RAM")
-    private String nameAz;
-
-    @Schema(description = "Group name in English — required only when code does not match a global spec group", example = "RAM")
-    private String nameEn;
-
-    @Schema(description = "Group name in Arabic — required only when code does not match a global spec group", example = "ذاكرة الوصول العشوائي")
-    private String nameAr;
+    @NotNull(message = "globalSpecGroupId is required")
+    @Schema(description = "ID of the global spec group (e.g. RAM, Storage) to attach to this product", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
+    private UUID globalSpecGroupId;
 
     @Valid
     @NotEmpty(message = "At least one spec option is required per group")
@@ -32,36 +24,12 @@ public class CreateSpecGroupRequest {
     // Getters & Setters
     // ========================
 
-    public String getCode() {
-        return code;
+    public UUID getGlobalSpecGroupId() {
+        return globalSpecGroupId;
     }
 
-    public void setCode(String code) {
-        this.code = code;
-    }
-
-    public String getNameAz() {
-        return nameAz;
-    }
-
-    public void setNameAz(String nameAz) {
-        this.nameAz = nameAz;
-    }
-
-    public String getNameEn() {
-        return nameEn;
-    }
-
-    public void setNameEn(String nameEn) {
-        this.nameEn = nameEn;
-    }
-
-    public String getNameAr() {
-        return nameAr;
-    }
-
-    public void setNameAr(String nameAr) {
-        this.nameAr = nameAr;
+    public void setGlobalSpecGroupId(UUID globalSpecGroupId) {
+        this.globalSpecGroupId = globalSpecGroupId;
     }
 
     public List<CreateSpecOptionRequest> getOptions() {

@@ -18,6 +18,10 @@ public class ProductSpecOption {
     @JoinColumn(name = "group_id", nullable = false)
     private ProductSpecGroup group;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "global_spec_option_id", nullable = true)
+    private GlobalSpecOption globalSpecOption;
+
     @Column(name = "value", nullable = false, length = 100)
     private String value;
 
@@ -36,14 +40,9 @@ public class ProductSpecOption {
     public ProductSpecOption() {
     }
 
-    public ProductSpecOption(ProductSpecGroup group, String value, BigDecimal additionalPrice) {
+    public ProductSpecOption(ProductSpecGroup group, GlobalSpecOption globalSpecOption, String value, SpecUnit unit, BigDecimal additionalPrice) {
         this.group = group;
-        this.value = value;
-        this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
-    }
-
-    public ProductSpecOption(ProductSpecGroup group, String value, SpecUnit unit, BigDecimal additionalPrice) {
-        this.group = group;
+        this.globalSpecOption = globalSpecOption;
         this.value = value;
         this.unit = unit;
         this.additionalPrice = additionalPrice != null ? additionalPrice : BigDecimal.ZERO;
@@ -79,6 +78,14 @@ public class ProductSpecOption {
 
     public void setGroup(ProductSpecGroup group) {
         this.group = group;
+    }
+
+    public GlobalSpecOption getGlobalSpecOption() {
+        return globalSpecOption;
+    }
+
+    public void setGlobalSpecOption(GlobalSpecOption globalSpecOption) {
+        this.globalSpecOption = globalSpecOption;
     }
 
     public String getValue() {

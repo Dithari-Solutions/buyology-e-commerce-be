@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.product.service;
 
 import com.buyology.ecommerce.common.enums.Language;
+import com.buyology.ecommerce.common.enums.SpecUnit;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Brand;
 import com.buyology.ecommerce.product.domain.GlobalSpecGroup;
@@ -468,19 +469,24 @@ public class ProductService {
 
         List<ProductResponse.SpecGroupDto> groupDtos = new ArrayList<>();
         for (ProductSpecGroup group : groups) {
-            String groupName = specGroupTranslationRepository
-                    .findByGroup_IdAndLanguageIgnoreCase(group.getId(), lang)
-                    .map(ProductSpecGroupTranslation::getName)
+            // Read group name from global spec translations
+            UUID globalGroupId = group.getGlobalSpecGroup().getId();
+            String groupName = globalSpecGroupTranslationRepository
+                    .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, lang)
+                    .map(t -> t.getName())
                     .orElse(group.getCode());
 
             Language finalLanguage = language;
             List<ProductResponse.SpecOptionDto> optionDtos = specOptionRepository.findByGroup_Id(group.getId()).stream()
                     .map(opt -> {
-                        String optValue = specOptionTranslationRepository
-                                .findByOption_IdAndLanguage(opt.getId(), finalLanguage)
-                                .map(ProductSpecOptionTranslation::getValue)
+                        // Read option value and unit from global spec translations
+                        UUID globalOptionId = opt.getGlobalSpecOption().getId();
+                        String optValue = globalSpecOptionTranslationRepository
+                                .findByOption_IdAndLanguage(globalOptionId, finalLanguage)
+                                .map(t -> t.getValue())
                                 .orElse(opt.getValue());
-                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, opt.getUnit(), opt.getAdditionalPrice());
+                        SpecUnit unit = opt.getGlobalSpecOption().getUnit();
+                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, unit, opt.getAdditionalPrice());
                     })
                     .toList();
 
@@ -528,7 +534,9 @@ public class ProductService {
     }
 
     /**
-     * Creates spec groups and their options inline.
+     * Creates spec groups and their options from global spec library references.
+     * Spec group and each option must reference an existing global spec entry.
+     * Names and values are resolved from global spec translations at read time.
      * additionalPrice = 0 means the spec is included in the base product price.
      * additionalPrice > 0 means it is an upgrade option that costs extra.
      */
@@ -542,90 +550,36 @@ public class ProductService {
         }
 
         for (CreateSpecGroupRequest groupReq : specRequests) {
-            ProductSpecGroup group = specGroupRepository.save(new ProductSpecGroup(product, groupReq.getCode()));
+            GlobalSpecGroup globalGroup = globalSpecGroupRepository.findById(groupReq.getGlobalSpecGroupId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Global spec group not found: " + groupReq.getGlobalSpecGroupId()));
 
-            // If the code matches a global spec group, copy translations from it.
-            // Otherwise the admin must supply nameAz/nameEn/nameAr manually.
-            String nameAz, nameEn, nameAr;
-            Optional<GlobalSpecGroup> globalGroup = globalSpecGroupRepository.findByCode(groupReq.getCode());
-            if (globalGroup.isPresent()) {
-                UUID globalGroupId = globalGroup.get().getId();
-                nameAz = globalSpecGroupTranslationRepository
-                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "AZ")
-                        .map(t -> t.getName()).orElse(groupReq.getNameAz());
-                nameEn = globalSpecGroupTranslationRepository
-                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "EN")
-                        .map(t -> t.getName()).orElse(groupReq.getNameEn());
-                nameAr = globalSpecGroupTranslationRepository
-                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "AR")
-                        .map(t -> t.getName()).orElse(groupReq.getNameAr());
-            } else {
-                if (groupReq.getNameAz() == null || groupReq.getNameAz().isBlank()) {
-                    throw new IllegalArgumentException("Spec group name (AZ) is required for custom spec: " + groupReq.getCode());
-                }
-                if (groupReq.getNameEn() == null || groupReq.getNameEn().isBlank()) {
-                    throw new IllegalArgumentException("Spec group name (EN) is required for custom spec: " + groupReq.getCode());
-                }
-                if (groupReq.getNameAr() == null || groupReq.getNameAr().isBlank()) {
-                    throw new IllegalArgumentException("Spec group name (AR) is required for custom spec: " + groupReq.getCode());
-                }
-                nameAz = groupReq.getNameAz();
-                nameEn = groupReq.getNameEn();
-                nameAr = groupReq.getNameAr();
-            }
-
-            specGroupTranslationRepository.saveAll(List.of(
-                    new ProductSpecGroupTranslation(group, "AZ", nameAz),
-                    new ProductSpecGroupTranslation(group, "EN", nameEn),
-                    new ProductSpecGroupTranslation(group, "AR", nameAr)
-            ));
+            ProductSpecGroup group = specGroupRepository.save(
+                    new ProductSpecGroup(product, globalGroup, globalGroup.getCode()));
 
             for (CreateSpecOptionRequest optReq : groupReq.getOptions()) {
                 if (optReq.getLocalKey() != null && localKeyToOption.containsKey(optReq.getLocalKey())) {
                     throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
                 }
 
-                // If globalOptionId is provided, copy values from the global spec library.
-                // Otherwise the admin must supply valueAz/valueEn/valueAr manually.
-                String valueAz = optReq.getValueAz();
-                String valueEn = optReq.getValueEn();
-                String valueAr = optReq.getValueAr();
-                com.buyology.ecommerce.common.enums.SpecUnit unit = optReq.getUnit();
-                if (optReq.getGlobalOptionId() != null) {
-                    GlobalSpecOption global = globalSpecOptionRepository.findById(optReq.getGlobalOptionId())
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "Global spec option not found: " + optReq.getGlobalOptionId()));
-                    unit = global.getUnit();
-                    // Read translated values from the translation table
-                    valueAz = globalSpecOptionTranslationRepository
-                            .findByOption_IdAndLanguage(global.getId(), Language.AZ)
-                            .map(t -> t.getValue()).orElse(valueAz);
-                    valueEn = globalSpecOptionTranslationRepository
-                            .findByOption_IdAndLanguage(global.getId(), Language.EN)
-                            .map(t -> t.getValue()).orElse(valueEn);
-                    valueAr = globalSpecOptionTranslationRepository
-                            .findByOption_IdAndLanguage(global.getId(), Language.AR)
-                            .map(t -> t.getValue()).orElse(valueAr);
-                } else {
-                    if (valueAz == null || valueAz.isBlank()) {
-                        throw new IllegalArgumentException("Spec option value (AZ) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
-                    }
-                    if (valueEn == null || valueEn.isBlank()) {
-                        throw new IllegalArgumentException("Spec option value (EN) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
-                    }
-                    if (valueAr == null || valueAr.isBlank()) {
-                        throw new IllegalArgumentException("Spec option value (AR) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
-                    }
+                GlobalSpecOption globalOption = globalSpecOptionRepository.findById(optReq.getGlobalOptionId())
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Global spec option not found: " + optReq.getGlobalOptionId()));
+
+                // Verify the option belongs to the selected group
+                if (!globalOption.getGroup().getId().equals(globalGroup.getId())) {
+                    throw new IllegalArgumentException(
+                            "Global spec option " + optReq.getGlobalOptionId() + " does not belong to group " + groupReq.getGlobalSpecGroupId());
                 }
 
-                ProductSpecOption option = specOptionRepository.save(
-                        new ProductSpecOption(group, valueEn, unit, optReq.getAdditionalPrice()));
+                // Cache EN value for the denormalized value column
+                String valueEn = globalSpecOptionTranslationRepository
+                        .findByOption_IdAndLanguage(globalOption.getId(), Language.EN)
+                        .map(t -> t.getValue())
+                        .orElse(globalOption.getId().toString());
 
-                specOptionTranslationRepository.saveAll(List.of(
-                        new ProductSpecOptionTranslation(option, Language.AZ, valueAz),
-                        new ProductSpecOptionTranslation(option, Language.EN, valueEn),
-                        new ProductSpecOptionTranslation(option, Language.AR, valueAr)
-                ));
+                ProductSpecOption option = specOptionRepository.save(
+                        new ProductSpecOption(group, globalOption, valueEn, globalOption.getUnit(), optReq.getAdditionalPrice()));
 
                 if (optReq.getLocalKey() != null) {
                     localKeyToOption.put(optReq.getLocalKey(), option);

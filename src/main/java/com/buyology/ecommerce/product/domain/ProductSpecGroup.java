@@ -19,6 +19,10 @@ public class ProductSpecGroup {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "global_spec_group_id", nullable = true)
+    private GlobalSpecGroup globalSpecGroup;
+
     @Column(name = "code", nullable = false, length = 100)
     private String code;
 
@@ -32,6 +36,13 @@ public class ProductSpecGroup {
     public ProductSpecGroup() {
     }
 
+    public ProductSpecGroup(Product product, GlobalSpecGroup globalSpecGroup, String code) {
+        this.product = product;
+        this.globalSpecGroup = globalSpecGroup;
+        this.code = code;
+    }
+
+    /** Used for special internal groups (e.g. color) that are not backed by a global spec group. */
     public ProductSpecGroup(Product product, String code) {
         this.product = product;
         this.code = code;
@@ -65,6 +76,14 @@ public class ProductSpecGroup {
 
     public void setProduct(Product product) {
         this.product = product;
+    }
+
+    public GlobalSpecGroup getGlobalSpecGroup() {
+        return globalSpecGroup;
+    }
+
+    public void setGlobalSpecGroup(GlobalSpecGroup globalSpecGroup) {
+        this.globalSpecGroup = globalSpecGroup;
     }
 
     public String getCode() {
