@@ -87,7 +87,7 @@ DELETE /api/admin/brand/{brandId}
 
 ## 3. Global Spec Library
 
-The global spec library lets admins define reusable spec options once (e.g. "RAM → 8GB, 16GB, 32GB") and pick from them when creating products instead of typing values every time.
+The global spec library is a shared catalogue of reusable spec groups and options (e.g. "RAM → 8GB, 16GB, 32GB"). Admins can manage it explicitly via the endpoints below, **or** specs can be created implicitly during product creation — if a spec group/option doesn't exist yet, the backend will create it automatically and add it to the library.
 
 ### Get all global spec groups + options (admin)
 ```
@@ -242,10 +242,7 @@ The body has two parts:
   },
   "specs": [
     {
-      "code": "ram",
-      "nameAz": "RAM",
-      "nameEn": "RAM",
-      "nameAr": "ذاكرة الوصول العشوائي",
+      "globalSpecGroupId": "uuid-of-existing-ram-group",
       "options": [
         {
           "localKey": "ram-16gb",
@@ -255,15 +252,17 @@ The body has two parts:
       ]
     },
     {
-      "code": "storage",
-      "nameAz": "Yaddaş",
-      "nameEn": "Storage",
-      "nameAr": "التخزين",
+      "globalSpecGroupId": "uuid-of-existing-storage-group",
       "options": [
         {
           "localKey": "storage-512",
           "globalOptionId": "uuid-of-global-512gb-option",
           "additionalPrice": 0
+        },
+        {
+          "localKey": "storage-1tb",
+          "globalOptionId": "uuid-of-global-1tb-option",
+          "additionalPrice": 150.00
         }
       ]
     },
@@ -359,9 +358,36 @@ The body has two parts:
 
 ---
 
-### Using globalOptionId vs. manual values
+### Spec group resolution — two modes
 
-**Pick from library** — send only `localKey`, `globalOptionId`, and `additionalPrice`. The backend copies `valueAz/En/Ar` and `unit` automatically:
+**Mode A: Reference an existing global spec group** — send `globalSpecGroupId`. The backend looks it up; the request fails if not found.
+
+```json
+{
+  "globalSpecGroupId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "options": [...]
+}
+```
+
+**Mode B: Define inline (find-or-create)** — omit `globalSpecGroupId` and provide `code` + name translations. If a global spec group with that `code` already exists it is reused; otherwise a new one is created in the global library.
+
+```json
+{
+  "code": "battery_capacity",
+  "nameAz": "Batareya tutumu",
+  "nameEn": "Battery Capacity",
+  "nameAr": "سعة البطارية",
+  "options": [...]
+}
+```
+
+> Never send both `globalSpecGroupId` and the inline name fields together. If `globalSpecGroupId` is omitted, all three name fields are required.
+
+---
+
+### Spec option resolution — two modes
+
+**Mode A: Pick from library** — send only `localKey`, `globalOptionId`, and `additionalPrice`. The backend copies `valueAz/En/Ar` and `unit` automatically.
 
 ```json
 {
@@ -371,7 +397,7 @@ The body has two parts:
 }
 ```
 
-**Type manually** — omit `globalOptionId` and fill all language fields:
+**Mode B: Define inline** — omit `globalOptionId` and provide value translations. A new global spec option is created in the resolved spec group and linked to the product.
 
 ```json
 {
@@ -383,7 +409,7 @@ The body has two parts:
 }
 ```
 
-> `@NotBlank` validation is on `valueAz`, `valueEn`, `valueAr`. When using `globalOptionId` the backend fills them before saving, so validation still passes. Do not send both `globalOptionId` and manual values together.
+> Never send both `globalOptionId` and manual value fields together. If `globalOptionId` is omitted, all three value fields are required.
 
 ---
 
@@ -719,25 +745,65 @@ All six fields are required.
 
 #### Section E — Specs
 
-**Spec group row:**
-- `code` → fixed dropdown (same 7 values as the library page — never free text)
-- nameAz, nameEn, nameAr text inputs
-- Options list (repeatable)
+Each spec group row supports two modes. Show a toggle or segmented control to let the admin choose.
 
-**Per spec option — two modes:**
+---
 
-**Mode 1: Pick from library (preferred)**
+**Spec group — Mode A: Pick from global library (preferred)**
 ```
 [Pick from library]  button →
   Modal: shows GET /api/admin/specs results
-  Admin selects group → option
+  Admin selects a spec group
+  On confirm:
+    • Store globalSpecGroupId internally
+    • Display group nameEn (read-only)
+    • Proceed to add options for this group
+```
+
+Send:
+```json
+{ "globalSpecGroupId": "uuid", "options": [...] }
+```
+
+---
+
+**Spec group — Mode B: Define new spec group inline**
+```
+code dropdown (fixed 7 values — never free text)
+nameAz / nameEn / nameAr  (required)
+```
+
+The backend will reuse the group if a global spec with that `code` already exists, or create a new one.
+
+Send:
+```json
+{
+  "code": "battery_capacity",
+  "nameAz": "...", "nameEn": "Battery Capacity", "nameAr": "...",
+  "options": [...]
+}
+```
+
+> Do not send `globalSpecGroupId` when using Mode B.
+
+---
+
+**Per spec option — two modes:**
+
+**Option Mode A: Pick from library (preferred)**
+```
+[Pick from library]  button →
+  Modal: shows options belonging to the selected/resolved spec group
+  Admin selects option
   On confirm:
     • Store globalOptionId internally
     • Display valueEn (read-only)
     • Only localKey and additionalPrice remain editable
 ```
 
-**Mode 2: Manual entry**
+Send: `{ localKey, globalOptionId, additionalPrice }`
+
+**Option Mode B: Manual entry**
 ```
 localKey (required)
 valueAz / valueEn / valueAr (required)
@@ -745,10 +811,13 @@ unit dropdown (optional)
 additionalPrice (default 0)
 ```
 
-**Logic:**
-- If `globalOptionId` is set → send `{ localKey, globalOptionId, additionalPrice }`
-- If no `globalOptionId` → send `{ localKey, valueAz, valueEn, valueAr, unit?, additionalPrice }`
-- Never send both `globalOptionId` and manual value fields together
+Send: `{ localKey, valueAz, valueEn, valueAr, unit?, additionalPrice }`
+
+> The backend creates a new global spec option in the resolved group and links it to the product. It will appear in `GET /api/admin/specs` after creation.
+
+**Logic summary:**
+- Spec group: send either `globalSpecGroupId` OR `code` + names — never both
+- Spec option: send either `globalOptionId` OR value fields — never both
 
 #### Section F — Variants
 

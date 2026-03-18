@@ -5,7 +5,9 @@ import com.buyology.ecommerce.common.enums.SpecUnit;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Brand;
 import com.buyology.ecommerce.product.domain.GlobalSpecGroup;
+import com.buyology.ecommerce.product.domain.GlobalSpecGroupTranslation;
 import com.buyology.ecommerce.product.domain.GlobalSpecOption;
+import com.buyology.ecommerce.product.domain.GlobalSpecOptionTranslation;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductAccessory;
 import com.buyology.ecommerce.product.domain.ProductCategory;
@@ -534,9 +536,11 @@ public class ProductService {
     }
 
     /**
-     * Creates spec groups and their options from global spec library references.
-     * Spec group and each option must reference an existing global spec entry.
-     * Names and values are resolved from global spec translations at read time.
+     * Creates spec groups and their options, resolving each against the global spec library.
+     * Each spec group can be referenced by globalSpecGroupId (existing) or defined inline
+     * (code + name translations) — the latter will find-or-create the global spec group.
+     * Each spec option can be referenced by globalOptionId (existing) or defined inline
+     * (value translations + optional unit) — the latter always creates a new global spec option.
      * additionalPrice = 0 means the spec is included in the base product price.
      * additionalPrice > 0 means it is an upgrade option that costs extra.
      */
@@ -550,9 +554,7 @@ public class ProductService {
         }
 
         for (CreateSpecGroupRequest groupReq : specRequests) {
-            GlobalSpecGroup globalGroup = globalSpecGroupRepository.findById(groupReq.getGlobalSpecGroupId())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Global spec group not found: " + groupReq.getGlobalSpecGroupId()));
+            GlobalSpecGroup globalGroup = resolveOrCreateGlobalSpecGroup(groupReq);
 
             ProductSpecGroup group = specGroupRepository.save(
                     new ProductSpecGroup(product, globalGroup, globalGroup.getCode()));
@@ -562,15 +564,7 @@ public class ProductService {
                     throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
                 }
 
-                GlobalSpecOption globalOption = globalSpecOptionRepository.findById(optReq.getGlobalOptionId())
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "Global spec option not found: " + optReq.getGlobalOptionId()));
-
-                // Verify the option belongs to the selected group
-                if (!globalOption.getGroup().getId().equals(globalGroup.getId())) {
-                    throw new IllegalArgumentException(
-                            "Global spec option " + optReq.getGlobalOptionId() + " does not belong to group " + groupReq.getGlobalSpecGroupId());
-                }
+                GlobalSpecOption globalOption = resolveOrCreateGlobalSpecOption(optReq, globalGroup);
 
                 // Cache EN value for the denormalized value column
                 String valueEn = globalSpecOptionTranslationRepository
@@ -586,6 +580,73 @@ public class ProductService {
                 }
             }
         }
+    }
+
+    /**
+     * If globalSpecGroupId is provided, looks up the existing global spec group.
+     * Otherwise, requires code + name translations and finds or creates the global spec group by code.
+     */
+    private GlobalSpecGroup resolveOrCreateGlobalSpecGroup(CreateSpecGroupRequest req) {
+        if (req.getGlobalSpecGroupId() != null) {
+            return globalSpecGroupRepository.findById(req.getGlobalSpecGroupId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Global spec group not found: " + req.getGlobalSpecGroupId()));
+        }
+
+        if (req.getCode() == null || req.getCode().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Either globalSpecGroupId or code (+ nameAz/nameEn/nameAr) must be provided for each spec group");
+        }
+        if (req.getNameAz() == null || req.getNameAz().isBlank()
+                || req.getNameEn() == null || req.getNameEn().isBlank()
+                || req.getNameAr() == null || req.getNameAr().isBlank()) {
+            throw new IllegalArgumentException(
+                    "nameAz, nameEn, and nameAr are required when creating a new global spec group (code: " + req.getCode() + ")");
+        }
+
+        Optional<GlobalSpecGroup> existing = globalSpecGroupRepository.findByCode(req.getCode());
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        GlobalSpecGroup newGroup = globalSpecGroupRepository.save(new GlobalSpecGroup(req.getCode()));
+        globalSpecGroupTranslationRepository.saveAll(List.of(
+                new GlobalSpecGroupTranslation(newGroup, "AZ", req.getNameAz()),
+                new GlobalSpecGroupTranslation(newGroup, "EN", req.getNameEn()),
+                new GlobalSpecGroupTranslation(newGroup, "AR", req.getNameAr())));
+        return newGroup;
+    }
+
+    /**
+     * If globalOptionId is provided, looks up the existing global spec option and verifies
+     * it belongs to the given group. Otherwise, requires value translations and creates
+     * a new global spec option in the given group.
+     */
+    private GlobalSpecOption resolveOrCreateGlobalSpecOption(CreateSpecOptionRequest req, GlobalSpecGroup globalGroup) {
+        if (req.getGlobalOptionId() != null) {
+            GlobalSpecOption existing = globalSpecOptionRepository.findById(req.getGlobalOptionId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Global spec option not found: " + req.getGlobalOptionId()));
+            if (!existing.getGroup().getId().equals(globalGroup.getId())) {
+                throw new IllegalArgumentException(
+                        "Global spec option " + req.getGlobalOptionId() + " does not belong to group " + globalGroup.getId());
+            }
+            return existing;
+        }
+
+        if (req.getValueAz() == null || req.getValueAz().isBlank()
+                || req.getValueEn() == null || req.getValueEn().isBlank()
+                || req.getValueAr() == null || req.getValueAr().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Either globalOptionId or valueAz/valueEn/valueAr must be provided for each spec option (localKey: " + req.getLocalKey() + ")");
+        }
+
+        GlobalSpecOption newOption = globalSpecOptionRepository.save(new GlobalSpecOption(globalGroup, req.getUnit()));
+        globalSpecOptionTranslationRepository.saveAll(List.of(
+                new GlobalSpecOptionTranslation(newOption, Language.AZ, req.getValueAz()),
+                new GlobalSpecOptionTranslation(newOption, Language.EN, req.getValueEn()),
+                new GlobalSpecOptionTranslation(newOption, Language.AR, req.getValueAr())));
+        return newOption;
     }
 
     /**
