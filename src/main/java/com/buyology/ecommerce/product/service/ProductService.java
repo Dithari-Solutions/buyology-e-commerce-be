@@ -471,6 +471,11 @@ public class ProductService {
 
         List<ProductResponse.SpecGroupDto> groupDtos = new ArrayList<>();
         for (ProductSpecGroup group : groups) {
+            // Skip orphaned spec groups that lost their global spec reference
+            if (group.getGlobalSpecGroup() == null) {
+                continue;
+            }
+
             // Read group name from global spec translations
             UUID globalGroupId = group.getGlobalSpecGroup().getId();
             String groupName = globalSpecGroupTranslationRepository
@@ -480,6 +485,7 @@ public class ProductService {
 
             Language finalLanguage = language;
             List<ProductResponse.SpecOptionDto> optionDtos = specOptionRepository.findByGroup_Id(group.getId()).stream()
+                    .filter(opt -> opt.getGlobalSpecOption() != null)
                     .map(opt -> {
                         // Read option value and unit from global spec translations
                         UUID globalOptionId = opt.getGlobalSpecOption().getId();
