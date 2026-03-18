@@ -18,16 +18,13 @@ public class CreateSpecOptionRequest {
     @Schema(description = "Optional: reference a GlobalSpecOption by ID — its valueAz/En/Ar and unit will be copied automatically, no need to fill those fields manually")
     private UUID globalOptionId;
 
-    @NotBlank(message = "Spec option value (AZ) is required")
-    @Schema(description = "Option value in Azerbaijani (numeric part only when unit is provided, e.g. \"16\")", example = "16")
+    @Schema(description = "Option value in Azerbaijani — required only when globalOptionId is not provided", example = "16")
     private String valueAz;
 
-    @NotBlank(message = "Spec option value (EN) is required")
-    @Schema(description = "Option value in English (numeric part only when unit is provided, e.g. \"16\")", example = "16")
+    @Schema(description = "Option value in English — required only when globalOptionId is not provided", example = "16")
     private String valueEn;
 
-    @NotBlank(message = "Spec option value (AR) is required")
-    @Schema(description = "Option value in Arabic (numeric part only when unit is provided, e.g. \"16\")", example = "16")
+    @Schema(description = "Option value in Arabic — required only when globalOptionId is not provided", example = "16")
     private String valueAr;
 
     @Schema(

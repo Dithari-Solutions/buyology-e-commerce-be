@@ -585,7 +585,8 @@ public class ProductService {
                     throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
                 }
 
-                // If globalOptionId is provided, copy values from the global spec library
+                // If globalOptionId is provided, copy values from the global spec library.
+                // Otherwise the admin must supply valueAz/valueEn/valueAr manually.
                 String valueAz = optReq.getValueAz();
                 String valueEn = optReq.getValueEn();
                 String valueAr = optReq.getValueAr();
@@ -605,6 +606,16 @@ public class ProductService {
                     valueAr = globalSpecOptionTranslationRepository
                             .findByOption_IdAndLanguage(global.getId(), Language.AR)
                             .map(t -> t.getValue()).orElse(valueAr);
+                } else {
+                    if (valueAz == null || valueAz.isBlank()) {
+                        throw new IllegalArgumentException("Spec option value (AZ) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
+                    }
+                    if (valueEn == null || valueEn.isBlank()) {
+                        throw new IllegalArgumentException("Spec option value (EN) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
+                    }
+                    if (valueAr == null || valueAr.isBlank()) {
+                        throw new IllegalArgumentException("Spec option value (AR) is required when globalOptionId is not provided (localKey: " + optReq.getLocalKey() + ")");
+                    }
                 }
 
                 ProductSpecOption option = specOptionRepository.save(
