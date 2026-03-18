@@ -14,6 +14,8 @@ public class ProductResponse {
 
     private UUID id;
     private UUID categoryId;
+    private UUID brandId;
+    private String brandName;
     private String productType;
     private Boolean isRefurbished;
     private String refurbGrade;
@@ -22,6 +24,9 @@ public class ProductResponse {
     private BigDecimal discountValue;
     private BigDecimal effectivePrice;
     private String sku;
+    private String availabilityStatus;
+    private Boolean isSuperDeal;
+    private Boolean isLimitedStock;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -204,6 +209,16 @@ public class ProductResponse {
     public void setId(UUID id) { this.id = id; }
     public UUID getCategoryId() { return categoryId; }
     public void setCategoryId(UUID categoryId) { this.categoryId = categoryId; }
+    public UUID getBrandId() { return brandId; }
+    public void setBrandId(UUID brandId) { this.brandId = brandId; }
+    public String getBrandName() { return brandName; }
+    public void setBrandName(String brandName) { this.brandName = brandName; }
+    public String getAvailabilityStatus() { return availabilityStatus; }
+    public void setAvailabilityStatus(String availabilityStatus) { this.availabilityStatus = availabilityStatus; }
+    public Boolean getIsSuperDeal() { return isSuperDeal; }
+    public void setIsSuperDeal(Boolean isSuperDeal) { this.isSuperDeal = isSuperDeal; }
+    public Boolean getIsLimitedStock() { return isLimitedStock; }
+    public void setIsLimitedStock(Boolean isLimitedStock) { this.isLimitedStock = isLimitedStock; }
     public String getProductType() { return productType; }
     public void setProductType(String productType) { this.productType = productType; }
     public Boolean getIsRefurbished() { return isRefurbished; }

@@ -1,0 +1,833 @@
+# Product Admin API — Frontend Handoff
+
+This document covers all backend API changes required for the admin dashboard to support the updated product module. It includes brand management, global spec library, updated product creation, and the public product search/filter endpoint.
+
+---
+
+## Table of Contents
+
+1. [Base URL & Auth](#1-base-url--auth)
+2. [Brand Management](#2-brand-management)
+3. [Global Spec Library](#3-global-spec-library)
+4. [Create Product — Full Request](#4-create-product--full-request)
+5. [Product Response Shape](#5-product-response-shape)
+6. [Product Search & Filter (Public)](#6-product-search--filter-public)
+7. [Spec Group Code Convention](#7-spec-group-code-convention)
+8. [Enums & Allowed Values](#8-enums--allowed-values)
+9. [Admin Dashboard UI Guide](#9-admin-dashboard-ui-guide)
+10. [Endpoint Summary](#10-endpoint-summary)
+
+---
+
+## 1. Base URL & Auth
+
+All **admin** endpoints are prefixed with `/api/admin/` and require an admin JWT in the `Authorization: Bearer <token>` header.
+
+All **public** endpoints are prefixed with `/api/` and require no auth.
+
+---
+
+## 2. Brand Management
+
+### Get all active brands (public)
+```
+GET /api/brand
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "message": "Brands fetched successfully",
+  "data": [
+    {
+      "id": "uuid",
+      "nameAz": "Apple",
+      "nameEn": "Apple",
+      "nameAr": "Apple",
+      "status": "ACTIVE"
+    }
+  ]
+}
+```
+
+---
+
+### Create a brand (admin)
+```
+POST /api/admin/brand
+Content-Type: application/json
+```
+
+**Request body:**
+```json
+{
+  "nameAz": "Apple",
+  "nameEn": "Apple",
+  "nameAr": "Apple"
+}
+```
+
+**Response:** `201 Created` with the created brand object.
+
+> All three language fields are required. The EN name must be unique.
+
+---
+
+### Deactivate a brand (admin)
+```
+DELETE /api/admin/brand/{brandId}
+```
+
+**Response:** `200 OK`
+
+> Brands are soft-deactivated (status → INACTIVE), not deleted. Products linked to a deactivated brand still retain the reference.
+
+---
+
+## 3. Global Spec Library
+
+The global spec library lets admins define reusable spec options once (e.g. "RAM → 8GB, 16GB, 32GB") and pick from them when creating products instead of typing values every time.
+
+### Get all global spec groups + options (admin)
+```
+GET /api/admin/specs
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "message": "Global spec groups fetched successfully",
+  "data": [
+    {
+      "id": "uuid",
+      "code": "ram",
+      "nameAz": "RAM",
+      "nameEn": "RAM",
+      "nameAr": "ذاكرة الوصول العشوائي",
+      "options": [
+        {
+          "id": "uuid",
+          "valueAz": "8GB",
+          "valueEn": "8GB",
+          "valueAr": "8GB",
+          "unit": "GB"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### Create a global spec group (admin)
+```
+POST /api/admin/specs
+Content-Type: application/json
+```
+
+**Request body:**
+```json
+{
+  "code": "ram",
+  "nameAz": "RAM",
+  "nameEn": "RAM",
+  "nameAr": "ذاكرة الوصول العشوائي",
+  "options": [
+    { "valueAz": "8GB",  "valueEn": "8GB",  "valueAr": "8GB",  "unit": "GB" },
+    { "valueAz": "16GB", "valueEn": "16GB", "valueAr": "16GB", "unit": "GB" },
+    { "valueAz": "32GB", "valueEn": "32GB", "valueAr": "32GB", "unit": "GB" }
+  ]
+}
+```
+
+> `code` must be unique and must match the [spec group code convention](#7-spec-group-code-convention).
+> `options` is optional — you can add them later using the add-option endpoint.
+
+**Response:** `201 Created`
+
+---
+
+### Add an option to an existing group (admin)
+```
+POST /api/admin/specs/{groupId}/options
+Content-Type: application/json
+```
+
+**Request body:**
+```json
+{
+  "valueAz": "64GB",
+  "valueEn": "64GB",
+  "valueAr": "64GB",
+  "unit": "GB"
+}
+```
+
+**Response:** `201 Created` with the new option object.
+
+---
+
+### Delete a global spec option (admin)
+```
+DELETE /api/admin/specs/options/{optionId}
+```
+
+**Response:** `200 OK`
+
+> Deleting a global option does NOT remove it from products where it was already copied — product specs are independent copies.
+
+---
+
+## 4. Create Product — Full Request
+
+```
+POST /api/admin/product/create
+Content-Type: multipart/form-data
+```
+
+The body has two parts:
+- `request` — JSON string (the shape below)
+- `files` — image/video uploads (0 or more)
+
+### Field reference
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `categoryId` | UUID | **Yes** | — | Must exist |
+| `brandId` | UUID | No | `null` | From `GET /api/brand` |
+| `productType` | enum | **Yes** | — | `SIMPLE`, `DIY`, `ACCESSORY` |
+| `isRefurbished` | boolean | No | `false` | When `true`, send `refurbGrade` |
+| `refurbGrade` | enum | Conditional | `null` | `A`, `B`, `C` — required when `isRefurbished: true` |
+| `basePrice` | decimal | **Yes** | — | Non-negative |
+| `discountType` | enum | No | `null` | `FIXED` or `PERCENTAGE` |
+| `discountValue` | decimal | No | `null` | % or fixed amount |
+| `sku` | string | **Yes** | — | Must be globally unique, max 255 chars |
+| `status` | string | No | `"ACTIVE"` | `"ACTIVE"` or `"INACTIVE"` |
+| `availabilityStatus` | enum | No | `IN_STOCK` | `IN_STOCK`, `OUT_OF_STOCK`, `PRE_ORDER` |
+| `isSuperDeal` | boolean | No | `false` | Shows product in Super Deals section |
+| `isLimitedStock` | boolean | No | `false` | Flags product as limited stock |
+| `translations` | object | **Yes** | — | See translations shape below |
+| `specs` | array | No | `[]` | See spec shape below |
+| `colors` | array | No | `[]` | |
+| `variants` | array | No | `[]` | |
+| `accessoryIds` | array | No | `[]` | UUIDs of existing products |
+
+### Full request JSON example
+
+```json
+{
+  "categoryId": "uuid",
+  "brandId": "uuid",
+  "productType": "SIMPLE",
+  "isRefurbished": false,
+  "refurbGrade": null,
+  "basePrice": 1299.99,
+  "discountType": "PERCENTAGE",
+  "discountValue": 10,
+  "sku": "LAPTOP-HP-15-001",
+  "status": "ACTIVE",
+  "availabilityStatus": "IN_STOCK",
+  "isSuperDeal": false,
+  "isLimitedStock": false,
+  "translations": {
+    "titleAz": "HP ProBook 15",
+    "titleEn": "HP ProBook 15",
+    "titleAr": "HP ProBook 15",
+    "descriptionAz": "...",
+    "descriptionEn": "...",
+    "descriptionAr": "..."
+  },
+  "specs": [
+    {
+      "code": "ram",
+      "nameAz": "RAM",
+      "nameEn": "RAM",
+      "nameAr": "ذاكرة الوصول العشوائي",
+      "options": [
+        {
+          "localKey": "ram-16gb",
+          "globalOptionId": "uuid-of-global-16gb-ram-option",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "storage",
+      "nameAz": "Yaddaş",
+      "nameEn": "Storage",
+      "nameAr": "التخزين",
+      "options": [
+        {
+          "localKey": "storage-512",
+          "globalOptionId": "uuid-of-global-512gb-option",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "processor",
+      "nameAz": "Prosessor",
+      "nameEn": "Processor",
+      "nameAr": "المعالج",
+      "options": [
+        {
+          "localKey": "cpu-i7",
+          "valueAz": "Intel Core i7-1255U",
+          "valueEn": "Intel Core i7-1255U",
+          "valueAr": "Intel Core i7-1255U",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "operating_system",
+      "nameAz": "Əməliyyat sistemi",
+      "nameEn": "Operating System",
+      "nameAr": "نظام التشغيل",
+      "options": [
+        {
+          "localKey": "os-win11",
+          "valueAz": "Win11 Home",
+          "valueEn": "Win11 Home",
+          "valueAr": "Win11 Home",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "screen_size",
+      "nameAz": "Ekran ölçüsü",
+      "nameEn": "Screen Size",
+      "nameAr": "حجم الشاشة",
+      "options": [
+        {
+          "localKey": "screen-156",
+          "valueAz": "15.6",
+          "valueEn": "15.6",
+          "valueAr": "15.6",
+          "unit": "INCH",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "touchable_screen",
+      "nameAz": "Toxunma ekranı",
+      "nameEn": "Touchable Screen",
+      "nameAr": "شاشة لمس",
+      "options": [
+        {
+          "localKey": "touch-no",
+          "valueAz": "No",
+          "valueEn": "No",
+          "valueAr": "No",
+          "additionalPrice": 0
+        }
+      ]
+    },
+    {
+      "code": "keyboard_language",
+      "nameAz": "Klaviatura dili",
+      "nameEn": "Keyboard Language",
+      "nameAr": "لغة لوحة المفاتيح",
+      "options": [
+        {
+          "localKey": "kb-en",
+          "valueAz": "EN",
+          "valueEn": "EN",
+          "valueAr": "EN",
+          "additionalPrice": 0
+        }
+      ]
+    }
+  ],
+  "colors": [],
+  "variants": [
+    {
+      "sku": "LAPTOP-HP-15-001-V1",
+      "price": 1299.99,
+      "stock": 20,
+      "specOptionLocalKeys": ["ram-16gb", "storage-512", "cpu-i7", "os-win11"]
+    }
+  ],
+  "accessoryIds": []
+}
+```
+
+---
+
+### Using globalOptionId vs. manual values
+
+**Pick from library** — send only `localKey`, `globalOptionId`, and `additionalPrice`. The backend copies `valueAz/En/Ar` and `unit` automatically:
+
+```json
+{
+  "localKey": "ram-16gb",
+  "globalOptionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "additionalPrice": 0
+}
+```
+
+**Type manually** — omit `globalOptionId` and fill all language fields:
+
+```json
+{
+  "localKey": "cpu-i7",
+  "valueAz": "Intel Core i7-1255U",
+  "valueEn": "Intel Core i7-1255U",
+  "valueAr": "Intel Core i7-1255U",
+  "additionalPrice": 0
+}
+```
+
+> `@NotBlank` validation is on `valueAz`, `valueEn`, `valueAr`. When using `globalOptionId` the backend fills them before saving, so validation still passes. Do not send both `globalOptionId` and manual values together.
+
+---
+
+## 5. Product Response Shape
+
+All product endpoints return this shape. Fields marked **admin-only** are omitted from public responses.
+
+```json
+{
+  "id": "uuid",
+  "categoryId": "uuid",
+  "brandId": "uuid",
+  "brandName": "HP",
+  "productType": "SIMPLE",
+  "isRefurbished": false,
+  "refurbGrade": null,
+  "basePrice": 1299.99,
+  "discountType": "PERCENTAGE",
+  "discountValue": 10,
+  "effectivePrice": 1169.99,
+  "sku": "LAPTOP-HP-15-001",
+  "availabilityStatus": "IN_STOCK",
+  "isSuperDeal": false,
+  "isLimitedStock": false,
+  "status": "ACTIVE",
+  "deletedAt": null,
+  "createdAt": "2026-03-18T10:00:00Z",
+  "updatedAt": "2026-03-18T10:00:00Z",
+  "title": "HP ProBook 15",
+  "description": "...",
+  "slug": "hp-probook-15",
+  "media": [
+    {
+      "id": "uuid",
+      "mediaType": "IMAGE",
+      "url": "https://...",
+      "thumbnailUrl": "https://...",
+      "isPrimary": true,
+      "orderIndex": 0
+    }
+  ],
+  "specs": [
+    {
+      "id": "uuid",
+      "code": "ram",
+      "name": "RAM",
+      "options": [
+        { "id": "uuid", "value": "16GB", "unit": "GB", "additionalPrice": 0 }
+      ]
+    }
+  ],
+  "colors": [
+    {
+      "id": "uuid",
+      "value": "Space Grey",
+      "colorCode": "#8D8D8D",
+      "media": [{ "id": "uuid", "mediaType": "IMAGE", "url": "...", "thumbnailUrl": "...", "isPrimary": true, "orderIndex": 0 }]
+    }
+  ],
+  "variants": [
+    {
+      "id": "uuid",
+      "sku": "LAPTOP-HP-15-001-V1",
+      "price": 1299.99,
+      "stock": 20,
+      "specOptionIds": ["uuid-of-ram-option", "uuid-of-storage-option"]
+    }
+  ],
+  "accessoryIds": ["uuid"]
+}
+```
+
+**Key notes:**
+- `brandId` and `brandName` are `null` if no brand was assigned.
+- `status` and `deletedAt` are only included in admin responses (`@JsonInclude(NON_NULL)`).
+- `effectivePrice` is computed by the backend: base price minus discount. Always display this as the sell price.
+- `unit` on spec options is `null`/omitted when not applicable.
+
+---
+
+## 6. Product Search & Filter (Public)
+
+```
+GET /api/product/search?lang=EN
+```
+
+Handled by `ProductController.searchProducts()` which binds all params via `@ModelAttribute ProductFilterRequest`.
+
+All query params are optional. They are **ANDed** together.
+
+### Query parameters
+
+| Param | Type | Example | Maps to |
+|---|---|---|---|
+| `lang` | string | `EN` | **Required.** Response language: `EN`, `AZ`, `AR` |
+| `condition` | string | `NEW` | `NEW` or `REFURBISHED` |
+| `brandId` | UUID | `uuid` | Filter by brand |
+| `availabilityStatus` | string | `IN_STOCK` | `IN_STOCK`, `OUT_OF_STOCK`, `PRE_ORDER` |
+| `categoryId` | UUID | `uuid` | Filter by category |
+| `minPrice` | decimal | `500` | Minimum base price (inclusive) |
+| `maxPrice` | decimal | `1500` | Maximum base price (inclusive) |
+| `isSuperDeal` | boolean | `true` | Only super deal products |
+| `isLimitedStock` | boolean | `true` | Only limited stock products |
+| `ram` | string | `16GB` | Spec group code `ram` |
+| `storage` | string | `512GB SSD` | Spec group code `storage` |
+| `processor` | string | `Intel Core i7-1255U` | Spec group code `processor` |
+| `screenSize` | string | `15.6` | Spec group code `screen_size` |
+| `touchableScreen` | string | `Yes` | Spec group code `touchable_screen` — `Yes` or `No` |
+| `operatingSystem` | string | `Win11 Home` | Spec group code `operating_system` |
+| `keyboardLanguage` | string | `EN` | Spec group code `keyboard_language` |
+
+### Example requests
+
+```
+GET /api/product/search?lang=EN&ram=16GB&minPrice=800&maxPrice=1500&availabilityStatus=IN_STOCK
+
+GET /api/product/search?lang=EN&isSuperDeal=true&brandId=uuid
+
+GET /api/product/search?lang=EN&operatingSystem=Win11%20Home&touchableScreen=No&condition=NEW
+
+GET /api/product/search?lang=EN&processor=Intel%20Core%20i7-1255U&storage=512GB%20SSD
+```
+
+**Response:** Same shape as section 5.
+
+---
+
+## 7. Spec Group Code Convention
+
+The filter API matches spec values by the `code` field of the spec group. Admins **must** use exactly these codes:
+
+| Filter param | Required spec group code | Example values |
+|---|---|---|
+| `ram` | `ram` | `8GB`, `16GB`, `32GB`, `64GB` |
+| `storage` | `storage` | `256GB SSD`, `512GB SSD`, `1TB SSD` |
+| `processor` | `processor` | `Intel Core i5-1235U`, `AMD Ryzen 7 7730U`, `Apple M3` |
+| `screenSize` | `screen_size` | `13.3`, `14`, `15.6`, `17.3` |
+| `touchableScreen` | `touchable_screen` | `Yes`, `No` |
+| `operatingSystem` | `operating_system` | `FreeDOS`, `MacOS`, `Win11 Home`, `Win11 Pro`, `Ubuntu`, `No OS`, `Chrome OS` |
+| `keyboardLanguage` | `keyboard_language` | `EN`, `RU`, `AZ`, `AR` |
+
+> If a product's spec group uses a different code (e.g. `RAM` instead of `ram`), it will **not** appear in filtered results. Enforce these codes in the admin UI with a fixed dropdown — not a text input.
+
+---
+
+## 8. Enums & Allowed Values
+
+### `availabilityStatus`
+| Value | Description |
+|---|---|
+| `IN_STOCK` | Product is available immediately |
+| `OUT_OF_STOCK` | Currently unavailable |
+| `PRE_ORDER` | Can be ordered, ships later |
+
+### `productType`
+| Value | Description |
+|---|---|
+| `SIMPLE` | Standard single product |
+| `DIY` | Build-your-own / configurable |
+| `ACCESSORY` | Accessory linked to a main product |
+
+### `discountType`
+| Value | Description |
+|---|---|
+| `FIXED` | `discountValue` is the final sale price |
+| `PERCENTAGE` | `discountValue` is % off (1–100) |
+
+### `refurbGrade` (only when `isRefurbished: true`)
+| Value | Condition |
+|---|---|
+| `A` | Like new |
+| `B` | Minor cosmetic wear |
+| `C` | Visible wear, fully functional |
+
+### `unit` (for spec options)
+`KB`, `MB`, `GB`, `TB`, `MHz`, `GHz`, `mAh`, `Wh`, `W`, `INCH`, `MP`, `Mbps`, `Gbps`, `G`, `KG`, `Hz`, `RPM`
+
+---
+
+## 9. Admin Dashboard UI Guide
+
+This section describes every UI component needed, including exact field mappings and interaction patterns.
+
+---
+
+### 9.1 Brand Management Page
+
+**Table:**
+- Columns: Name (AZ / EN / AR), Status badge (green = ACTIVE, grey = INACTIVE), Actions
+- Source: `GET /api/brand`
+
+**Add Brand form:**
+- Three text inputs: Name AZ, Name EN, Name AR
+- Submit → `POST /api/admin/brand`
+- Validate: all three fields are filled before enabling submit
+
+**Deactivate button:**
+- Per row → confirm dialog → `DELETE /api/admin/brand/{id}`
+- After success, reload the table (status changes to INACTIVE)
+
+---
+
+### 9.2 Global Spec Library Page
+
+**Spec group list:**
+- Accordion or expandable rows, one per group
+- Each row shows: code badge, nameEn, option count
+- Expand → list of options (valueEn, unit)
+- Source: `GET /api/admin/specs`
+
+**Add Spec Group:**
+- `code` → **fixed dropdown** (never a free-text input):
+  ```
+  ram | storage | processor | screen_size | touchable_screen | operating_system | keyboard_language
+  ```
+- nameAz, nameEn, nameAr text inputs
+- Optional initial options section (repeatable row: valueAz, valueEn, valueAr, unit dropdown)
+- Submit → `POST /api/admin/specs`
+
+**Add Option to existing group (inline):**
+- valueAz, valueEn, valueAr, unit dropdown (optional)
+- Submit → `POST /api/admin/specs/{groupId}/options`
+
+**Delete option button:**
+- Per option row → `DELETE /api/admin/specs/options/{optionId}`
+- Show confirmation: "This won't affect existing products."
+
+---
+
+### 9.3 Create / Edit Product Form
+
+#### Section A — Basic Info
+
+| UI element | Field sent | Notes |
+|---|---|---|
+| Brand dropdown | `brandId` | Fetch from `GET /api/brand`, filter status = ACTIVE. Show "No brand" as first option (sends `null`). |
+| Product Type select | `productType` | `SIMPLE`, `DIY`, `ACCESSORY` |
+| SKU text input | `sku` | Required, max 255 chars, must be unique |
+| Base Price number input | `basePrice` | Required, non-negative |
+| Discount Type select | `discountType` | `FIXED` or `PERCENTAGE`. Hide when no discount. |
+| Discount Value number input | `discountValue` | Show only when discountType is selected |
+| Status select | `status` | `ACTIVE` / `INACTIVE` |
+
+#### Section B — Availability & Flags
+
+These map to three separate fields in the backend. Render them as a clean card with a toggle (switch) component each.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Availability                                        │
+│                                                      │
+│  Stock Status    [IN_STOCK ▾]                       │
+│                                                      │
+│  Super Deal      ●────  (toggle, default OFF)        │
+│                  Show this product in the Super      │
+│                  Deals section on the storefront.    │
+│                                                      │
+│  Limited Stock   ●────  (toggle, default OFF)        │
+│                  Marks this product as limited-      │
+│                  stock so a badge appears on the     │
+│                  product card.                       │
+└─────────────────────────────────────────────────────┘
+```
+
+**Field mappings:**
+
+| UI element | Field sent | Type | Default |
+|---|---|---|---|
+| Stock Status select | `availabilityStatus` | `IN_STOCK` / `OUT_OF_STOCK` / `PRE_ORDER` | `IN_STOCK` |
+| Super Deal toggle | `isSuperDeal` | boolean | `false` |
+| Limited Stock toggle | `isLimitedStock` | boolean | `false` |
+
+**Toggle implementation notes (React example):**
+```tsx
+// State
+const [isSuperDeal, setIsSuperDeal] = useState(false);
+const [isLimitedStock, setIsLimitedStock] = useState(false);
+
+// In form submission — always send the boolean:
+// isSuperDeal: isSuperDeal     ← not "on"/"off", must be true/false
+// isLimitedStock: isLimitedStock
+
+// UI
+<label className="flex items-center gap-3">
+  <Switch
+    checked={isSuperDeal}
+    onCheckedChange={setIsSuperDeal}
+  />
+  <span>Super Deal</span>
+</label>
+
+<label className="flex items-center gap-3">
+  <Switch
+    checked={isLimitedStock}
+    onCheckedChange={setIsLimitedStock}
+  />
+  <span>Limited Stock</span>
+</label>
+```
+
+**Storefront behaviour driven by these flags:**
+- `isSuperDeal: true` → product appears in "Super Deals" section / carousel; filter `?isSuperDeal=true` returns it
+- `isLimitedStock: true` → "Limited Stock" badge on product card; filter `?isLimitedStock=true` returns it
+- Both can be `true` simultaneously
+
+#### Section C — Condition
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Condition                                           │
+│                                                      │
+│  Refurbished     ○────  (toggle, default OFF)        │
+│                                                      │
+│  [visible only when Refurbished is ON]               │
+│  Grade    (A) Like new  (B) Minor wear  (C) Visible  │
+└─────────────────────────────────────────────────────┘
+```
+
+| UI element | Field sent | Notes |
+|---|---|---|
+| Refurbished toggle | `isRefurbished` | When `false`, set `refurbGrade: null` |
+| Grade radio | `refurbGrade` | Required when `isRefurbished: true` |
+
+#### Section D — Translations
+
+Three tabs or a single accordion: AZ / EN / AR.
+
+Each tab contains:
+- Title text input (`titleAz` / `titleEn` / `titleAr`)
+- Description textarea (`descriptionAz` / `descriptionEn` / `descriptionAr`)
+
+All six fields are required.
+
+#### Section E — Specs
+
+**Spec group row:**
+- `code` → fixed dropdown (same 7 values as the library page — never free text)
+- nameAz, nameEn, nameAr text inputs
+- Options list (repeatable)
+
+**Per spec option — two modes:**
+
+**Mode 1: Pick from library (preferred)**
+```
+[Pick from library]  button →
+  Modal: shows GET /api/admin/specs results
+  Admin selects group → option
+  On confirm:
+    • Store globalOptionId internally
+    • Display valueEn (read-only)
+    • Only localKey and additionalPrice remain editable
+```
+
+**Mode 2: Manual entry**
+```
+localKey (required)
+valueAz / valueEn / valueAr (required)
+unit dropdown (optional)
+additionalPrice (default 0)
+```
+
+**Logic:**
+- If `globalOptionId` is set → send `{ localKey, globalOptionId, additionalPrice }`
+- If no `globalOptionId` → send `{ localKey, valueAz, valueEn, valueAr, unit?, additionalPrice }`
+- Never send both `globalOptionId` and manual value fields together
+
+#### Section F — Variants
+
+Each variant links to spec options using `specOptionLocalKeys`:
+```json
+{
+  "sku": "LAPTOP-HP-15-001-V1",
+  "price": 1299.99,
+  "stock": 20,
+  "specOptionLocalKeys": ["ram-16gb", "storage-512"]
+}
+```
+
+**UI:**
+- Add variant button → row with: SKU, price, stock, multi-select of localKeys defined in Section E
+- The multi-select should be auto-populated from the options entered in the Specs section above
+
+#### Section G — Media
+
+- File dropzone (images + video supported)
+- After upload, each file gets an index (0, 1, 2…)
+- Set primary image toggle per media item
+- These indices are used in `colors[].mediaIndices` if colors are assigned
+
+---
+
+### 9.4 Product Listing Table (Admin)
+
+Add these columns to the existing table:
+
+| Column | Source field | Render as |
+|---|---|---|
+| Brand | `brandName` | Plain text, "—" when null |
+| Availability | `availabilityStatus` | Badge: `IN_STOCK` = green, `OUT_OF_STOCK` = red, `PRE_ORDER` = amber |
+| Super Deal | `isSuperDeal` | Star icon or "Super Deal" badge when true |
+| Limited Stock | `isLimitedStock` | "Limited" badge when true |
+
+---
+
+### 9.5 Public Storefront Filter UI
+
+Replace or extend static filters to send real query params to `GET /api/product/search`.
+
+| Filter UI element | Query param | Notes |
+|---|---|---|
+| Condition checkboxes | `condition=NEW` / `condition=REFURBISHED` | |
+| Brand checkboxes | `brandId=uuid` | Populate from `GET /api/brand` |
+| Availability | `availabilityStatus=IN_STOCK` | |
+| RAM checkboxes | `ram=16GB` | |
+| Storage checkboxes | `storage=512GB SSD` | |
+| Processor checkboxes | `processor=Intel Core i7-1255U` | |
+| Screen size | `screenSize=15.6` | |
+| Touch screen toggle | `touchableScreen=Yes` / `touchableScreen=No` | |
+| OS checkboxes | `operatingSystem=Win11 Home` | |
+| Keyboard language | `keyboardLanguage=EN` | |
+| Price range slider | `minPrice=500&maxPrice=1500` | |
+| Super Deals toggle | `isSuperDeal=true` | Only send when ON, omit when OFF |
+| Limited Stock toggle | `isLimitedStock=true` | Only send when ON, omit when OFF |
+
+> Only send params that have an active selection. Do not send empty strings or `false` for toggles — just omit the param.
+
+---
+
+## 10. Endpoint Summary
+
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/brand` | Public | List active brands |
+| `POST` | `/api/admin/brand` | Admin | Create brand |
+| `DELETE` | `/api/admin/brand/{id}` | Admin | Deactivate brand |
+| `GET` | `/api/admin/specs` | Admin | List global spec library |
+| `POST` | `/api/admin/specs` | Admin | Create spec group |
+| `POST` | `/api/admin/specs/{groupId}/options` | Admin | Add option to group |
+| `DELETE` | `/api/admin/specs/options/{optionId}` | Admin | Delete spec option |
+| `POST` | `/api/admin/product/create` | Admin | Create product (multipart/form-data) |
+| `GET` | `/api/admin/product` | Admin | List all products |
+| `GET` | `/api/admin/product/{id}` | Admin | Get product by ID |
+| `DELETE` | `/api/admin/product/{id}` | Admin | Soft-delete product |
+| `PUT` | `/api/admin/product/{id}/restore` | Admin | Restore from trash |
+| `GET` | `/api/product/search` | Public | Filter/search products |
+| `GET` | `/api/product/{id}` | Public | Get product by ID |
+| `GET` | `/api/product/category/{id}` | Public | Products by category |

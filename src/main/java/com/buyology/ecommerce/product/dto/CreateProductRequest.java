@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.dto;
 
+import com.buyology.ecommerce.product.domain.Product.AvailabilityStatus;
 import com.buyology.ecommerce.product.domain.Product.DiscountType;
 import com.buyology.ecommerce.product.domain.Product.ProductType;
 import com.buyology.ecommerce.product.domain.Product.RefurbGrade;
@@ -20,6 +21,18 @@ public class CreateProductRequest {
     @NotNull(message = "Category ID is required")
     @Schema(description = "UUID of the existing product category", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
     private UUID categoryId;
+
+    @Schema(description = "UUID of the brand (optional)")
+    private UUID brandId;
+
+    @Schema(description = "Availability status of the product", allowableValues = {"IN_STOCK", "OUT_OF_STOCK", "PRE_ORDER"}, defaultValue = "IN_STOCK")
+    private AvailabilityStatus availabilityStatus = AvailabilityStatus.IN_STOCK;
+
+    @Schema(description = "Mark product as a super deal (shows in super deals section)", defaultValue = "false")
+    private Boolean isSuperDeal = false;
+
+    @Schema(description = "Mark product as limited stock", defaultValue = "false")
+    private Boolean isLimitedStock = false;
 
     @NotNull(message = "Product type is required")
     @Schema(description = "Type of the product", allowableValues = {"SIMPLE", "DIY", "ACCESSORY"})
@@ -185,5 +198,37 @@ public class CreateProductRequest {
 
     public void setAccessoryIds(List<UUID> accessoryIds) {
         this.accessoryIds = accessoryIds;
+    }
+
+    public UUID getBrandId() {
+        return brandId;
+    }
+
+    public void setBrandId(UUID brandId) {
+        this.brandId = brandId;
+    }
+
+    public AvailabilityStatus getAvailabilityStatus() {
+        return availabilityStatus;
+    }
+
+    public void setAvailabilityStatus(AvailabilityStatus availabilityStatus) {
+        this.availabilityStatus = availabilityStatus;
+    }
+
+    public Boolean getIsSuperDeal() {
+        return isSuperDeal;
+    }
+
+    public void setIsSuperDeal(Boolean isSuperDeal) {
+        this.isSuperDeal = isSuperDeal;
+    }
+
+    public Boolean getIsLimitedStock() {
+        return isLimitedStock;
+    }
+
+    public void setIsLimitedStock(Boolean isLimitedStock) {
+        this.isLimitedStock = isLimitedStock;
     }
 }

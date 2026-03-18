@@ -6,6 +6,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Schema(description = "Inline spec option to create during product creation (e.g. 16, 512, 1)")
 public class CreateSpecOptionRequest {
@@ -13,6 +14,9 @@ public class CreateSpecOptionRequest {
     @NotBlank(message = "Spec option localKey is required")
     @Schema(description = "Unique key within this request used by variants to reference this option", example = "ram-16gb")
     private String localKey;
+
+    @Schema(description = "Optional: reference a GlobalSpecOption by ID — its valueAz/En/Ar and unit will be copied automatically, no need to fill those fields manually")
+    private UUID globalOptionId;
 
     @NotBlank(message = "Spec option value (AZ) is required")
     @Schema(description = "Option value in Azerbaijani (numeric part only when unit is provided, e.g. \"16\")", example = "16")
@@ -47,6 +51,14 @@ public class CreateSpecOptionRequest {
 
     public void setLocalKey(String localKey) {
         this.localKey = localKey;
+    }
+
+    public UUID getGlobalOptionId() {
+        return globalOptionId;
+    }
+
+    public void setGlobalOptionId(UUID globalOptionId) {
+        this.globalOptionId = globalOptionId;
     }
 
     public String getValueAz() {

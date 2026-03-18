@@ -2,6 +2,8 @@ package com.buyology.ecommerce.product.service;
 
 import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.product.domain.Brand;
+import com.buyology.ecommerce.product.domain.GlobalSpecOption;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductAccessory;
 import com.buyology.ecommerce.product.domain.ProductCategory;
@@ -22,7 +24,13 @@ import com.buyology.ecommerce.product.dto.CreateSpecOptionRequest;
 import com.buyology.ecommerce.product.dto.CreateVariantRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
 import com.buyology.ecommerce.product.dto.ProductTranslationRequest;
+import com.buyology.ecommerce.product.dto.ProductFilterRequest;
+import com.buyology.ecommerce.product.repository.BrandRepository;
+import com.buyology.ecommerce.product.repository.BrandTranslationRepository;
+import com.buyology.ecommerce.product.repository.GlobalSpecOptionRepository;
+import com.buyology.ecommerce.product.repository.GlobalSpecOptionTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductAccessoryRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecification;
 import com.buyology.ecommerce.product.repository.ProductCategoryRepository;
 import com.buyology.ecommerce.product.repository.ProductMediaRepository;
 import com.buyology.ecommerce.product.repository.ProductRepository;
@@ -61,6 +69,10 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
+    private final BrandRepository brandRepository;
+    private final BrandTranslationRepository brandTranslationRepository;
+    private final GlobalSpecOptionRepository globalSpecOptionRepository;
+    private final GlobalSpecOptionTranslationRepository globalSpecOptionTranslationRepository;
     private final ProductSpecGroupRepository specGroupRepository;
     private final ProductSpecGroupTranslationRepository specGroupTranslationRepository;
     private final ProductSpecOptionRepository specOptionRepository;
@@ -74,6 +86,10 @@ public class ProductService {
     public ProductService(
             ProductRepository productRepository,
             ProductCategoryRepository categoryRepository,
+            BrandRepository brandRepository,
+            BrandTranslationRepository brandTranslationRepository,
+            GlobalSpecOptionRepository globalSpecOptionRepository,
+            GlobalSpecOptionTranslationRepository globalSpecOptionTranslationRepository,
             ProductSpecGroupRepository specGroupRepository,
             ProductSpecGroupTranslationRepository specGroupTranslationRepository,
             ProductSpecOptionRepository specOptionRepository,
@@ -85,6 +101,10 @@ public class ProductService {
             ProductAccessoryRepository accessoryRepository) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
+        this.brandRepository = brandRepository;
+        this.brandTranslationRepository = brandTranslationRepository;
+        this.globalSpecOptionRepository = globalSpecOptionRepository;
+        this.globalSpecOptionTranslationRepository = globalSpecOptionTranslationRepository;
         this.specGroupRepository = specGroupRepository;
         this.specGroupTranslationRepository = specGroupTranslationRepository;
         this.specOptionRepository = specOptionRepository;
@@ -115,6 +135,14 @@ public class ProductService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Category not found with id: " + request.getCategoryId()));
 
+        // 1b. Optionally resolve brand
+        Brand brand = null;
+        if (request.getBrandId() != null) {
+            brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Brand not found with id: " + request.getBrandId()));
+        }
+
         // 2. Refurb grade is mandatory when the product is refurbished
         if (Boolean.TRUE.equals(request.getIsRefurbished()) && request.getRefurbGrade() == null) {
             throw new IllegalArgumentException(
@@ -142,6 +170,7 @@ public class ProductService {
         // 4. Persist base product
         Product product = new Product(
                 category,
+                brand,
                 request.getProductType(),
                 request.getIsRefurbished(),
                 request.getRefurbGrade(),
@@ -149,7 +178,10 @@ public class ProductService {
                 request.getDiscountType(),
                 request.getDiscountValue(),
                 request.getSku(),
-                request.getStatus());
+                request.getStatus(),
+                request.getAvailabilityStatus(),
+                request.getIsSuperDeal(),
+                request.getIsLimitedStock());
         Product savedProduct = productRepository.save(product);
 
         // 5. Save translations
@@ -332,6 +364,14 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
+            ProductFilterRequest filter, String lang) {
+        List<ProductResponse> responses = productRepository.findAll(ProductSpecification.from(filter)).stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(UUID categoryId, String lang) {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
@@ -505,13 +545,35 @@ public class ProductService {
                     throw new IllegalArgumentException("Duplicate localKey in specs: " + optReq.getLocalKey());
                 }
 
+                // If globalOptionId is provided, copy values from the global spec library
+                String valueAz = optReq.getValueAz();
+                String valueEn = optReq.getValueEn();
+                String valueAr = optReq.getValueAr();
+                com.buyology.ecommerce.common.enums.SpecUnit unit = optReq.getUnit();
+                if (optReq.getGlobalOptionId() != null) {
+                    GlobalSpecOption global = globalSpecOptionRepository.findById(optReq.getGlobalOptionId())
+                            .orElseThrow(() -> new IllegalArgumentException(
+                                    "Global spec option not found: " + optReq.getGlobalOptionId()));
+                    unit = global.getUnit();
+                    // Read translated values from the translation table
+                    valueAz = globalSpecOptionTranslationRepository
+                            .findByOption_IdAndLanguage(global.getId(), Language.AZ)
+                            .map(t -> t.getValue()).orElse(valueAz);
+                    valueEn = globalSpecOptionTranslationRepository
+                            .findByOption_IdAndLanguage(global.getId(), Language.EN)
+                            .map(t -> t.getValue()).orElse(valueEn);
+                    valueAr = globalSpecOptionTranslationRepository
+                            .findByOption_IdAndLanguage(global.getId(), Language.AR)
+                            .map(t -> t.getValue()).orElse(valueAr);
+                }
+
                 ProductSpecOption option = specOptionRepository.save(
-                        new ProductSpecOption(group, optReq.getValueEn(), optReq.getUnit(), optReq.getAdditionalPrice()));
+                        new ProductSpecOption(group, valueEn, unit, optReq.getAdditionalPrice()));
 
                 specOptionTranslationRepository.saveAll(List.of(
-                        new ProductSpecOptionTranslation(option, Language.AZ, optReq.getValueAz()),
-                        new ProductSpecOptionTranslation(option, Language.EN, optReq.getValueEn()),
-                        new ProductSpecOptionTranslation(option, Language.AR, optReq.getValueAr())
+                        new ProductSpecOptionTranslation(option, Language.AZ, valueAz),
+                        new ProductSpecOptionTranslation(option, Language.EN, valueEn),
+                        new ProductSpecOptionTranslation(option, Language.AR, valueAr)
                 ));
 
                 if (optReq.getLocalKey() != null) {
@@ -759,6 +821,17 @@ public class ProductService {
         ProductResponse response = new ProductResponse();
         response.setId(product.getId());
         response.setCategoryId(product.getCategory().getId());
+        if (product.getBrand() != null) {
+            response.setBrandId(product.getBrand().getId());
+            String brandName = brandTranslationRepository
+                    .findByBrand_IdAndLanguageIgnoreCase(product.getBrand().getId(), lang)
+                    .map(t -> t.getName())
+                    .orElseGet(() -> brandTranslationRepository
+                            .findByBrand_IdAndLanguageIgnoreCase(product.getBrand().getId(), "EN")
+                            .map(t -> t.getName())
+                            .orElse(null));
+            response.setBrandName(brandName);
+        }
         response.setProductType(product.getProductType() != null ? product.getProductType().name() : null);
         response.setIsRefurbished(product.getIsRefurbished());
         response.setRefurbGrade(product.getRefurbGrade() != null ? product.getRefurbGrade().name() : null);
@@ -767,6 +840,9 @@ public class ProductService {
         response.setDiscountValue(product.getDiscountValue());
         response.setEffectivePrice(computeEffectivePrice(product));
         response.setSku(product.getSku());
+        response.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
+        response.setIsSuperDeal(product.getIsSuperDeal());
+        response.setIsLimitedStock(product.getIsLimitedStock());
         if (includeStatus) {
             response.setStatus(product.getStatus());
             response.setDeletedAt(product.getDeletedAt());
