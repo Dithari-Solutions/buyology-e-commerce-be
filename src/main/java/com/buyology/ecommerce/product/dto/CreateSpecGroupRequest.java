@@ -14,16 +14,13 @@ public class CreateSpecGroupRequest {
     @Schema(description = "Unique code for the spec group", example = "ram")
     private String code;
 
-    @NotBlank(message = "Spec group name (AZ) is required")
-    @Schema(description = "Group name in Azerbaijani", example = "RAM")
+    @Schema(description = "Group name in Azerbaijani — required only when code does not match a global spec group", example = "RAM")
     private String nameAz;
 
-    @NotBlank(message = "Spec group name (EN) is required")
-    @Schema(description = "Group name in English", example = "RAM")
+    @Schema(description = "Group name in English — required only when code does not match a global spec group", example = "RAM")
     private String nameEn;
 
-    @NotBlank(message = "Spec group name (AR) is required")
-    @Schema(description = "Group name in Arabic", example = "ذاكرة الوصول العشوائي")
+    @Schema(description = "Group name in Arabic — required only when code does not match a global spec group", example = "ذاكرة الوصول العشوائي")
     private String nameAr;
 
     @Valid

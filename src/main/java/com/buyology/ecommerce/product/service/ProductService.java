@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.service;
 import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Brand;
+import com.buyology.ecommerce.product.domain.GlobalSpecGroup;
 import com.buyology.ecommerce.product.domain.GlobalSpecOption;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductAccessory;
@@ -27,6 +28,8 @@ import com.buyology.ecommerce.product.dto.ProductTranslationRequest;
 import com.buyology.ecommerce.product.dto.ProductFilterRequest;
 import com.buyology.ecommerce.product.repository.BrandRepository;
 import com.buyology.ecommerce.product.repository.BrandTranslationRepository;
+import com.buyology.ecommerce.product.repository.GlobalSpecGroupRepository;
+import com.buyology.ecommerce.product.repository.GlobalSpecGroupTranslationRepository;
 import com.buyology.ecommerce.product.repository.GlobalSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.GlobalSpecOptionTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductAccessoryRepository;
@@ -59,6 +62,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -71,6 +75,8 @@ public class ProductService {
     private final ProductCategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
     private final BrandTranslationRepository brandTranslationRepository;
+    private final GlobalSpecGroupRepository globalSpecGroupRepository;
+    private final GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository;
     private final GlobalSpecOptionRepository globalSpecOptionRepository;
     private final GlobalSpecOptionTranslationRepository globalSpecOptionTranslationRepository;
     private final ProductSpecGroupRepository specGroupRepository;
@@ -88,6 +94,8 @@ public class ProductService {
             ProductCategoryRepository categoryRepository,
             BrandRepository brandRepository,
             BrandTranslationRepository brandTranslationRepository,
+            GlobalSpecGroupRepository globalSpecGroupRepository,
+            GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository,
             GlobalSpecOptionRepository globalSpecOptionRepository,
             GlobalSpecOptionTranslationRepository globalSpecOptionTranslationRepository,
             ProductSpecGroupRepository specGroupRepository,
@@ -103,6 +111,8 @@ public class ProductService {
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
         this.brandTranslationRepository = brandTranslationRepository;
+        this.globalSpecGroupRepository = globalSpecGroupRepository;
+        this.globalSpecGroupTranslationRepository = globalSpecGroupTranslationRepository;
         this.globalSpecOptionRepository = globalSpecOptionRepository;
         this.globalSpecOptionTranslationRepository = globalSpecOptionTranslationRepository;
         this.specGroupRepository = specGroupRepository;
@@ -534,10 +544,40 @@ public class ProductService {
         for (CreateSpecGroupRequest groupReq : specRequests) {
             ProductSpecGroup group = specGroupRepository.save(new ProductSpecGroup(product, groupReq.getCode()));
 
+            // If the code matches a global spec group, copy translations from it.
+            // Otherwise the admin must supply nameAz/nameEn/nameAr manually.
+            String nameAz, nameEn, nameAr;
+            Optional<GlobalSpecGroup> globalGroup = globalSpecGroupRepository.findByCode(groupReq.getCode());
+            if (globalGroup.isPresent()) {
+                UUID globalGroupId = globalGroup.get().getId();
+                nameAz = globalSpecGroupTranslationRepository
+                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "AZ")
+                        .map(t -> t.getName()).orElse(groupReq.getNameAz());
+                nameEn = globalSpecGroupTranslationRepository
+                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "EN")
+                        .map(t -> t.getName()).orElse(groupReq.getNameEn());
+                nameAr = globalSpecGroupTranslationRepository
+                        .findByGroup_IdAndLanguageIgnoreCase(globalGroupId, "AR")
+                        .map(t -> t.getName()).orElse(groupReq.getNameAr());
+            } else {
+                if (groupReq.getNameAz() == null || groupReq.getNameAz().isBlank()) {
+                    throw new IllegalArgumentException("Spec group name (AZ) is required for custom spec: " + groupReq.getCode());
+                }
+                if (groupReq.getNameEn() == null || groupReq.getNameEn().isBlank()) {
+                    throw new IllegalArgumentException("Spec group name (EN) is required for custom spec: " + groupReq.getCode());
+                }
+                if (groupReq.getNameAr() == null || groupReq.getNameAr().isBlank()) {
+                    throw new IllegalArgumentException("Spec group name (AR) is required for custom spec: " + groupReq.getCode());
+                }
+                nameAz = groupReq.getNameAz();
+                nameEn = groupReq.getNameEn();
+                nameAr = groupReq.getNameAr();
+            }
+
             specGroupTranslationRepository.saveAll(List.of(
-                    new ProductSpecGroupTranslation(group, "AZ", groupReq.getNameAz()),
-                    new ProductSpecGroupTranslation(group, "EN", groupReq.getNameEn()),
-                    new ProductSpecGroupTranslation(group, "AR", groupReq.getNameAr())
+                    new ProductSpecGroupTranslation(group, "AZ", nameAz),
+                    new ProductSpecGroupTranslation(group, "EN", nameEn),
+                    new ProductSpecGroupTranslation(group, "AR", nameAr)
             ));
 
             for (CreateSpecOptionRequest optReq : groupReq.getOptions()) {
