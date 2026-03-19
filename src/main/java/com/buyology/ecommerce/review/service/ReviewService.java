@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.review.domain.*;
+import com.buyology.ecommerce.review.domain.enums.MediaType;
 import com.buyology.ecommerce.review.domain.enums.ModerationStatus;
 import com.buyology.ecommerce.review.dto.*;
 import com.buyology.ecommerce.review.repository.*;
@@ -16,13 +17,21 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 @Service
 public class ReviewService {
+
+    private static final String REVIEW_UPLOAD_PATH = "/opt/uploads/review";
+    private static final int MAX_REVIEW_IMAGES = 2;
 
     private final ProductReviewRepository reviewRepository;
     private final ProductReviewStatsRepository statsRepository;
@@ -87,7 +96,9 @@ public class ReviewService {
     // ── Create review ─────────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<ReviewResponse>> createReview(CreateReviewRequest request) {
+    public ResponseEntity<ApiResponse<ReviewResponse>> createReview(
+            CreateReviewRequest request, List<MultipartFile> images) {
+
         Product product = productRepository.findById(request.getProductId()).orElse(null);
         if (product == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
@@ -103,6 +114,21 @@ public class ReviewService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "User has already reviewed this product");
         }
 
+        if (images != null && images.size() > MAX_REVIEW_IMAGES) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "A review can have at most " + MAX_REVIEW_IMAGES + " images");
+        }
+
+        if (images != null) {
+            for (MultipartFile file : images) {
+                String ct = file.getContentType();
+                if (ct == null || !ct.startsWith("image/")) {
+                    return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                            "Only image files are allowed (JPEG, PNG, WEBP, etc.)");
+                }
+            }
+        }
+
         ProductReview review = new ProductReview(product, user, request.getRating(),
                 request.getTitle(), request.getBody());
         review.setOrderItemId(request.getOrderItemId());
@@ -113,12 +139,13 @@ public class ReviewService {
 
         ProductReview saved = reviewRepository.save(review);
 
-        if (request.getMedia() != null && !request.getMedia().isEmpty()) {
-            for (CreateReviewRequest.MediaItemRequest m : request.getMedia()) {
-                ProductReviewMedia media = new ProductReviewMedia(
-                        saved, m.getUrl(), m.getMediaType(),
-                        m.getSortOrder() != null ? m.getSortOrder() : 0);
-                mediaRepository.save(media);
+        if (images != null && !images.isEmpty()) {
+            Path reviewDir = Paths.get(REVIEW_UPLOAD_PATH, saved.getId().toString());
+            ensureDirectory(reviewDir);
+            for (int i = 0; i < images.size(); i++) {
+                MultipartFile file = images.get(i);
+                String url = saveFile(reviewDir, file, "review_" + i);
+                mediaRepository.save(new ProductReviewMedia(saved, url, MediaType.IMAGE, (short) i));
             }
         }
 
@@ -348,5 +375,30 @@ public class ReviewService {
         r.setRating4Count(0);
         r.setRating5Count(0);
         return r;
+    }
+
+    // ── File helpers ──────────────────────────────────────────────────────────
+
+    private String saveFile(Path dir, MultipartFile file, String baseName) {
+        String original = file.getOriginalFilename();
+        String extension = "";
+        if (original != null && original.contains(".")) {
+            extension = original.substring(original.lastIndexOf("."));
+        }
+        String fileName = baseName + extension;
+        try {
+            Files.write(dir.resolve(fileName), file.getBytes());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to save review image: " + original, e);
+        }
+        return "/review/" + dir.getFileName() + "/" + fileName;
+    }
+
+    private void ensureDirectory(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create review media directory", e);
+        }
     }
 }

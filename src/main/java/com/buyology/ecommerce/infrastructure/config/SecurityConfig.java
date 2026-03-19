@@ -27,7 +27,7 @@ public class SecurityConfig {
                                 "/webjars/**"
                         ).permitAll()
                         // Allow static resources
-                        .requestMatchers("/story/**", "/product/**", "/css/**", "/js/**", "/images/**").permitAll()
+                        .requestMatchers("/story/**", "/product/**", "/review/**", "/css/**", "/js/**", "/images/**").permitAll()
                         // All other requests
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())

@@ -3,11 +3,15 @@ package com.buyology.ecommerce.review.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.review.dto.*;
 import com.buyology.ecommerce.review.service.ReviewService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -18,9 +22,11 @@ import java.util.UUID;
 public class ReviewController {
 
     private final ReviewService reviewService;
+    private final ObjectMapper objectMapper;
 
-    public ReviewController(ReviewService reviewService) {
+    public ReviewController(ReviewService reviewService, ObjectMapper objectMapper) {
         this.reviewService = reviewService;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "Get approved reviews for a product")
@@ -47,11 +53,14 @@ public class ReviewController {
     }
 
     @Operation(summary = "Submit a new product review",
-            description = "One review per user per product. The review starts in PENDING status awaiting moderation.")
-    @PostMapping
+            description = "Multipart request. Send 'request' as a JSON part and up to 2 image files as 'images'. The review starts in PENDING status awaiting moderation.")
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ReviewResponse>> createReview(
-            @RequestBody @Valid CreateReviewRequest request) {
-        return reviewService.createReview(request);
+            @Parameter(hidden = true) @RequestPart("request") String requestJson,
+            @Parameter(hidden = true) @RequestPart(value = "images", required = false) List<MultipartFile> images)
+            throws Exception {
+        CreateReviewRequest request = objectMapper.readValue(requestJson, CreateReviewRequest.class);
+        return reviewService.createReview(request, images);
     }
 
     @Operation(summary = "Update a pending review",

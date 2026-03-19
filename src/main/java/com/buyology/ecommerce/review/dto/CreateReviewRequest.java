@@ -1,14 +1,11 @@
 package com.buyology.ecommerce.review.dto;
 
-import com.buyology.ecommerce.review.domain.enums.MediaType;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 
-import java.util.List;
 import java.util.UUID;
 
-@Schema(description = "Request body for creating a product review")
+@Schema(description = "Request body for creating a product review (sent as JSON part in multipart/form-data)")
 public class CreateReviewRequest {
 
     @NotNull(message = "Product ID is required")
@@ -35,39 +32,6 @@ public class CreateReviewRequest {
     @Schema(description = "Optional order item ID to verify the purchase")
     private UUID orderItemId;
 
-    @Valid
-    @Size(max = 10, message = "A review can have at most 10 media items")
-    @Schema(description = "Optional list of media attachments (images/videos)")
-    private List<MediaItemRequest> media;
-
-    // =====================
-    // Nested DTO
-    // =====================
-
-    @Schema(description = "A single media item attached to a review")
-    public static class MediaItemRequest {
-
-        @NotNull(message = "Media URL is required")
-        @Schema(description = "Public URL of the media file", example = "https://cdn.example.com/review/image1.jpg")
-        private String url;
-
-        @NotNull(message = "Media type is required")
-        @Schema(description = "Type of media: IMAGE or VIDEO", example = "IMAGE")
-        private MediaType mediaType;
-
-        @Schema(description = "Sort order for display (0-based)", example = "0")
-        private Short sortOrder = 0;
-
-        public String getUrl() { return url; }
-        public void setUrl(String url) { this.url = url; }
-
-        public MediaType getMediaType() { return mediaType; }
-        public void setMediaType(MediaType mediaType) { this.mediaType = mediaType; }
-
-        public Short getSortOrder() { return sortOrder; }
-        public void setSortOrder(Short sortOrder) { this.sortOrder = sortOrder; }
-    }
-
     // =====================
     // Getters & Setters
     // =====================
@@ -89,7 +53,4 @@ public class CreateReviewRequest {
 
     public UUID getOrderItemId() { return orderItemId; }
     public void setOrderItemId(UUID orderItemId) { this.orderItemId = orderItemId; }
-
-    public List<MediaItemRequest> getMedia() { return media; }
-    public void setMedia(List<MediaItemRequest> media) { this.media = media; }
 }

@@ -133,27 +133,17 @@ GET /api/reviews/{reviewId}
 
 ```
 POST /api/reviews
+Content-Type: multipart/form-data
 ```
 
-**Body:**
+Send as two parts:
 
-```json
-{
-  "productId": "uuid",
-  "userId": "uuid",
-  "rating": 4,
-  "title": "Great product!",
-  "body": "Exceeded my expectations.",
-  "orderItemId": "uuid",
-  "media": [
-    {
-      "url": "https://cdn.example.com/review/img1.jpg",
-      "mediaType": "IMAGE",
-      "sortOrder": 0
-    }
-  ]
-}
-```
+| Part | Type | Required | Notes |
+|---|---|---|---|
+| `request` | JSON string | Yes | Review metadata (see fields below) |
+| `images` | File(s) | No | Up to **2** image files (JPEG, PNG, WEBP, etc.) |
+
+**`request` part — JSON fields:**
 
 | Field | Required | Notes |
 |---|---|---|
@@ -163,7 +153,24 @@ POST /api/reviews
 | `title` | No | Max 255 chars |
 | `body` | No | Free text |
 | `orderItemId` | No | Providing this sets `isVerifiedPurchase = true` |
-| `media` | No | Max 10 items; `mediaType`: `IMAGE` or `VIDEO` |
+
+**Example (JavaScript `fetch`):**
+
+```js
+const formData = new FormData();
+formData.append('request', JSON.stringify({
+  productId: "uuid",
+  userId: "uuid",
+  rating: 4,
+  title: "Great product!",
+  body: "Exceeded my expectations.",
+  orderItemId: "uuid"   // optional
+}));
+formData.append('images', file1);  // optional, max 2
+formData.append('images', file2);  // optional
+
+fetch('/api/reviews', { method: 'POST', body: formData });
+```
 
 **Response 201:**
 
@@ -175,6 +182,7 @@ POST /api/reviews
 }
 ```
 
+**Response 400:** More than 2 images supplied, or a non-image file was uploaded
 **Response 409:** User has already reviewed this product
 
 ---
