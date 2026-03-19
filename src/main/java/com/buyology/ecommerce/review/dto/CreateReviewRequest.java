@@ -29,9 +29,6 @@ public class CreateReviewRequest {
     @Schema(description = "Optional review body text", example = "Really satisfied with the build quality.")
     private String body;
 
-    @Schema(description = "Optional order item ID to verify the purchase")
-    private UUID orderItemId;
-
     // =====================
     // Getters & Setters
     // =====================
@@ -50,7 +47,4 @@ public class CreateReviewRequest {
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }
-
-    public UUID getOrderItemId() { return orderItemId; }
-    public void setOrderItemId(UUID orderItemId) { this.orderItemId = orderItemId; }
 }

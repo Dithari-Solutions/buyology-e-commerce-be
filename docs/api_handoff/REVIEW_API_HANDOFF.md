@@ -152,7 +152,8 @@ Send as two parts:
 | `rating` | Yes | 1–5 |
 | `title` | No | Max 255 chars |
 | `body` | No | Free text |
-| `orderItemId` | No | Providing this sets `isVerifiedPurchase = true` |
+
+> `isVerifiedPurchase` is set **automatically by the backend** — it checks whether the user has a completed (checked-out) cart containing this product. Do **not** send `orderItemId` from the frontend.
 
 **Example (JavaScript `fetch`):**
 
@@ -163,8 +164,7 @@ formData.append('request', JSON.stringify({
   userId: "uuid",
   rating: 4,
   title: "Great product!",
-  body: "Exceeded my expectations.",
-  orderItemId: "uuid"   // optional
+  body: "Exceeded my expectations."
 }));
 formData.append('images', file1);  // optional, max 2
 formData.append('images', file2);  // optional

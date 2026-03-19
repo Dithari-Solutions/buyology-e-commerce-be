@@ -7,6 +7,7 @@ import com.buyology.ecommerce.review.domain.*;
 import com.buyology.ecommerce.review.domain.enums.MediaType;
 import com.buyology.ecommerce.review.domain.enums.ModerationStatus;
 import com.buyology.ecommerce.review.dto.*;
+import com.buyology.ecommerce.cart.repository.CartItemRepository;
 import com.buyology.ecommerce.review.repository.*;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
@@ -40,6 +41,7 @@ public class ReviewService {
     private final ProductReviewVoteRepository voteRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final CartItemRepository cartItemRepository;
 
     public ReviewService(ProductReviewRepository reviewRepository,
                          ProductReviewStatsRepository statsRepository,
@@ -47,7 +49,8 @@ public class ReviewService {
                          ProductReviewReplyRepository replyRepository,
                          ProductReviewVoteRepository voteRepository,
                          ProductRepository productRepository,
-                         UserRepository userRepository) {
+                         UserRepository userRepository,
+                         CartItemRepository cartItemRepository) {
         this.reviewRepository = reviewRepository;
         this.statsRepository = statsRepository;
         this.mediaRepository = mediaRepository;
@@ -55,6 +58,7 @@ public class ReviewService {
         this.voteRepository = voteRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.cartItemRepository = cartItemRepository;
     }
 
     // ── Public: List approved reviews for a product ──────────────────────────
@@ -129,13 +133,12 @@ public class ReviewService {
             }
         }
 
+        boolean isVerifiedPurchase = cartItemRepository
+                .existsCheckedOutPurchaseByUserAndProduct(request.getUserId(), request.getProductId());
+
         ProductReview review = new ProductReview(product, user, request.getRating(),
                 request.getTitle(), request.getBody());
-        review.setOrderItemId(request.getOrderItemId());
-
-        if (request.getOrderItemId() != null) {
-            review.setIsVerifiedPurchase(true);
-        }
+        review.setIsVerifiedPurchase(isVerifiedPurchase);
 
         ProductReview saved = reviewRepository.save(review);
 
