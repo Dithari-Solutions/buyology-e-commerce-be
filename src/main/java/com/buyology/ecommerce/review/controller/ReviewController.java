@@ -6,6 +6,11 @@ import com.buyology.ecommerce.review.service.ReviewService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Encoding;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
@@ -54,6 +59,14 @@ public class ReviewController {
 
     @Operation(summary = "Submit a new product review",
             description = "Multipart request. Send 'request' as a JSON part and up to 2 image files as 'images'. The review starts in PENDING status awaiting moderation.")
+    @RequestBody(
+            required = true,
+            content = @Content(
+                    mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
+                    schema = @Schema(implementation = ReviewController.CreateReviewForm.class),
+                    encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
+            )
+    )
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ReviewResponse>> createReview(
             @Parameter(hidden = true) @RequestPart("request") String requestJson,
@@ -94,5 +107,19 @@ public class ReviewController {
             @PathVariable UUID reviewId,
             @RequestParam UUID userId) {
         return reviewService.removeVoteOnReview(reviewId, userId);
+    }
+
+    private static class CreateReviewForm {
+
+        @Schema(
+                description = "Review metadata as JSON",
+                implementation = CreateReviewRequest.class)
+        public Object request;
+
+        @ArraySchema(schema = @Schema(
+                type = "string",
+                format = "binary",
+                description = "Up to 2 image files (JPEG, PNG, WEBP, etc.)"))
+        public List<MultipartFile> images;
     }
 }
