@@ -157,10 +157,8 @@ public class ReviewService {
         ProductReview review = new ProductReview(product, user, request.getRating(), request.getBody());
         review.setIsVerifiedPurchase(isVerifiedPurchase);
 
-        if (isVerifiedPurchase) {
-            review.setStatus(ModerationStatus.APPROVED);
-            review.setModeratedAt(Instant.now());
-        }
+        review.setStatus(ModerationStatus.APPROVED);
+        review.setModeratedAt(Instant.now());
 
         ProductReview saved = reviewRepository.save(review);
 
