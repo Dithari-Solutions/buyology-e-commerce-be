@@ -45,6 +45,7 @@ public class ReviewService {
     private final UserRepository userRepository;
     private final CartItemRepository cartItemRepository;
     private final AuthCredentialRepository authCredentialRepository;
+    private final ReviewContentFilter contentFilter;
 
     public ReviewService(ProductReviewRepository reviewRepository,
                          ProductReviewStatsRepository statsRepository,
@@ -54,7 +55,8 @@ public class ReviewService {
                          ProductRepository productRepository,
                          UserRepository userRepository,
                          CartItemRepository cartItemRepository,
-                         AuthCredentialRepository authCredentialRepository) {
+                         AuthCredentialRepository authCredentialRepository,
+                         ReviewContentFilter contentFilter) {
         this.reviewRepository = reviewRepository;
         this.statsRepository = statsRepository;
         this.mediaRepository = mediaRepository;
@@ -64,6 +66,7 @@ public class ReviewService {
         this.userRepository = userRepository;
         this.cartItemRepository = cartItemRepository;
         this.authCredentialRepository = authCredentialRepository;
+        this.contentFilter = contentFilter;
     }
 
     // ── Public: List approved reviews for a product ──────────────────────────
@@ -143,12 +146,21 @@ public class ReviewService {
             }
         }
 
+        String filterError = contentFilter.check(request.getBody());
+        if (filterError != null) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, filterError);
+        }
+
         boolean isVerifiedPurchase = cartItemRepository
                 .existsCheckedOutPurchaseByUserAndProduct(user.getId(), request.getProductId());
 
-        ProductReview review = new ProductReview(product, user, request.getRating(),
-                request.getTitle(), request.getBody());
+        ProductReview review = new ProductReview(product, user, request.getRating(), request.getBody());
         review.setIsVerifiedPurchase(isVerifiedPurchase);
+
+        if (isVerifiedPurchase) {
+            review.setStatus(ModerationStatus.APPROVED);
+            review.setModeratedAt(Instant.now());
+        }
 
         ProductReview saved = reviewRepository.save(review);
 
@@ -162,6 +174,10 @@ public class ReviewService {
             }
         }
 
+        if (isVerifiedPurchase) {
+            recalculateStats(saved.getProduct().getId());
+            return ApiResponse.created(toResponse(saved, false), "Review submitted successfully");
+        }
         return ApiResponse.created(toResponse(saved, false), "Review submitted successfully and is pending moderation");
     }
 
@@ -179,9 +195,14 @@ public class ReviewService {
                     "Only pending reviews can be edited");
         }
 
+        if (request.getBody() != null) {
+            String filterError = contentFilter.check(request.getBody());
+            if (filterError != null) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, filterError);
+            }
+            review.setBody(request.getBody());
+        }
         if (request.getRating() != null) review.setRating(request.getRating());
-        if (request.getTitle() != null) review.setTitle(request.getTitle());
-        if (request.getBody() != null) review.setBody(request.getBody());
 
         ProductReview saved = reviewRepository.save(review);
         return ApiResponse.success(toResponse(saved, false), "Review updated successfully");
@@ -332,7 +353,6 @@ public class ReviewService {
         r.setUserFirstName(review.getUser().getFirstName());
         r.setUserLastName(review.getUser().getLastName());
         r.setRating(review.getRating());
-        r.setTitle(review.getTitle());
         r.setBody(review.getBody());
         r.setIsVerifiedPurchase(review.getIsVerifiedPurchase());
         r.setStatus(review.getStatus());

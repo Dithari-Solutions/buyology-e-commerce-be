@@ -22,10 +22,6 @@ public class CreateReviewRequest {
     @Schema(description = "Rating from 1 to 5", example = "4")
     private Short rating;
 
-    @Size(max = 255, message = "Title must not exceed 255 characters")
-    @Schema(description = "Optional review title", example = "Great product!")
-    private String title;
-
     @Schema(description = "Optional review body text", example = "Really satisfied with the build quality.")
     private String body;
 
@@ -41,9 +37,6 @@ public class CreateReviewRequest {
 
     public Short getRating() { return rating; }
     public void setRating(Short rating) { this.rating = rating; }
-
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }

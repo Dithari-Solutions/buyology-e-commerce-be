@@ -17,7 +17,6 @@ public class ReviewResponse {
     private String userFirstName;
     private String userLastName;
     private Short rating;
-    private String title;
     private String body;
     private Boolean isVerifiedPurchase;
     private ModerationStatus status;
@@ -110,9 +109,6 @@ public class ReviewResponse {
 
     public Short getRating() { return rating; }
     public void setRating(Short rating) { this.rating = rating; }
-
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }

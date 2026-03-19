@@ -2,7 +2,7 @@
 
 **Base URL:** `https://api-dev.dithari.com` (dev) / your production base
 **Content-Type:** `application/json`
-**Auth:** Not enforced at the gateway layer — pass user/admin IDs in the request body.
+**Auth:** Not enforced at the gateway layer — pass the JWT `sub` claim value (which is the `AuthCredentials.id`) as `authCredentialId` in user-facing requests.
 
 All responses follow this envelope:
 
@@ -52,7 +52,6 @@ GET /api/reviews/product/{productId}?page=0&size=10
       "userFirstName": "John",
       "userLastName": "Doe",
       "rating": 4,
-      "title": "Great product!",
       "body": "Really satisfied with the build quality.",
       "isVerifiedPurchase": true,
       "status": "APPROVED",
@@ -148,12 +147,12 @@ Send as two parts:
 | Field | Required | Notes |
 |---|---|---|
 | `productId` | Yes | |
-| `userId` | Yes | Logged-in user's ID |
+| `authCredentialId` | Yes | JWT `sub` claim value (AuthCredentials ID) |
 | `rating` | Yes | 1–5 |
-| `title` | No | Max 255 chars |
 | `body` | No | Free text |
 
-> `isVerifiedPurchase` is set **automatically by the backend** — it checks whether the user has a completed (checked-out) cart containing this product. Do **not** send `orderItemId` from the frontend.
+> **Auto-moderation:** If the user has a verified purchase (checked-out cart containing this product), the review is published immediately (`APPROVED`). Otherwise it enters `PENDING` for admin review.
+> **Content filter:** The `body` is checked for profanity, SQL injection patterns, and XSS/HTML injection. A **400** is returned if blocked.
 
 **Example (JavaScript `fetch`):**
 
@@ -161,9 +160,8 @@ Send as two parts:
 const formData = new FormData();
 formData.append('request', JSON.stringify({
   productId: "uuid",
-  userId: "uuid",
+  authCredentialId: "jwt-sub-value",  // JWT sub claim
   rating: 4,
-  title: "Great product!",
   body: "Exceeded my expectations."
 }));
 formData.append('images', file1);  // optional, max 2
@@ -172,17 +170,10 @@ formData.append('images', file2);  // optional
 fetch('/api/reviews', { method: 'POST', body: formData });
 ```
 
-**Response 201:**
+**Response 201 (verified purchase):** `"Review submitted successfully"` — `status: "APPROVED"`, visible immediately
+**Response 201 (unverified):** `"Review submitted successfully and is pending moderation"` — `status: "PENDING"`
 
-```json
-{
-  "statusCode": 201,
-  "message": "Review submitted successfully and is pending moderation",
-  "data": { ...review object with status: "PENDING"... }
-}
-```
-
-**Response 400:** More than 2 images supplied, or a non-image file was uploaded
+**Response 400:** More than 2 images, non-image file, or body failed content filter
 **Response 409:** User has already reviewed this product
 
 ---
@@ -200,13 +191,12 @@ PUT /api/reviews/{reviewId}
 ```json
 {
   "rating": 5,
-  "title": "Even better than expected!",
   "body": "Updated opinion after 2 weeks of use."
 }
 ```
 
 **Response 200:** Updated review
-**Response 400:** Review is not in PENDING status
+**Response 400:** Review is not in PENDING status, or body failed content filter
 
 ---
 
@@ -230,7 +220,7 @@ POST /api/reviews/{reviewId}/vote
 
 ```json
 {
-  "userId": "uuid",
+  "authCredentialId": "jwt-sub-value",
   "isHelpful": true
 }
 ```
@@ -245,7 +235,7 @@ POST /api/reviews/{reviewId}/vote
 ### 1.8 Remove vote from a review
 
 ```
-DELETE /api/reviews/{reviewId}/vote?userId={userId}
+DELETE /api/reviews/{reviewId}/vote?authCredentialId={authCredentialId}
 ```
 
 **Response 200:** `{ "statusCode": 200, "message": "Vote removed successfully", "data": null }`
@@ -446,7 +436,7 @@ POST /api/questions
 ```json
 {
   "productId": "uuid",
-  "userId": "uuid",
+  "authCredentialId": "jwt-sub-value",
   "body": "Does this laptop support fingerprint login?"
 }
 ```
@@ -485,7 +475,7 @@ POST /api/questions/{questionId}/vote
 
 ```json
 {
-  "userId": "uuid"
+  "authCredentialId": "jwt-sub-value"
 }
 ```
 
@@ -496,7 +486,7 @@ POST /api/questions/{questionId}/vote
 ### 3.6 Remove helpful vote
 
 ```
-DELETE /api/questions/{questionId}/vote?userId={userId}
+DELETE /api/questions/{questionId}/vote?authCredentialId={authCredentialId}
 ```
 
 ---
@@ -620,9 +610,8 @@ DELETE /api/admin/questions/{questionId}/answer
 | `userFirstName` | String | |
 | `userLastName` | String | |
 | `rating` | Number (1–5) | |
-| `title` | String \| null | |
 | `body` | String \| null | |
-| `isVerifiedPurchase` | Boolean | `true` if submitted with an `orderItemId` |
+| `isVerifiedPurchase` | Boolean | `true` if the user has a checked-out cart containing this product (set automatically by backend) |
 | `status` | String | `PENDING`, `APPROVED`, `REJECTED` |
 | `rejectionReason` | String \| null | Admin-only field; present when rejected |
 | `helpfulCount` | Number | |
@@ -680,9 +669,9 @@ DELETE /api/admin/questions/{questionId}/answer
 
 - **Product page — star rating bar:** Call `GET /api/reviews/product/{productId}/stats`. Display `averageRating` and the five `ratingXCount` fields as a distribution bar.
 - **Product page — reviews list:** Call `GET /api/reviews/product/{productId}` with pagination. Show media thumbnails, verified-purchase badge, helpful/not-helpful buttons, and the admin reply if present.
-- **Submit review form:** `POST /api/reviews`. Pass `userId` from the logged-in session. `orderItemId` is optional — only provide it if your order module can supply the UUID (enables "Verified Purchase" badge).
+- **Submit review form:** `POST /api/reviews`. Pass `authCredentialId` (JWT `sub` claim) from the logged-in session. The "Verified Purchase" badge is set automatically — no extra fields needed.
 - **Edit review:** Only available if `review.status === "PENDING"`. Use `PUT /api/reviews/{reviewId}`.
-- **Helpful voting:** `POST /api/reviews/{reviewId}/vote` with `{ userId, isHelpful: true/false }`. On success update the local count.
+- **Helpful voting:** `POST /api/reviews/{reviewId}/vote` with `{ authCredentialId, isHelpful: true/false }`. On success update the local count.
 - **Q&A section:** Call `GET /api/questions/product/{productId}` ordered by `helpfulCount`. Show the admin answer (if any) below each question. Provide an "Ask a question" CTA that calls `POST /api/questions`.
 
 ### Admin dashboard

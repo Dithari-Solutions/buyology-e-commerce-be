@@ -59,9 +59,6 @@ public class ProductReview {
     @Column(name = "rating", columnDefinition = "SMALLINT", nullable = false)
     private Short rating;
 
-    @Column(name = "title", length = 255)
-    private String title;
-
     @Column(name = "body", columnDefinition = "TEXT")
     private String body;
 
@@ -108,11 +105,10 @@ public class ProductReview {
     public ProductReview() {
     }
 
-    public ProductReview(Product product, Users user, Short rating, String title, String body) {
+    public ProductReview(Product product, Users user, Short rating, String body) {
         this.product = product;
         this.user = user;
         this.rating = rating;
-        this.title = title;
         this.body = body;
     }
 
@@ -171,14 +167,6 @@ public class ProductReview {
 
     public void setRating(Short rating) {
         this.rating = rating;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
     }
 
     public String getBody() {
