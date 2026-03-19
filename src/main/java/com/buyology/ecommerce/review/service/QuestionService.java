@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.review.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
@@ -29,17 +31,20 @@ public class QuestionService {
     private final ProductQuestionVoteRepository voteRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final AuthCredentialRepository authCredentialRepository;
 
     public QuestionService(ProductQuestionRepository questionRepository,
                            ProductQuestionAnswerRepository answerRepository,
                            ProductQuestionVoteRepository voteRepository,
                            ProductRepository productRepository,
-                           UserRepository userRepository) {
+                           UserRepository userRepository,
+                           AuthCredentialRepository authCredentialRepository) {
         this.questionRepository = questionRepository;
         this.answerRepository = answerRepository;
         this.voteRepository = voteRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.authCredentialRepository = authCredentialRepository;
     }
 
     // ── Public: List approved questions for a product ─────────────────────────
@@ -76,7 +81,12 @@ public class QuestionService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
         }
 
-        Users user = userRepository.findById(request.getUserId()).orElse(null);
+        AuthCredentials authCredentials = authCredentialRepository.findById(request.getAuthCredentialId()).orElse(null);
+        if (authCredentials == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        }
+
+        Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
         if (user == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
@@ -108,16 +118,21 @@ public class QuestionService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Question not found");
         }
 
-        Users user = userRepository.findById(request.getUserId()).orElse(null);
+        AuthCredentials voteAuthCred = authCredentialRepository.findById(request.getAuthCredentialId()).orElse(null);
+        if (voteAuthCred == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        }
+
+        Users user = userRepository.findById(voteAuthCred.getUserId()).orElse(null);
         if (user == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
 
-        if (voteRepository.existsByIdQuestionIdAndIdUserId(questionId, request.getUserId())) {
+        if (voteRepository.existsByIdQuestionIdAndIdUserId(questionId, user.getId())) {
             return ApiResponse.failure(HttpStatus.CONFLICT, "You have already voted on this question");
         }
 
-        ProductQuestionVoteId voteId = new ProductQuestionVoteId(questionId, request.getUserId());
+        ProductQuestionVoteId voteId = new ProductQuestionVoteId(questionId, user.getId());
         ProductQuestionVote vote = new ProductQuestionVote(voteId, question, user);
         voteRepository.save(vote);
 
@@ -129,9 +144,13 @@ public class QuestionService {
     // ── Remove helpful vote ───────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<Void>> removeVoteOnQuestion(UUID questionId, UUID userId) {
+    public ResponseEntity<ApiResponse<Void>> removeVoteOnQuestion(UUID questionId, UUID authCredentialId) {
+        AuthCredentials authCredentials = authCredentialRepository.findById(authCredentialId).orElse(null);
+        if (authCredentials == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
+        }
         ProductQuestionVote vote = voteRepository
-                .findByIdQuestionIdAndIdUserId(questionId, userId).orElse(null);
+                .findByIdQuestionIdAndIdUserId(questionId, authCredentials.getUserId()).orElse(null);
         if (vote == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
         }

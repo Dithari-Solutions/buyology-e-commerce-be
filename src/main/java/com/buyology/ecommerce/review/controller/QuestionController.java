@@ -67,7 +67,7 @@ public class QuestionController {
     @DeleteMapping("/{questionId}/vote")
     public ResponseEntity<ApiResponse<Void>> removeVoteOnQuestion(
             @PathVariable UUID questionId,
-            @RequestParam UUID userId) {
-        return questionService.removeVoteOnQuestion(questionId, userId);
+            @RequestParam UUID authCredentialId) {
+        return questionService.removeVoteOnQuestion(questionId, authCredentialId);
     }
 }

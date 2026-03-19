@@ -105,8 +105,8 @@ public class ReviewController {
     @DeleteMapping("/{reviewId}/vote")
     public ResponseEntity<ApiResponse<Void>> removeVoteOnReview(
             @PathVariable UUID reviewId,
-            @RequestParam UUID userId) {
-        return reviewService.removeVoteOnReview(reviewId, userId);
+            @RequestParam UUID authCredentialId) {
+        return reviewService.removeVoteOnReview(reviewId, authCredentialId);
     }
 
     private static class CreateReviewForm {

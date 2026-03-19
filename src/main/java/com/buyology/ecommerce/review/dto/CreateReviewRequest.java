@@ -12,9 +12,9 @@ public class CreateReviewRequest {
     @Schema(description = "ID of the product being reviewed", example = "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
     private UUID productId;
 
-    @NotNull(message = "User ID is required")
-    @Schema(description = "ID of the user submitting the review", example = "b2c3d4e5-f6a7-8901-bcde-f12345678901")
-    private UUID userId;
+    @NotNull(message = "Auth credential ID is required")
+    @Schema(description = "JWT sub claim value (AuthCredentials ID) of the logged-in user", example = "b2c3d4e5-f6a7-8901-bcde-f12345678901")
+    private UUID authCredentialId;
 
     @NotNull(message = "Rating is required")
     @Min(value = 1, message = "Rating must be at least 1")
@@ -36,8 +36,8 @@ public class CreateReviewRequest {
     public UUID getProductId() { return productId; }
     public void setProductId(UUID productId) { this.productId = productId; }
 
-    public UUID getUserId() { return userId; }
-    public void setUserId(UUID userId) { this.userId = userId; }
+    public UUID getAuthCredentialId() { return authCredentialId; }
+    public void setAuthCredentialId(UUID authCredentialId) { this.authCredentialId = authCredentialId; }
 
     public Short getRating() { return rating; }
     public void setRating(Short rating) { this.rating = rating; }

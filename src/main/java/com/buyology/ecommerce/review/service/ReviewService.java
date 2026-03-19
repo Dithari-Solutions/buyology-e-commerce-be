@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.review.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
@@ -42,6 +44,7 @@ public class ReviewService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final CartItemRepository cartItemRepository;
+    private final AuthCredentialRepository authCredentialRepository;
 
     public ReviewService(ProductReviewRepository reviewRepository,
                          ProductReviewStatsRepository statsRepository,
@@ -50,7 +53,8 @@ public class ReviewService {
                          ProductReviewVoteRepository voteRepository,
                          ProductRepository productRepository,
                          UserRepository userRepository,
-                         CartItemRepository cartItemRepository) {
+                         CartItemRepository cartItemRepository,
+                         AuthCredentialRepository authCredentialRepository) {
         this.reviewRepository = reviewRepository;
         this.statsRepository = statsRepository;
         this.mediaRepository = mediaRepository;
@@ -59,6 +63,7 @@ public class ReviewService {
         this.productRepository = productRepository;
         this.userRepository = userRepository;
         this.cartItemRepository = cartItemRepository;
+        this.authCredentialRepository = authCredentialRepository;
     }
 
     // ── Public: List approved reviews for a product ──────────────────────────
@@ -108,13 +113,18 @@ public class ReviewService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
         }
 
-        Users user = userRepository.findById(request.getUserId()).orElse(null);
+        AuthCredentials authCredentials = authCredentialRepository.findById(request.getAuthCredentialId()).orElse(null);
+        if (authCredentials == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        }
+
+        Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
         if (user == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
 
         if (reviewRepository.existsByProductIdAndUserIdAndDeletedAtIsNull(
-                request.getProductId(), request.getUserId())) {
+                request.getProductId(), user.getId())) {
             return ApiResponse.failure(HttpStatus.CONFLICT, "User has already reviewed this product");
         }
 
@@ -134,7 +144,7 @@ public class ReviewService {
         }
 
         boolean isVerifiedPurchase = cartItemRepository
-                .existsCheckedOutPurchaseByUserAndProduct(request.getUserId(), request.getProductId());
+                .existsCheckedOutPurchaseByUserAndProduct(user.getId(), request.getProductId());
 
         ProductReview review = new ProductReview(product, user, request.getRating(),
                 request.getTitle(), request.getBody());
@@ -205,13 +215,18 @@ public class ReviewService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Review not found");
         }
 
-        Users user = userRepository.findById(request.getUserId()).orElse(null);
+        AuthCredentials voteAuthCred = authCredentialRepository.findById(request.getAuthCredentialId()).orElse(null);
+        if (voteAuthCred == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        }
+
+        Users user = userRepository.findById(voteAuthCred.getUserId()).orElse(null);
         if (user == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
 
         ProductReviewVote existing = voteRepository
-                .findByIdReviewIdAndIdUserId(reviewId, request.getUserId()).orElse(null);
+                .findByIdReviewIdAndIdUserId(reviewId, user.getId()).orElse(null);
 
         if (existing != null) {
             boolean changed = !existing.getIsHelpful().equals(request.getIsHelpful());
@@ -229,7 +244,7 @@ public class ReviewService {
             existing.setIsHelpful(request.getIsHelpful());
             voteRepository.save(existing);
         } else {
-            ProductReviewVoteId voteId = new ProductReviewVoteId(reviewId, request.getUserId());
+            ProductReviewVoteId voteId = new ProductReviewVoteId(reviewId, user.getId());
             ProductReviewVote vote = new ProductReviewVote(voteId, review, user, request.getIsHelpful());
             voteRepository.save(vote);
 
@@ -247,9 +262,13 @@ public class ReviewService {
     // ── Remove vote ───────────────────────────────────────────────────────────
 
     @Transactional
-    public ResponseEntity<ApiResponse<Void>> removeVoteOnReview(UUID reviewId, UUID userId) {
+    public ResponseEntity<ApiResponse<Void>> removeVoteOnReview(UUID reviewId, UUID authCredentialId) {
+        AuthCredentials authCredentials = authCredentialRepository.findById(authCredentialId).orElse(null);
+        if (authCredentials == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
+        }
         ProductReviewVote vote = voteRepository
-                .findByIdReviewIdAndIdUserId(reviewId, userId).orElse(null);
+                .findByIdReviewIdAndIdUserId(reviewId, authCredentials.getUserId()).orElse(null);
         if (vote == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
         }
