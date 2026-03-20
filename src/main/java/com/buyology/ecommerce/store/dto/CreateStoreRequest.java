@@ -24,8 +24,6 @@ public class CreateStoreRequest {
 
     private StoreStatus status = StoreStatus.PENDING_APPROVAL;
 
-    private String bannerUrl;
-
     @Size(max = 255)
     private String contactEmail;
 
@@ -46,9 +44,6 @@ public class CreateStoreRequest {
 
     public StoreStatus getStatus() { return status; }
     public void setStatus(StoreStatus status) { this.status = status; }
-
-    public String getBannerUrl() { return bannerUrl; }
-    public void setBannerUrl(String bannerUrl) { this.bannerUrl = bannerUrl; }
 
     public String getContactEmail() { return contactEmail; }
     public void setContactEmail(String contactEmail) { this.contactEmail = contactEmail; }

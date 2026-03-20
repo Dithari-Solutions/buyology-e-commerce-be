@@ -133,14 +133,20 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
 ### Create Store
 `POST /api/stores`
 
-**Request Body:**
+**Content-Type:** `multipart/form-data`
+
+| Part | Type | Required | Notes |
+|---|---|---|---|
+| `request` | JSON string | Yes | Store fields (see below) |
+| `banner` | file | No | Image file for the store banner |
+
+**`request` part (JSON):**
 ```json
 {
   "countryId": "uuid",
   "name": "Buyology Baku",
   "slug": "buyology-baku",
   "status": "PENDING_APPROVAL",
-  "bannerUrl": "https://cdn.example.com/banner.png",
   "contactEmail": "baku@buyology.com",
   "contactPhone": "+994501234567",
   "translations": [
@@ -164,7 +170,6 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
 | `name` | string | Yes | Max 255 chars |
 | `slug` | string | Yes | Max 255 chars, must be unique |
 | `status` | StoreStatus | No | Defaults to `PENDING_APPROVAL` |
-| `bannerUrl` | string | No | Full URL |
 | `contactEmail` | string | No | Max 255 chars |
 | `contactPhone` | string | No | Max 50 chars |
 | `translations` | array | No | See Translation shape below |
@@ -185,7 +190,7 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
   "name": "Buyology Baku",
   "slug": "buyology-baku",
   "status": "PENDING_APPROVAL",
-  "bannerUrl": "https://cdn.example.com/banner.png",
+  "bannerUrl": "/store/{storeId}/banner.png",
   "contactEmail": "baku@buyology.com",
   "contactPhone": "+994501234567",
   "translations": [
@@ -229,8 +234,14 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
 ### Update Store
 `PATCH /api/stores/{id}`
 
-All fields optional. Only send what needs to change. Translations are managed via separate endpoints (see below).
+**Content-Type:** `multipart/form-data`
 
+| Part | Type | Required | Notes |
+|---|---|---|---|
+| `request` | JSON string | Yes | Fields to update (all optional) |
+| `banner` | file | No | New banner image — replaces the existing one |
+
+**`request` part (JSON) — all fields optional:**
 ```json
 {
   "status": "ACTIVE",

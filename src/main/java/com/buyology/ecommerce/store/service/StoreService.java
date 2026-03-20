@@ -16,7 +16,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -37,7 +42,7 @@ public class StoreService {
     }
 
     @Transactional
-    public ResponseEntity<ApiResponse<StoreResponse>> createStore(CreateStoreRequest request) {
+    public ResponseEntity<ApiResponse<StoreResponse>> createStore(CreateStoreRequest request, MultipartFile banner) {
         Country country = countryRepository.findById(request.getCountryId()).orElse(null);
         if (country == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND,
@@ -51,11 +56,15 @@ public class StoreService {
 
         Store store = new Store(country, request.getName(), request.getSlug());
         if (request.getStatus() != null) store.setStatus(request.getStatus());
-        store.setBannerUrl(request.getBannerUrl());
         store.setContactEmail(request.getContactEmail());
         store.setContactPhone(request.getContactPhone());
 
         Store saved = storeRepository.save(store);
+
+        if (banner != null && !banner.isEmpty()) {
+            saved.setBannerUrl(saveBannerFile(saved.getId(), banner));
+            saved = storeRepository.save(saved);
+        }
 
         List<StoreTranslation> translations = List.of();
         if (request.getTranslations() != null && !request.getTranslations().isEmpty()) {
@@ -91,7 +100,7 @@ public class StoreService {
     }
 
     @Transactional
-    public ResponseEntity<ApiResponse<StoreResponse>> updateStore(UUID id, UpdateStoreRequest request) {
+    public ResponseEntity<ApiResponse<StoreResponse>> updateStore(UUID id, UpdateStoreRequest request, MultipartFile banner) {
         Store store = storeRepository.findByIdAndDeletedAtIsNull(id).orElse(null);
         if (store == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Store not found with id: " + id);
@@ -116,7 +125,7 @@ public class StoreService {
 
         if (request.getName() != null) store.setName(request.getName());
         if (request.getStatus() != null) store.setStatus(request.getStatus());
-        if (request.getBannerUrl() != null) store.setBannerUrl(request.getBannerUrl());
+        if (banner != null && !banner.isEmpty()) store.setBannerUrl(saveBannerFile(id, banner));
         if (request.getContactEmail() != null) store.setContactEmail(request.getContactEmail());
         if (request.getContactPhone() != null) store.setContactPhone(request.getContactPhone());
 
@@ -189,6 +198,24 @@ public class StoreService {
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
+
+    private static final String STORE_UPLOAD_PATH = "/opt/uploads/store";
+
+    private String saveBannerFile(UUID storeId, MultipartFile file) {
+        Path dir = Paths.get(STORE_UPLOAD_PATH, storeId.toString());
+        try {
+            Files.createDirectories(dir);
+            String original = file.getOriginalFilename();
+            String ext = (original != null && original.contains("."))
+                    ? original.substring(original.lastIndexOf("."))
+                    : "";
+            Path dest = dir.resolve("banner" + ext);
+            Files.write(dest, file.getBytes());
+            return "/store/" + storeId + "/banner" + ext;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to save banner file", e);
+        }
+    }
 
     private List<StoreTranslation> saveTranslations(Store store, List<StoreTranslationRequest> requests) {
         List<StoreTranslation> entities = requests.stream()

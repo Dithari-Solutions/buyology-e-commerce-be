@@ -7,9 +7,11 @@ import com.buyology.ecommerce.store.dto.StoreTranslationRequest;
 import com.buyology.ecommerce.store.dto.StoreTranslationResponse;
 import com.buyology.ecommerce.store.dto.UpdateStoreRequest;
 import com.buyology.ecommerce.store.service.StoreService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,7 +20,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -29,17 +33,21 @@ import java.util.UUID;
 public class StoreController {
 
     private final StoreService storeService;
+    private final ObjectMapper objectMapper;
 
-    public StoreController(StoreService storeService) {
+    public StoreController(StoreService storeService, ObjectMapper objectMapper) {
         this.storeService = storeService;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "Create a store",
-            description = "Creates a new store. Optionally include translations in multiple languages.")
-    @PostMapping
+            description = "Multipart form: 'request' part is JSON, 'banner' part is an optional image file.")
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> createStore(
-            @RequestBody @Valid CreateStoreRequest request) {
-        return storeService.createStore(request);
+            @RequestPart("request") String requestJson,
+            @RequestPart(value = "banner", required = false) MultipartFile banner) throws Exception {
+        CreateStoreRequest request = objectMapper.readValue(requestJson, CreateStoreRequest.class);
+        return storeService.createStore(request, banner);
     }
 
     @Operation(summary = "Get all stores")
@@ -61,12 +69,14 @@ public class StoreController {
     }
 
     @Operation(summary = "Update a store",
-            description = "Partially updates store fields. All fields are optional.")
-    @PatchMapping("/{id}")
+            description = "Multipart form: 'request' part is JSON (all fields optional), 'banner' part is an optional new image file.")
+    @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> updateStore(
             @PathVariable UUID id,
-            @RequestBody @Valid UpdateStoreRequest request) {
-        return storeService.updateStore(id, request);
+            @RequestPart("request") String requestJson,
+            @RequestPart(value = "banner", required = false) MultipartFile banner) throws Exception {
+        UpdateStoreRequest request = objectMapper.readValue(requestJson, UpdateStoreRequest.class);
+        return storeService.updateStore(id, request, banner);
     }
 
     @Operation(summary = "Soft-delete a store")
