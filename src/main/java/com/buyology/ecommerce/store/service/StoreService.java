@@ -51,7 +51,6 @@ public class StoreService {
 
         Store store = new Store(country, request.getName(), request.getSlug());
         if (request.getStatus() != null) store.setStatus(request.getStatus());
-        store.setLogoUrl(request.getLogoUrl());
         store.setBannerUrl(request.getBannerUrl());
         store.setContactEmail(request.getContactEmail());
         store.setContactPhone(request.getContactPhone());
@@ -117,7 +116,6 @@ public class StoreService {
 
         if (request.getName() != null) store.setName(request.getName());
         if (request.getStatus() != null) store.setStatus(request.getStatus());
-        if (request.getLogoUrl() != null) store.setLogoUrl(request.getLogoUrl());
         if (request.getBannerUrl() != null) store.setBannerUrl(request.getBannerUrl());
         if (request.getContactEmail() != null) store.setContactEmail(request.getContactEmail());
         if (request.getContactPhone() != null) store.setContactPhone(request.getContactPhone());
@@ -208,7 +206,6 @@ public class StoreService {
         response.setName(store.getName());
         response.setSlug(store.getSlug());
         response.setStatus(store.getStatus());
-        response.setLogoUrl(store.getLogoUrl());
         response.setBannerUrl(store.getBannerUrl());
         response.setContactEmail(store.getContactEmail());
         response.setContactPhone(store.getContactPhone());

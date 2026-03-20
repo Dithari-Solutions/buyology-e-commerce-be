@@ -35,9 +35,6 @@ public class Store {
     @Column(name = "status", nullable = false, length = 20)
     private StoreStatus status = StoreStatus.ACTIVE;
 
-    @Column(name = "logo_url", columnDefinition = "TEXT")
-    private String logoUrl;
-
     @Column(name = "banner_url", columnDefinition = "TEXT")
     private String bannerUrl;
 
@@ -122,14 +119,6 @@ public class Store {
 
     public void setStatus(StoreStatus status) {
         this.status = status;
-    }
-
-    public String getLogoUrl() {
-        return logoUrl;
-    }
-
-    public void setLogoUrl(String logoUrl) {
-        this.logoUrl = logoUrl;
     }
 
     public String getBannerUrl() {

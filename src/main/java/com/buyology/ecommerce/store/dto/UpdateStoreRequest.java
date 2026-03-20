@@ -17,7 +17,6 @@ public class UpdateStoreRequest {
 
     private StoreStatus status;
 
-    private String logoUrl;
     private String bannerUrl;
 
     @Size(max = 255)
@@ -37,9 +36,6 @@ public class UpdateStoreRequest {
 
     public StoreStatus getStatus() { return status; }
     public void setStatus(StoreStatus status) { this.status = status; }
-
-    public String getLogoUrl() { return logoUrl; }
-    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
 
     public String getBannerUrl() { return bannerUrl; }
     public void setBannerUrl(String bannerUrl) { this.bannerUrl = bannerUrl; }

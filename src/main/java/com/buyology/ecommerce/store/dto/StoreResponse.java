@@ -14,7 +14,6 @@ public class StoreResponse {
     private String name;
     private String slug;
     private StoreStatus status;
-    private String logoUrl;
     private String bannerUrl;
     private String contactEmail;
     private String contactPhone;
@@ -39,9 +38,6 @@ public class StoreResponse {
 
     public StoreStatus getStatus() { return status; }
     public void setStatus(StoreStatus status) { this.status = status; }
-
-    public String getLogoUrl() { return logoUrl; }
-    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
 
     public String getBannerUrl() { return bannerUrl; }
     public void setBannerUrl(String bannerUrl) { this.bannerUrl = bannerUrl; }
