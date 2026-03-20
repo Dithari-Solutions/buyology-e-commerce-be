@@ -85,15 +85,10 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        boolean customerExists = authCredentialRepository
-                .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
-                .stream()
-                .anyMatch(cred -> {
-                    Users user = userRepository.findById(cred.getUserId()).orElse(null);
-                    return user != null && user.getUserType() == Users.UserType.CUSTOMER;
-                });
-        if (customerExists) {
-            return ApiResponse.failure(HttpStatus.CONFLICT, "A customer account with this email already exists");
+        boolean emailTaken = !authCredentialRepository
+                .findAllByEmailAndProvider(request.getEmail(), "LOCAL").isEmpty();
+        if (emailTaken) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
         }
 
         // Rate-limit: scoped to SIGNUP type only so a pending password-reset OTP isn't affected
@@ -227,15 +222,10 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
         }
 
-        boolean adminExists = authCredentialRepository
-                .findAllByEmailAndProvider(request.getEmail(), "LOCAL")
-                .stream()
-                .anyMatch(cred -> {
-                    Users user = userRepository.findById(cred.getUserId()).orElse(null);
-                    return user != null && user.getUserType() == Users.UserType.ADMIN;
-                });
-        if (adminExists) {
-            return ApiResponse.failure(HttpStatus.CONFLICT, "An admin account with this email already exists");
+        boolean emailTaken = !authCredentialRepository
+                .findAllByEmailAndProvider(request.getEmail(), "LOCAL").isEmpty();
+        if (emailTaken) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
         }
 
         Optional<EmailOtp> existingOtp = emailOtpRepository
