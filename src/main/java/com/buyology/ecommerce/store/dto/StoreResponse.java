@@ -18,6 +18,7 @@ public class StoreResponse {
     private String contactEmail;
     private String contactPhone;
     private List<StoreTranslationResponse> translations;
+    private List<StoreLocationResponse> locations;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -50,6 +51,9 @@ public class StoreResponse {
 
     public List<StoreTranslationResponse> getTranslations() { return translations; }
     public void setTranslations(List<StoreTranslationResponse> translations) { this.translations = translations; }
+
+    public List<StoreLocationResponse> getLocations() { return locations; }
+    public void setLocations(List<StoreLocationResponse> locations) { this.locations = locations; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

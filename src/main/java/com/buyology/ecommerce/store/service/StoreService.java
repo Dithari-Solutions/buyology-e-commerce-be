@@ -3,13 +3,20 @@ package com.buyology.ecommerce.store.service;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.domain.Store;
+import com.buyology.ecommerce.store.domain.StoreLocation;
+import com.buyology.ecommerce.store.domain.StoreOperatingHours;
 import com.buyology.ecommerce.store.domain.StoreTranslation;
+import com.buyology.ecommerce.store.dto.CreateOperatingHoursRequest;
+import com.buyology.ecommerce.store.dto.CreateStoreLocationRequest;
 import com.buyology.ecommerce.store.dto.CreateStoreRequest;
+import com.buyology.ecommerce.store.dto.StoreLocationResponse;
 import com.buyology.ecommerce.store.dto.StoreResponse;
 import com.buyology.ecommerce.store.dto.StoreTranslationRequest;
 import com.buyology.ecommerce.store.dto.StoreTranslationResponse;
 import com.buyology.ecommerce.store.dto.UpdateStoreRequest;
 import com.buyology.ecommerce.store.repository.CountryRepository;
+import com.buyology.ecommerce.store.repository.StoreLocationRepository;
+import com.buyology.ecommerce.store.repository.StoreOperatingHoursRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.store.repository.StoreTranslationRepository;
 import org.springframework.http.HttpStatus;
@@ -32,13 +39,19 @@ public class StoreService {
     private final StoreRepository storeRepository;
     private final CountryRepository countryRepository;
     private final StoreTranslationRepository translationRepository;
+    private final StoreLocationRepository locationRepository;
+    private final StoreOperatingHoursRepository hoursRepository;
 
     public StoreService(StoreRepository storeRepository,
                         CountryRepository countryRepository,
-                        StoreTranslationRepository translationRepository) {
+                        StoreTranslationRepository translationRepository,
+                        StoreLocationRepository locationRepository,
+                        StoreOperatingHoursRepository hoursRepository) {
         this.storeRepository = storeRepository;
         this.countryRepository = countryRepository;
         this.translationRepository = translationRepository;
+        this.locationRepository = locationRepository;
+        this.hoursRepository = hoursRepository;
     }
 
     @Transactional
@@ -71,12 +84,16 @@ public class StoreService {
             translations = saveTranslations(saved, request.getTranslations());
         }
 
-        return ApiResponse.created(buildResponse(saved, translations), "Store created successfully");
+        StoreLocation location = createLocationWithHours(saved, request.getLocation());
+
+        return ApiResponse.created(buildResponse(saved, translations, List.of(location)), "Store created successfully");
     }
 
     public ResponseEntity<ApiResponse<List<StoreResponse>>> getAllStores() {
         List<StoreResponse> stores = storeRepository.findAllByDeletedAtIsNull().stream()
-                .map(s -> buildResponse(s, translationRepository.findAllByStoreId(s.getId())))
+                .map(s -> buildResponse(s,
+                        translationRepository.findAllByStoreId(s.getId()),
+                        locationRepository.findAllByStoreId(s.getId())))
                 .toList();
         return ApiResponse.success(stores, "Stores fetched successfully");
     }
@@ -86,8 +103,9 @@ public class StoreService {
         if (store == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Store not found with id: " + id);
         }
-        List<StoreTranslation> translations = translationRepository.findAllByStoreId(id);
-        return ApiResponse.success(buildResponse(store, translations), "Store fetched successfully");
+        return ApiResponse.success(buildResponse(store,
+                translationRepository.findAllByStoreId(id),
+                locationRepository.findAllByStoreId(id)), "Store fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<StoreResponse>> getStoreBySlug(String slug) {
@@ -95,8 +113,9 @@ public class StoreService {
         if (store == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Store not found with slug: " + slug);
         }
-        List<StoreTranslation> translations = translationRepository.findAllByStoreId(store.getId());
-        return ApiResponse.success(buildResponse(store, translations), "Store fetched successfully");
+        return ApiResponse.success(buildResponse(store,
+                translationRepository.findAllByStoreId(store.getId()),
+                locationRepository.findAllByStoreId(store.getId())), "Store fetched successfully");
     }
 
     @Transactional
@@ -130,8 +149,9 @@ public class StoreService {
         if (request.getContactPhone() != null) store.setContactPhone(request.getContactPhone());
 
         Store saved = storeRepository.save(store);
-        List<StoreTranslation> translations = translationRepository.findAllByStoreId(id);
-        return ApiResponse.success(buildResponse(saved, translations), "Store updated successfully");
+        return ApiResponse.success(buildResponse(saved,
+                translationRepository.findAllByStoreId(id),
+                locationRepository.findAllByStoreId(id)), "Store updated successfully");
     }
 
     @Transactional
@@ -217,6 +237,32 @@ public class StoreService {
         }
     }
 
+    private StoreLocation createLocationWithHours(Store store, CreateStoreLocationRequest req) {
+        StoreLocation location = new StoreLocation(
+                store,
+                req.getBranchName(),
+                req.getAddress(),
+                req.getCity(),
+                req.getCountry(),
+                req.getLatitude(),
+                req.getLongitude());
+        location.setState(req.getState());
+        location.setPostalCode(req.getPostalCode());
+        location.setIsPrimary(true);
+        StoreLocation saved = locationRepository.save(location);
+
+        for (CreateOperatingHoursRequest h : req.getOperatingHours()) {
+            boolean isClosed = Boolean.TRUE.equals(h.getIsClosed());
+            hoursRepository.save(new StoreOperatingHours(
+                    saved,
+                    h.getDayOfWeek(),
+                    isClosed ? null : h.getOpenTime(),
+                    isClosed ? null : h.getCloseTime(),
+                    isClosed));
+        }
+        return saved;
+    }
+
     private List<StoreTranslation> saveTranslations(Store store, List<StoreTranslationRequest> requests) {
         List<StoreTranslation> entities = requests.stream()
                 .map(r -> new StoreTranslation(store, r.getLanguage().toLowerCase(),
@@ -225,7 +271,7 @@ public class StoreService {
         return translationRepository.saveAll(entities);
     }
 
-    private StoreResponse buildResponse(Store store, List<StoreTranslation> translations) {
+    private StoreResponse buildResponse(Store store, List<StoreTranslation> translations, List<StoreLocation> locations) {
         StoreResponse response = new StoreResponse();
         response.setId(store.getId());
         response.setCountryId(store.getCountry().getId());
@@ -239,6 +285,7 @@ public class StoreService {
         response.setCreatedAt(store.getCreatedAt());
         response.setUpdatedAt(store.getUpdatedAt());
         response.setTranslations(translations.stream().map(this::toTranslationResponse).toList());
+        response.setLocations(locations.stream().map(this::toLocationResponse).toList());
         return response;
     }
 
@@ -246,5 +293,24 @@ public class StoreService {
         return new StoreTranslationResponse(
                 t.getId(), t.getLanguage(), t.getName(),
                 t.getDescription(), t.getCreatedAt(), t.getUpdatedAt());
+    }
+
+    private StoreLocationResponse toLocationResponse(StoreLocation l) {
+        StoreLocationResponse r = new StoreLocationResponse();
+        r.setId(l.getId());
+        r.setStoreId(l.getStore().getId());
+        r.setBranchName(l.getBranchName());
+        r.setAddress(l.getAddress());
+        r.setCity(l.getCity());
+        r.setState(l.getState());
+        r.setCountry(l.getCountry());
+        r.setPostalCode(l.getPostalCode());
+        r.setLatitude(l.getLatitude());
+        r.setLongitude(l.getLongitude());
+        r.setIsPrimary(l.getIsPrimary());
+        r.setIsActive(l.getIsActive());
+        r.setCreatedAt(l.getCreatedAt());
+        r.setUpdatedAt(l.getUpdatedAt());
+        return r;
     }
 }

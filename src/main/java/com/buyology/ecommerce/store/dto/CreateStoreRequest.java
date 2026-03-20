@@ -30,6 +30,10 @@ public class CreateStoreRequest {
     @Size(max = 50)
     private String contactPhone;
 
+    @NotNull(message = "Location is required")
+    @Valid
+    private CreateStoreLocationRequest location;
+
     @Valid
     private List<StoreTranslationRequest> translations;
 
@@ -50,6 +54,9 @@ public class CreateStoreRequest {
 
     public String getContactPhone() { return contactPhone; }
     public void setContactPhone(String contactPhone) { this.contactPhone = contactPhone; }
+
+    public CreateStoreLocationRequest getLocation() { return location; }
+    public void setLocation(CreateStoreLocationRequest location) { this.location = location; }
 
     public List<StoreTranslationRequest> getTranslations() { return translations; }
     public void setTranslations(List<StoreTranslationRequest> translations) { this.translations = translations; }

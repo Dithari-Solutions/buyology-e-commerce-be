@@ -149,6 +149,25 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
   "status": "PENDING_APPROVAL",
   "contactEmail": "baku@buyology.com",
   "contactPhone": "+994501234567",
+  "location": {
+    "branchName": "Baku Main Branch",
+    "address": "28 May Street, Building 5",
+    "city": "Baku",
+    "state": "Baku",
+    "country": "AZ",
+    "postalCode": "AZ1000",
+    "latitude": 40.4093,
+    "longitude": 49.8671,
+    "operatingHours": [
+      { "dayOfWeek": "MONDAY",    "openTime": "09:00:00", "closeTime": "18:00:00", "isClosed": false },
+      { "dayOfWeek": "TUESDAY",   "openTime": "09:00:00", "closeTime": "18:00:00", "isClosed": false },
+      { "dayOfWeek": "WEDNESDAY", "openTime": "09:00:00", "closeTime": "18:00:00", "isClosed": false },
+      { "dayOfWeek": "THURSDAY",  "openTime": "09:00:00", "closeTime": "18:00:00", "isClosed": false },
+      { "dayOfWeek": "FRIDAY",    "openTime": "09:00:00", "closeTime": "18:00:00", "isClosed": false },
+      { "dayOfWeek": "SATURDAY",  "openTime": "10:00:00", "closeTime": "16:00:00", "isClosed": false },
+      { "dayOfWeek": "SUNDAY",    "isClosed": true }
+    ]
+  },
   "translations": [
     {
       "language": "az",
@@ -164,6 +183,7 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
 }
 ```
 
+**Store fields:**
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `countryId` | UUID | Yes | Must match an existing country |
@@ -172,7 +192,29 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
 | `status` | StoreStatus | No | Defaults to `PENDING_APPROVAL` |
 | `contactEmail` | string | No | Max 255 chars |
 | `contactPhone` | string | No | Max 50 chars |
+| `location` | object | Yes | First branch — see below |
 | `translations` | array | No | See Translation shape below |
+
+**`location` object:**
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `branchName` | string | Yes | Max 255 chars |
+| `address` | string | Yes | Full street address |
+| `city` | string | Yes | Max 100 chars |
+| `state` | string | No | Max 100 chars |
+| `country` | string | Yes | ISO 2–3 letter code |
+| `postalCode` | string | No | Max 20 chars |
+| `latitude` | double | Yes | Decimal degrees |
+| `longitude` | double | Yes | Decimal degrees |
+| `operatingHours` | array | Yes | All 7 days required |
+
+**`operatingHours` item:**
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `dayOfWeek` | DayOfWeek | Yes | `MONDAY` – `SUNDAY` |
+| `openTime` | string | No | `HH:mm:ss`. Omit if `isClosed: true` |
+| `closeTime` | string | No | `HH:mm:ss`. Omit if `isClosed: true` |
+| `isClosed` | boolean | No | Defaults to `false` |
 
 **Translation object:**
 | Field | Type | Required | Notes |
@@ -199,6 +241,24 @@ Soft deactivation (sets `isActive` to false). `data` is `null` on success.
       "language": "az",
       "name": "Buyology Bakı",
       "description": "Azərbaycanda onlayn mağaza",
+      "createdAt": "2026-03-21T10:00:00Z",
+      "updatedAt": "2026-03-21T10:00:00Z"
+    }
+  ],
+  "locations": [
+    {
+      "id": "uuid",
+      "storeId": "uuid",
+      "branchName": "Baku Main Branch",
+      "address": "28 May Street, Building 5",
+      "city": "Baku",
+      "state": "Baku",
+      "country": "AZ",
+      "postalCode": "AZ1000",
+      "latitude": 40.4093,
+      "longitude": 49.8671,
+      "isPrimary": true,
+      "isActive": true,
       "createdAt": "2026-03-21T10:00:00Z",
       "updatedAt": "2026-03-21T10:00:00Z"
     }
@@ -584,10 +644,10 @@ Sets `isActive` to `false`. Does not delete the record. `data` is `null` on succ
 ## Typical Admin Dashboard Flow
 
 ```
-1. GET  /api/countries/active          → populate country dropdown
-2. POST /api/stores                    → create store (status: PENDING_APPROVAL)
-3. PATCH /api/stores/{id}              → approve store (status: ACTIVE)
-4. POST /api/stores/{storeId}/locations → add branch
-5. POST /api/stores/locations/{id}/hours (x7) → set weekly hours
-6. POST /api/stores/{storeId}/admins   → assign store manager
+1. GET  /api/countries/active   → populate country dropdown
+2. POST /api/stores             → create store with location + hours in one request
+3. PATCH /api/stores/{id}       → update store fields or banner (e.g. approve: status: ACTIVE)
+4. POST /api/stores/{storeId}/locations          → add more branches later if needed
+5. POST /api/stores/locations/{id}/hours (x7)   → set hours for additional branches
+6. POST /api/stores/{storeId}/admins             → assign store manager
 ```

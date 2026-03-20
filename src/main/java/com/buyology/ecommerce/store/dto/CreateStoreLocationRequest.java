@@ -1,8 +1,12 @@
 package com.buyology.ecommerce.store.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+
+import java.util.List;
 
 public class CreateStoreLocationRequest {
 
@@ -35,6 +39,10 @@ public class CreateStoreLocationRequest {
 
     private Boolean isPrimary = false;
 
+    @NotEmpty(message = "Operating hours are required (provide all 7 days)")
+    @Valid
+    private List<CreateOperatingHoursRequest> operatingHours;
+
     public String getBranchName() { return branchName; }
     public void setBranchName(String branchName) { this.branchName = branchName; }
 
@@ -61,4 +69,7 @@ public class CreateStoreLocationRequest {
 
     public Boolean getIsPrimary() { return isPrimary; }
     public void setIsPrimary(Boolean isPrimary) { this.isPrimary = isPrimary; }
+
+    public List<CreateOperatingHoursRequest> getOperatingHours() { return operatingHours; }
+    public void setOperatingHours(List<CreateOperatingHoursRequest> operatingHours) { this.operatingHours = operatingHours; }
 }
