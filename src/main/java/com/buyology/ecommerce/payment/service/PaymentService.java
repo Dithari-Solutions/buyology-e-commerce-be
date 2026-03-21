@@ -103,7 +103,8 @@ public class PaymentService {
         items.add(item);
 
         int integrationId = Integer.parseInt(config.getIntegrationId());
-        String specialReference = req.getAppOrderId().toString();
+        // Unique per attempt — Paymob rejects duplicate special_reference values
+        String specialReference = req.getAppOrderId() + "-" + UUID.randomUUID().toString().substring(0, 8);
 
         // Single API call — replaces the old authenticate → createOrder → generatePaymentKey chain
         PaymobClient.IntentionResult intention = paymobClient.createIntention(
@@ -112,18 +113,14 @@ public class PaymentService {
                 integrationId, specialReference,
                 billingData, customer, items);
 
-        // Store the intention as the provider order (intentionId = Paymob order reference)
-        PaymentProviderOrder providerOrder = providerOrderRepo
-                .findByAppOrderId(req.getAppOrderId())
-                .orElseGet(() -> {
-                    PaymentProviderOrder po = new PaymentProviderOrder();
-                    po.setAppOrderId(req.getAppOrderId());
-                    po.setProvider(provider);
-                    po.setProviderOrderId(intention.intentionId());
-                    po.setAmountCents(amountCents);
-                    po.setCurrency(req.getCurrency());
-                    return providerOrderRepo.save(po);
-                });
+        // Each intention creates a new provider order row (one per attempt)
+        PaymentProviderOrder providerOrder = new PaymentProviderOrder();
+        providerOrder.setAppOrderId(req.getAppOrderId());
+        providerOrder.setProvider(provider);
+        providerOrder.setProviderOrderId(intention.intentionId());
+        providerOrder.setAmountCents(amountCents);
+        providerOrder.setCurrency(req.getCurrency());
+        providerOrder = providerOrderRepo.save(providerOrder);
 
         // Persist the transaction in PENDING state
         // paymentKeyToken is repurposed to store the clientSecret
