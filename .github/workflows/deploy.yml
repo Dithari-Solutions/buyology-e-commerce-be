@@ -54,6 +54,8 @@ jobs:
       REDIS_HOST: ${{ secrets.REDIS_HOST }}
       REDIS_PORT: ${{ secrets.REDIS_PORT }}
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      PAYMOB_API_KEY: ${{ secrets.PAYMOB_API_KEY }}
+      PAYMOB_HMAC_SECRET: ${{ secrets.PAYMOB_HMAC_SECRET }}
 
     steps:
       - name: Deploy to VPS
@@ -62,7 +64,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME
+          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME,PAYMOB_API_KEY,PAYMOB_HMAC_SECRET
           script: |
             docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
 
@@ -86,4 +88,11 @@ jobs:
               -e "REDIS_HOST=$REDIS_HOST" \
               -e "REDIS_PORT=$REDIS_PORT" \
               -e COOKIE_SECURE=true \
+              -e "PAYMOB_API_KEY=$PAYMOB_API_KEY" \
+              -e "PAYMOB_HMAC_SECRET=$PAYMOB_HMAC_SECRET" \
+              -e "PAYMOB_BASE_URL=https://accept.paymob.com" \
+              -e "PAYMOB_CARD_INTEGRATION_ID=57776" \
+              -e "PAYMOB_CARD_IFRAME_ID=24836" \
+              -e "PAYMOB_TABBY_INTEGRATION_ID=44953" \
+              -e "PAYMOB_TAMARA_INTEGRATION_ID=44437" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
