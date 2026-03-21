@@ -18,9 +18,17 @@ public class PaymentProvider {
     @Column(name = "name", nullable = false, unique = true, length = 50)
     private String name;
 
-    // Encrypted at rest — never log or expose in API responses
-    @Column(name = "api_key", nullable = false, columnDefinition = "TEXT")
+    // Legacy — kept for backward compat but no longer used by the Intention API
+    @Column(name = "api_key", columnDefinition = "TEXT")
     private String apiKey;
+
+    // Intention API — used in Authorization: Token header for all server-side calls
+    @Column(name = "secret_key", columnDefinition = "TEXT")
+    private String secretKey;
+
+    // Intention API — used by frontend to initialise the Paymob checkout UI
+    @Column(name = "public_key", columnDefinition = "TEXT")
+    private String publicKey;
 
     // Encrypted at rest — never log or expose in API responses
     @Column(name = "hmac_secret", nullable = false, columnDefinition = "TEXT")
@@ -61,6 +69,12 @@ public class PaymentProvider {
 
     public String getApiKey() { return apiKey; }
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+
+    public String getSecretKey() { return secretKey; }
+    public void setSecretKey(String secretKey) { this.secretKey = secretKey; }
+
+    public String getPublicKey() { return publicKey; }
+    public void setPublicKey(String publicKey) { this.publicKey = publicKey; }
 
     public String getHmacSecret() { return hmacSecret; }
     public void setHmacSecret(String hmacSecret) { this.hmacSecret = hmacSecret; }

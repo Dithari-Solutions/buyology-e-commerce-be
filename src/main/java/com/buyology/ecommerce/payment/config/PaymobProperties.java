@@ -7,7 +7,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "paymob")
 public class PaymobProperties {
 
-    private String apiKey;
+    private String apiKey;       // legacy — no longer used
+    private String secretKey;    // Intention API: Authorization: Token header
+    private String publicKey;    // Intention API: frontend checkout URL
     private String hmacSecret;
     private String baseUrl;
     private Card card = new Card();
@@ -34,6 +36,12 @@ public class PaymobProperties {
 
     public String getApiKey() { return apiKey; }
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+
+    public String getSecretKey() { return secretKey; }
+    public void setSecretKey(String secretKey) { this.secretKey = secretKey; }
+
+    public String getPublicKey() { return publicKey; }
+    public void setPublicKey(String publicKey) { this.publicKey = publicKey; }
 
     public String getHmacSecret() { return hmacSecret; }
     public void setHmacSecret(String hmacSecret) { this.hmacSecret = hmacSecret; }

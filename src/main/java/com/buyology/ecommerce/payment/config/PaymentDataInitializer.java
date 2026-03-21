@@ -58,6 +58,8 @@ public class PaymentDataInitializer implements ApplicationRunner {
 
         provider.setBaseUrl(props.getBaseUrl());
         provider.setApiKey(apiKey);
+        provider.setSecretKey(props.getSecretKey());
+        provider.setPublicKey(props.getPublicKey());
         provider.setHmacSecret(props.getHmacSecret());
         providerRepo.save(provider);
 

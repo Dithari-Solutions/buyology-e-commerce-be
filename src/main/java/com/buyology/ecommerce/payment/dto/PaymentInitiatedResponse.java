@@ -12,14 +12,11 @@ public class PaymentInitiatedResponse {
     private BigDecimal amount;
     private String currency;
 
-    // Card payments: render this token inside the Paymob iframe
-    private String paymentKeyToken;
+    // Single-use token — passed to frontend to open Unified Checkout
+    private String clientSecret;
 
-    // Tabby / Tamara: redirect the user to this URL
-    private String redirectUrl;
-
-    // Card payments only: Paymob iframe ID used to embed the payment form
-    private String iframeId;
+    // Full Unified Checkout URL — open this in a WebView or redirect
+    private String checkoutUrl;
 
     public UUID getTransactionId() { return transactionId; }
     public void setTransactionId(UUID transactionId) { this.transactionId = transactionId; }
@@ -33,12 +30,9 @@ public class PaymentInitiatedResponse {
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
 
-    public String getPaymentKeyToken() { return paymentKeyToken; }
-    public void setPaymentKeyToken(String paymentKeyToken) { this.paymentKeyToken = paymentKeyToken; }
+    public String getClientSecret() { return clientSecret; }
+    public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
 
-    public String getRedirectUrl() { return redirectUrl; }
-    public void setRedirectUrl(String redirectUrl) { this.redirectUrl = redirectUrl; }
-
-    public String getIframeId() { return iframeId; }
-    public void setIframeId(String iframeId) { this.iframeId = iframeId; }
+    public String getCheckoutUrl() { return checkoutUrl; }
+    public void setCheckoutUrl(String checkoutUrl) { this.checkoutUrl = checkoutUrl; }
 }

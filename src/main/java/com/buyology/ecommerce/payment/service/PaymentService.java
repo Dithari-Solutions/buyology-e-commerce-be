@@ -10,6 +10,7 @@ import com.buyology.ecommerce.user.service.UserProfileService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +19,9 @@ import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.UUID;
 
 @Service
 public class PaymentService {
@@ -55,7 +58,7 @@ public class PaymentService {
     }
 
     // =========================================================================
-    // Initiate payment — runs the full 3-step Paymob flow
+    // Initiate payment — Paymob Intention API (v2, single-call flow)
     // =========================================================================
 
     @Transactional
@@ -75,36 +78,55 @@ public class PaymentService {
                 .multiply(BigDecimal.valueOf(100))
                 .longValue();
 
-        // Step 1: Authenticate
-        String authToken = paymobClient.authenticate(provider.getApiKey(), provider.getBaseUrl());
+        // Build billing_data node
+        ObjectNode billingData = buildBillingData(req);
 
-        // Step 2: Create or reuse a Paymob order for this app order
+        // Build customer node
+        ObjectNode customer = objectMapper.createObjectNode();
+        customer.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
+        String[] nameParts = req.getBillingName() != null
+                ? req.getBillingName().split(" ", 2)
+                : new String[]{"NA", "NA"};
+        customer.put("first_name", nameParts[0]);
+        customer.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
+        if (req.getCustomerPhone() != null) {
+            customer.put("phone_number", req.getCustomerPhone());
+        }
+
+        // Build items array (empty line item representing the order total)
+        ArrayNode items = objectMapper.createArrayNode();
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("name", "Order " + req.getAppOrderId());
+        item.put("amount", amountCents);
+        item.put("description", "Order payment");
+        item.put("quantity", 1);
+        items.add(item);
+
+        int integrationId = Integer.parseInt(config.getIntegrationId());
+        String specialReference = req.getAppOrderId().toString();
+
+        // Single API call — replaces the old authenticate → createOrder → generatePaymentKey chain
+        PaymobClient.IntentionResult intention = paymobClient.createIntention(
+                provider.getSecretKey(), provider.getBaseUrl(),
+                amountCents, req.getCurrency(),
+                integrationId, specialReference,
+                billingData, customer, items);
+
+        // Store the intention as the provider order (intentionId = Paymob order reference)
         PaymentProviderOrder providerOrder = providerOrderRepo
                 .findByAppOrderId(req.getAppOrderId())
                 .orElseGet(() -> {
-                    ArrayNode items = objectMapper.createArrayNode();
-                    String paymobOrderId = paymobClient.createOrder(
-                            authToken, provider.getBaseUrl(),
-                            amountCents, req.getCurrency(), items);
-
                     PaymentProviderOrder po = new PaymentProviderOrder();
                     po.setAppOrderId(req.getAppOrderId());
                     po.setProvider(provider);
-                    po.setProviderOrderId(paymobOrderId);
+                    po.setProviderOrderId(intention.intentionId());
                     po.setAmountCents(amountCents);
                     po.setCurrency(req.getCurrency());
                     return providerOrderRepo.save(po);
                 });
 
-        // Step 3: Generate payment key
-        Map<String, String> billing = buildBillingMap(req);
-        String paymentKey = paymobClient.generatePaymentKey(
-                authToken, provider.getBaseUrl(),
-                providerOrder.getProviderOrderId(), amountCents,
-                req.getCurrency(), config.getIntegrationId(),
-                req.getCustomerEmail(), billing);
-
         // Persist the transaction in PENDING state
+        // paymentKeyToken is repurposed to store the clientSecret
         PaymentTransaction tx = new PaymentTransaction();
         tx.setAppOrderId(req.getAppOrderId());
         tx.setProviderOrder(providerOrder);
@@ -114,20 +136,19 @@ public class PaymentService {
         tx.setAmountCents(amountCents);
         tx.setCurrency(req.getCurrency());
         tx.setStatus(PaymentStatus.PENDING);
-        tx.setPaymentKeyToken(paymentKey);
+        tx.setPaymentKeyToken(intention.clientSecret());
         tx.setCustomerId(req.getCustomerId());
         tx.setCustomerEmail(req.getCustomerEmail());
         tx.setCustomerPhone(req.getCustomerPhone());
         tx.setBillingName(req.getBillingName());
-
-        // Tabby / Tamara: the payment key IS the redirect URL for BNPL
-        if (req.getMethodType() != PaymentMethodType.CARD) {
-            tx.setRedirectUrl(paymentKey);
-        }
-
         tx = transactionRepo.save(tx);
 
-        return buildInitiatedResponse(tx, config);
+        // Unified Checkout URL — works for card, Tabby, and Tamara
+        String checkoutUrl = provider.getBaseUrl()
+                + "/unifiedcheckout/?publicKey=" + provider.getPublicKey()
+                + "&clientSecret=" + intention.clientSecret();
+
+        return buildInitiatedResponse(tx, intention.clientSecret(), checkoutUrl);
     }
 
     // =========================================================================
@@ -242,14 +263,13 @@ public class PaymentService {
         }
 
         PaymentProvider provider = tx.getMethodConfig().getProvider();
-        String authToken = paymobClient.authenticate(provider.getApiKey(), provider.getBaseUrl());
 
         long refundCents = req.getAmount()
                 .multiply(BigDecimal.valueOf(100))
                 .longValue();
 
         String providerRefundId = paymobClient.refund(
-                authToken, provider.getBaseUrl(),
+                provider.getSecretKey(), provider.getBaseUrl(),
                 tx.getProviderTransactionId(), refundCents);
 
         PaymentRefund refund = new PaymentRefund();
@@ -297,36 +317,37 @@ public class PaymentService {
     // Private helpers
     // =========================================================================
 
-    private Map<String, String> buildBillingMap(InitiatePaymentRequest req) {
+    private ObjectNode buildBillingData(InitiatePaymentRequest req) {
         String[] nameParts = req.getBillingName() != null
                 ? req.getBillingName().split(" ", 2)
                 : new String[]{"NA", "NA"};
 
-        Map<String, String> m = new HashMap<>();
-        m.put("first_name", nameParts[0]);
-        m.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
-        m.put("phone_number", req.getCustomerPhone() != null ? req.getCustomerPhone() : "NA");
-        m.put("apartment", req.getBillingApartment() != null ? req.getBillingApartment() : "NA");
-        m.put("floor", req.getBillingFloor() != null ? req.getBillingFloor() : "NA");
-        m.put("street", req.getBillingStreet() != null ? req.getBillingStreet() : "NA");
-        m.put("building", req.getBillingBuilding() != null ? req.getBillingBuilding() : "NA");
-        m.put("city", req.getBillingCity() != null ? req.getBillingCity() : "NA");
-        m.put("country", req.getBillingCountry() != null ? req.getBillingCountry() : "AE");
-        m.put("state", req.getBillingState() != null ? req.getBillingState() : "NA");
-        m.put("postal_code", req.getBillingPostalCode() != null ? req.getBillingPostalCode() : "NA");
-        return m;
+        ObjectNode n = objectMapper.createObjectNode();
+        n.put("first_name", nameParts[0]);
+        n.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
+        n.put("phone_number", req.getCustomerPhone() != null ? req.getCustomerPhone() : "NA");
+        n.put("apartment", req.getBillingApartment() != null ? req.getBillingApartment() : "NA");
+        n.put("floor", req.getBillingFloor() != null ? req.getBillingFloor() : "NA");
+        n.put("street", req.getBillingStreet() != null ? req.getBillingStreet() : "NA");
+        n.put("building", req.getBillingBuilding() != null ? req.getBillingBuilding() : "NA");
+        n.put("city", req.getBillingCity() != null ? req.getBillingCity() : "NA");
+        n.put("country", req.getBillingCountry() != null ? req.getBillingCountry() : "AE");
+        n.put("state", req.getBillingState() != null ? req.getBillingState() : "NA");
+        n.put("postal_code", req.getBillingPostalCode() != null ? req.getBillingPostalCode() : "NA");
+        n.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
+        return n;
     }
 
     private PaymentInitiatedResponse buildInitiatedResponse(PaymentTransaction tx,
-                                                             PaymentMethodConfig config) {
+                                                             String clientSecret,
+                                                             String checkoutUrl) {
         PaymentInitiatedResponse res = new PaymentInitiatedResponse();
         res.setTransactionId(tx.getId());
         res.setMethodType(tx.getMethodType());
         res.setAmount(tx.getAmount());
         res.setCurrency(tx.getCurrency());
-        res.setPaymentKeyToken(tx.getPaymentKeyToken());
-        res.setRedirectUrl(tx.getRedirectUrl());
-        res.setIframeId(config.getIframeId());
+        res.setClientSecret(clientSecret);
+        res.setCheckoutUrl(checkoutUrl);
         return res;
     }
 

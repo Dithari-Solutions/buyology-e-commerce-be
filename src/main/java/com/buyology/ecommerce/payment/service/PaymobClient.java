@@ -8,17 +8,16 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Map;
-
 /**
- * Thin HTTP wrapper for the Paymob API.
- * All three steps of the Paymob flow are encapsulated here so that
- * PaymentService stays focused on orchestration rather than HTTP mechanics.
+ * Thin HTTP wrapper for the Paymob Intention API (v2).
  *
- * Paymob flow:
- *   Step 1 — POST /api/auth/tokens                  → short-lived auth token
- *   Step 2 — POST /api/ecommerce/orders             → Paymob-side order ID
- *   Step 3 — POST /api/acceptance/payment_keys      → payment key token
+ * Authentication: every request carries the Secret Key in the
+ * Authorization header as a Token — there is no separate auth step.
+ *
+ * Flow:
+ *   Step 1 — POST /v1/intention/   → returns intentionId + clientSecret
+ *   Step 2 — frontend redirects to UnifiedCheckout using publicKey + clientSecret
+ *   Step 3 — Paymob POSTs webhook to our callback URL
  */
 @Component
 public class PaymobClient {
@@ -32,107 +31,80 @@ public class PaymobClient {
     }
 
     /**
-     * Step 1 — Authenticate with Paymob and return a short-lived auth token.
-     * Token is valid for ~1 hour. Cache it in Redis keyed by provider ID rather
-     * than calling this on every request.
+     * Result of a successful intention creation.
+     *
+     * @param intentionId  Paymob intention ID — store as the provider order reference
+     * @param clientSecret Single-use token passed to the frontend checkout UI
      */
-    public String authenticate(String apiKey, String baseUrl) {
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("api_key", apiKey);
-
-        JsonNode response = post(baseUrl + "/api/auth/tokens", body, null);
-        return response.get("token").asText();
-    }
+    public record IntentionResult(String intentionId, String clientSecret) {}
 
     /**
-     * Step 2 — Register a Paymob-side order and return the Paymob order ID.
+     * Create a payment intention — single API call that replaces the old 3-step flow.
      *
-     * @param amountCents   integer cents (e.g. 10000 = 100.00 AED)
-     * @param currency      ISO 4217 currency code (e.g. "AED")
-     * @param items         array of order item objects; see Paymob docs for shape
+     * @param secretKey      Paymob Secret Key (from dashboard Settings)
+     * @param baseUrl        Regional base URL, e.g. https://uae.paymob.com
+     * @param amountCents    Total amount in smallest currency unit (e.g. 10000 = 100.00 AED)
+     * @param currency       ISO 4217 code — "AED", "EGP", "SAR" …
+     * @param integrationId  Paymob integration ID for the chosen payment method
+     * @param specialReference  Your internal order/reference ID
+     * @param billingData    Customer billing details node
+     * @param customer       Customer identity node
+     * @param items          Line items array
      */
-    public String createOrder(String authToken, String baseUrl,
-                              long amountCents, String currency,
-                              ArrayNode items) {
+    public IntentionResult createIntention(String secretKey, String baseUrl,
+                                           long amountCents, String currency,
+                                           int integrationId, String specialReference,
+                                           ObjectNode billingData, ObjectNode customer,
+                                           ArrayNode items) {
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("auth_token", authToken);
-        body.put("delivery_needed", false);
-        body.put("amount_cents", amountCents);
+        body.put("amount", amountCents);
         body.put("currency", currency);
+        body.put("special_reference", specialReference);
+
+        ArrayNode paymentMethods = objectMapper.createArrayNode();
+        paymentMethods.add(integrationId);
+        body.set("payment_methods", paymentMethods);
+
         body.set("items", items);
+        body.set("billing_data", billingData);
+        body.set("customer", customer);
 
-        JsonNode response = post(baseUrl + "/api/ecommerce/orders", body, null);
-        return response.get("id").asText();
+        JsonNode response = post(baseUrl + "/v1/intention/", body, "Token " + secretKey);
+        return new IntentionResult(
+                response.get("id").asText(),
+                response.get("client_secret").asText()
+        );
     }
 
     /**
-     * Step 3 — Generate a payment key for a specific integration (method type).
-     * The returned token is short-lived (~1 hour) and is what the frontend
-     * passes to the Paymob iframe or redirect URL.
+     * Submit a refund for a completed transaction.
      *
-     * @param integrationId  Paymob integration ID for the chosen method (CARD/TABBY/TAMARA)
-     * @param billingData    map of billing address fields required by Paymob
-     */
-    public String generatePaymentKey(String authToken, String baseUrl,
-                                     String paymobOrderId, long amountCents,
-                                     String currency, String integrationId,
-                                     String customerEmail, Map<String, String> billingData) {
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("auth_token", authToken);
-        body.put("amount_cents", amountCents);
-        body.put("expiration", 3600);
-        body.put("order_id", paymobOrderId);
-        body.put("currency", currency);
-        body.put("integration_id", Integer.parseInt(integrationId));
-
-        ObjectNode billing = objectMapper.createObjectNode();
-        billing.put("apartment", billingData.getOrDefault("apartment", "NA"));
-        billing.put("email", customerEmail);
-        billing.put("floor", billingData.getOrDefault("floor", "NA"));
-        billing.put("first_name", billingData.getOrDefault("first_name", "NA"));
-        billing.put("street", billingData.getOrDefault("street", "NA"));
-        billing.put("building", billingData.getOrDefault("building", "NA"));
-        billing.put("phone_number", billingData.getOrDefault("phone_number", "NA"));
-        billing.put("shipping_method", "PKG");
-        billing.put("postal_code", billingData.getOrDefault("postal_code", "NA"));
-        billing.put("city", billingData.getOrDefault("city", "NA"));
-        billing.put("country", billingData.getOrDefault("country", "NA"));
-        billing.put("last_name", billingData.getOrDefault("last_name", "NA"));
-        billing.put("state", billingData.getOrDefault("state", "NA"));
-        body.set("billing_data", billing);
-
-        JsonNode response = post(baseUrl + "/api/acceptance/payment_keys", body, null);
-        return response.get("token").asText();
-    }
-
-    /**
-     * Submit a refund request to Paymob for a completed transaction.
-     *
+     * @param secretKey            Paymob Secret Key
+     * @param baseUrl              Regional base URL
      * @param paymobTransactionId  Paymob's transaction ID (from webhook)
-     * @param amountCents          amount to refund in integer cents
+     * @param amountCents          Amount to refund in smallest currency unit
      * @return Paymob refund transaction ID
      */
-    public String refund(String authToken, String baseUrl,
+    public String refund(String secretKey, String baseUrl,
                          String paymobTransactionId, long amountCents) {
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("auth_token", authToken);
         body.put("transaction_id", paymobTransactionId);
         body.put("amount_cents", amountCents);
 
-        JsonNode response = post(baseUrl + "/api/acceptance/void_refund/refund", body, null);
+        JsonNode response = post(baseUrl + "/api/acceptance/void_refund/refund", body, "Token " + secretKey);
         return response.get("id").asText();
     }
 
     // -------------------------------------------------------------------------
-    // Internal helpers
+    // Internal helper
     // -------------------------------------------------------------------------
 
-    private JsonNode post(String url, ObjectNode body, String bearerToken) {
+    private JsonNode post(String url, ObjectNode body, String authHeader) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            if (bearerToken != null) {
-                headers.setBearerAuth(bearerToken);
+            if (authHeader != null) {
+                headers.set(HttpHeaders.AUTHORIZATION, authHeader);
             }
             HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
             ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);

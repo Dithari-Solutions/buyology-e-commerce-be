@@ -29,31 +29,27 @@ On failure, `data` is `null` and `statusCode` + `message` describe the error.
 
 Understanding this before integrating will save debugging time.
 
+The backend uses the **Paymob Intention API (v2)**. One backend call creates a payment intention and returns a `clientSecret` + a ready-to-open `checkoutUrl`. All payment methods (card, Tabby, Tamara) go through the same **Unified Checkout** page hosted by Paymob.
+
 ```
 Frontend                        Backend                         Paymob
    │                               │                               │
    │  POST /api/payments/initiate  │                               │
    │──────────────────────────────>│                               │
-   │                               │  Step 1: authenticate         │
+   │                               │  POST /v1/intention/          │
    │                               │──────────────────────────────>│
-   │                               │<── auth token                 │
+   │                               │<── { intentionId,             │
+   │                               │      clientSecret }           │
    │                               │                               │
-   │                               │  Step 2: create order         │
-   │                               │──────────────────────────────>│
-   │                               │<── paymob order ID            │
+   │<── { clientSecret,            │                               │
+   │      checkoutUrl }            │                               │
    │                               │                               │
-   │                               │  Step 3: generate payment key │
-   │                               │──────────────────────────────>│
-   │                               │<── payment key token          │
+   │  Open checkoutUrl             │                               │
+   │  (WebView / redirect)         │                               │
+   │──────────────────────────────────────────────────────────────>│
    │                               │                               │
-   │<── { paymentKeyToken,         │                               │
-   │      iframeId, redirectUrl }  │                               │
+   │              [user pays on Paymob Unified Checkout]           │
    │                               │                               │
-   │  [card]  render Paymob iframe │                               │
-   │  [BNPL]  redirect user to     │                               │
-   │          Paymob/Tabby/Tamara  │                               │
-   │                               │                               │
-   │              [user pays]      │                               │
    │                               │  Webhook callback             │
    │                               │<──────────────────────────────│
    │                               │  (stored + processed)         │
@@ -65,7 +61,7 @@ Frontend                        Backend                         Paymob
 
 **Key rules:**
 - One `POST /initiate` call = one transaction row. If a payment fails, call `/initiate` again — never reuse a failed transaction.
-- The backend stores the raw Paymob webhook before processing it. Never rely on a redirect to know the final status — always poll the transaction status after the user returns.
+- The backend stores the raw Paymob webhook before processing it. **Never rely on a redirect to determine final status** — always poll the transaction status after the user returns.
 
 ---
 
@@ -74,15 +70,17 @@ Frontend                        Backend                         Paymob
 ### PaymentMethodType
 | Value | Description |
 |---|---|
-| `CARD` | Direct card payment via Paymob iframe |
-| `TABBY` | Buy Now Pay Later — Tabby (redirect) |
-| `TAMARA` | Buy Now Pay Later — Tamara (redirect) |
+| `CARD` | Direct card payment |
+| `TABBY` | Buy Now Pay Later — Tabby |
+| `TAMARA` | Buy Now Pay Later — Tamara |
+
+All three methods open the same Unified Checkout URL. Paymob displays the correct UI based on the `integration_id` passed during intention creation.
 
 ### PaymentStatus
 | Value | Description |
 |---|---|
-| `PENDING` | Transaction created, user has not seen payment page yet |
-| `PROCESSING` | User was redirected / iframe rendered |
+| `PENDING` | Transaction created, user has not completed payment yet |
+| `PROCESSING` | Webhook arrived, status update in progress |
 | `SUCCESS` | Paymob confirmed payment via webhook |
 | `FAILED` | Paymob reported failure via webhook |
 | `CANCELLED` | User abandoned or session timed out |
@@ -115,7 +113,7 @@ PENDING
 
 `POST /api/payments/initiate`
 
-Starts the full 3-step Paymob flow and returns what the frontend needs to render the payment UI.
+Creates a Paymob payment intention and returns a `checkoutUrl` to open for the user.
 
 **Request Body:**
 ```json
@@ -145,7 +143,7 @@ Starts the full 3-step Paymob flow and returns what the frontend needs to render
 | `methodType` | PaymentMethodType | Yes | `CARD`, `TABBY`, or `TAMARA` |
 | `amount` | decimal | Yes | Minimum `0.01`. Use the full order amount |
 | `currency` | string | Yes | Exactly 3 chars — use `"AED"` |
-| `customerId` | UUID | Yes | Logged-in user's ID |
+| `customerId` | UUID | Yes | Logged-in user's ID (auth credentials ID from JWT) |
 | `customerEmail` | string | Yes | Snapshotted on the transaction row |
 | `customerPhone` | string | No | |
 | `billingName` | string | Yes | Full name |
@@ -165,18 +163,16 @@ Starts the full 3-step Paymob flow and returns what the frontend needs to render
   "methodType": "CARD",
   "amount": 250.00,
   "currency": "AED",
-  "paymentKeyToken": "ZXlKaGJHY2lPaUpJVXpVeE1pSXN...",
-  "redirectUrl": null,
-  "iframeId": "24836"
+  "clientSecret": "zsk_test_abc123...",
+  "checkoutUrl": "https://uae.paymob.com/unifiedcheckout/?publicKey=are_xxx&clientSecret=zsk_test_abc123..."
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `transactionId` | UUID | Save this — you need it to poll status |
-| `paymentKeyToken` | string | Card: pass this to the Paymob iframe. BNPL: same value as `redirectUrl` |
-| `redirectUrl` | string \| null | Tabby / Tamara: redirect the user here. `null` for card |
-| `iframeId` | string \| null | Card only: use this to build the iframe URL. `null` for BNPL |
+| `transactionId` | UUID | Save this — you need it to poll for the final status |
+| `clientSecret` | string | Single-use token tied to this intention. Short-lived |
+| `checkoutUrl` | string | Open this URL in a WebView or redirect the user to it. Works for all payment methods |
 
 ---
 
@@ -184,7 +180,7 @@ Starts the full 3-step Paymob flow and returns what the frontend needs to render
 
 `GET /api/payments/transactions/{transactionId}`
 
-Poll this after the user returns from payment to get the final status.
+Poll this after the user returns from the Paymob checkout to get the final status.
 
 **Response `data`:**
 ```json
@@ -263,55 +259,38 @@ Supports full and partial refunds. Multiple partial refunds are allowed as long 
 
 ## Frontend Integration Guide
 
-### Card Payment (iframe)
+### All Payment Methods — Unified Checkout
 
-Paymob card payments render inside an embedded iframe hosted by Paymob. Your server never sees card details.
+The new Paymob Intention API uses a single **Unified Checkout** page for all payment methods (card, Tabby, Tamara). The integration steps are the same regardless of method.
 
-**Step 1** — Call `/api/payments/initiate` with `"methodType": "CARD"`.
+**Step 1** — Call `POST /api/payments/initiate` with the chosen `methodType`.
 
-**Step 2** — Build the iframe URL using the values from the response:
-
-```
-https://uae.paymob.com/api/acceptance/iframes/{iframeId}?payment_token={paymentKeyToken}
-```
-
-Substituting from the response:
-```
-https://uae.paymob.com/api/acceptance/iframes/24836?payment_token=ZXlKaGJHY2lP...
-```
-
-**Step 3** — Embed the iframe in your checkout page:
-
-```html
-<iframe
-  src="https://uae.paymob.com/api/acceptance/iframes/24836?payment_token=TOKEN"
-  width="100%"
-  height="600"
-  frameborder="0"
-/>
-```
-
-**Step 4** — After the iframe closes or Paymob redirects the user back to your site, call `GET /api/payments/transactions/{transactionId}` to get the actual status. **Do not trust any redirect parameters** — only the webhook-updated transaction status is authoritative.
-
----
-
-### Tabby (BNPL — redirect)
-
-**Step 1** — Call `/api/payments/initiate` with `"methodType": "TABBY"`.
-
-**Step 2** — Redirect the user to `redirectUrl` from the response:
+**Step 2** — Open `checkoutUrl` from the response. Use a WebView in mobile apps, or redirect/open a new tab on web:
 
 ```js
-window.location.href = data.redirectUrl;
+// Web — redirect current page
+window.location.href = data.checkoutUrl;
+
+// Web — open in new tab
+window.open(data.checkoutUrl, '_blank');
 ```
 
-**Step 3** — Paymob redirects the user back to your site after they complete or cancel on Tabby's page. On return, call `GET /api/payments/transactions/{transactionId}` to get the actual status.
+```swift
+// iOS — open in SFSafariViewController or WKWebView
+let url = URL(string: data.checkoutUrl)!
+let safariVC = SFSafariViewController(url: url)
+present(safariVC, animated: true)
+```
 
----
+```kotlin
+// Android — open in CustomTabs or WebView
+val intent = CustomTabsIntent.Builder().build()
+intent.launchUrl(context, Uri.parse(data.checkoutUrl))
+```
 
-### Tamara (BNPL — redirect)
+**Step 3** — Paymob redirects the user back to your app/site after they complete or cancel. On return, poll `GET /api/payments/transactions/{transactionId}` to get the authoritative status.
 
-Same flow as Tabby — use `"methodType": "TAMARA"` and redirect to `redirectUrl`.
+> The `clientSecret` in the response is already embedded in `checkoutUrl`. You only need `clientSecret` separately if you are building a custom checkout UI directly on top of the Paymob JS SDK — for standard integration, just open `checkoutUrl`.
 
 ---
 
@@ -371,18 +350,17 @@ Use `GET /api/payments/orders/{appOrderId}/transactions` to show the user their 
 2. User picks payment method (Card / Tabby / Tamara) on checkout page
 
 3. POST /api/payments/initiate
-   → save the returned transactionId in component state
+   → save transactionId in component state
 
-4. [CARD]  render Paymob iframe using iframeId + paymentKeyToken
-   [TABBY] window.location.href = redirectUrl
-   [TAMARA] window.location.href = redirectUrl
+4. Open checkoutUrl in WebView / redirect
+   (same step for CARD, TABBY, and TAMARA)
 
-5. User completes payment on Paymob / Tabby / Tamara
+5. User completes payment on Paymob Unified Checkout
 
-6. User returns to your site (Paymob redirect or iframe close event)
+6. User returns to your app/site
 
 7. Poll GET /api/payments/transactions/{transactionId}
-   → status: SUCCESS  → navigate to order confirmation page
-   → status: FAILED   → show error, offer retry
-   → status: PROCESSING → keep polling (webhook in transit)
+   → status: SUCCESS     → navigate to order confirmation page
+   → status: FAILED      → show error, offer retry
+   → status: PROCESSING  → keep polling (webhook in transit)
 ```
