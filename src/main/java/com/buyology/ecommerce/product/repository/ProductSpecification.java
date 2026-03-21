@@ -53,14 +53,6 @@ public class ProductSpecification {
                 predicates.add(cb.equal(root.get("category").get("id"), filter.getCategoryId()));
             }
 
-            // Price range — filters on basePrice
-            if (filter.getMinPrice() != null) {
-                predicates.add(cb.greaterThanOrEqualTo(root.get("basePrice"), filter.getMinPrice()));
-            }
-            if (filter.getMaxPrice() != null) {
-                predicates.add(cb.lessThanOrEqualTo(root.get("basePrice"), filter.getMaxPrice()));
-            }
-
             // Super deal / limited stock flags
             if (Boolean.TRUE.equals(filter.getIsSuperDeal())) {
                 predicates.add(cb.isTrue(root.get("isSuperDeal")));

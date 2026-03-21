@@ -5,6 +5,9 @@ import java.util.UUID;
 
 public class AddToCartRequest {
 
+    /** The store from which this product is being purchased — determines price and currency */
+    private UUID storeId;
+
     private UUID productId;
 
     /** Optional — set for products with pre-built variants (e.g. refurbished grades) */
@@ -17,6 +20,9 @@ public class AddToCartRequest {
 
     public AddToCartRequest() {
     }
+
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
 
     public UUID getProductId() { return productId; }
     public void setProductId(UUID productId) { this.productId = productId; }

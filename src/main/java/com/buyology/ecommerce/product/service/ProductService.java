@@ -56,6 +56,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
+import java.util.concurrent.ThreadLocalRandom;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -162,35 +163,15 @@ public class ProductService {
                     "Refurb grade (A, B, or C) is required when isRefurbished is true");
         }
 
-        // 3. Discount validation
-        if (request.getDiscountType() != null) {
-            if (request.getDiscountValue() == null) {
-                throw new IllegalArgumentException("discountValue is required when discountType is set");
-            }
-            if (request.getDiscountType() == Product.DiscountType.FIXED
-                    && request.getDiscountValue().compareTo(request.getBasePrice()) >= 0) {
-                throw new IllegalArgumentException("Fixed discount value must be lower than base price");
-            }
-            if (request.getDiscountType() == Product.DiscountType.PERCENTAGE
-                    && (request.getDiscountValue().compareTo(BigDecimal.ZERO) <= 0
-                            || request.getDiscountValue().compareTo(new BigDecimal("100")) > 0)) {
-                throw new IllegalArgumentException("Percentage discount must be between 0 and 100");
-            }
-        } else if (request.getDiscountValue() != null) {
-            throw new IllegalArgumentException("discountType is required when discountValue is set");
-        }
-
-        // 4. Persist base product
+        // 3. Persist base product
+        String sku = generateSku(request.getProductType());
         Product product = new Product(
                 category,
                 brand,
                 request.getProductType(),
                 request.getIsRefurbished(),
                 request.getRefurbGrade(),
-                request.getBasePrice(),
-                request.getDiscountType(),
-                request.getDiscountValue(),
-                request.getSku(),
+                sku,
                 request.getStatus(),
                 request.getAvailabilityStatus(),
                 request.getIsSuperDeal(),
@@ -226,7 +207,7 @@ public class ProductService {
                     List<UUID> optionIds = variantOptionRepository.findByVariantId(v.getId()).stream()
                             .map(vo -> vo.getOption().getId())
                             .toList();
-                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), v.getPrice(), v.getStock(), optionIds);
+                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), optionIds);
                 })
                 .toList();
         ProductResponse response = buildResponse(
@@ -457,7 +438,7 @@ public class ProductService {
                     List<UUID> optionIds = variantOptionRepository.findByVariantId(v.getId()).stream()
                             .map(vo -> vo.getOption().getId())
                             .toList();
-                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), v.getPrice(), v.getStock(), optionIds);
+                    return new ProductResponse.VariantDto(v.getId(), v.getSku(), optionIds);
                 })
                 .toList();
 
@@ -795,7 +776,7 @@ public class ProductService {
         List<ProductResponse.VariantDto> variantDtos = new ArrayList<>();
 
         for (CreateVariantRequest variantReq : variantRequests) {
-            ProductVariant variant = new ProductVariant(product, variantReq.getSku(), variantReq.getPrice(), variantReq.getStock());
+            ProductVariant variant = new ProductVariant(product, variantReq.getSku());
             ProductVariant savedVariant = variantRepository.save(variant);
 
             List<UUID> linkedOptionIds = new ArrayList<>();
@@ -821,7 +802,7 @@ public class ProductService {
             }
 
             variantDtos.add(new ProductResponse.VariantDto(
-                    savedVariant.getId(), savedVariant.getSku(), savedVariant.getPrice(), savedVariant.getStock(), linkedOptionIds));
+                    savedVariant.getId(), savedVariant.getSku(), linkedOptionIds));
         }
 
         return variantDtos;
@@ -842,6 +823,16 @@ public class ProductService {
             resolvedIds.add(accessoryId);
         }
         return resolvedIds;
+    }
+
+    private String generateSku(Product.ProductType productType) {
+        String prefix = (productType == Product.ProductType.ACCESSORY) ? "DTAX" : "DTDX";
+        String sku;
+        do {
+            int digits = ThreadLocalRandom.current().nextInt(100000, 1000000);
+            sku = prefix + "-" + digits;
+        } while (productRepository.existsBySku(sku));
+        return sku;
     }
 
     private String saveFile(Path dir, MultipartFile file, String baseName) {
@@ -880,19 +871,6 @@ public class ProductService {
                 m.getThumbnailUrl(), m.getIsPrimary(), m.getOrderIndex());
     }
 
-    private BigDecimal computeEffectivePrice(Product product) {
-        if (product.getDiscountType() == null || product.getDiscountValue() == null) {
-            return product.getBasePrice();
-        }
-        return switch (product.getDiscountType()) {
-            case FIXED -> product.getDiscountValue();
-            case PERCENTAGE -> product.getBasePrice()
-                    .multiply(BigDecimal.ONE.subtract(
-                            product.getDiscountValue().divide(new BigDecimal("100"))))
-                    .setScale(2, java.math.RoundingMode.HALF_UP);
-        };
-    }
-
     private ProductResponse buildResponse(
             Product product,
             String title,
@@ -923,10 +901,6 @@ public class ProductService {
         response.setProductType(product.getProductType() != null ? product.getProductType().name() : null);
         response.setIsRefurbished(product.getIsRefurbished());
         response.setRefurbGrade(product.getRefurbGrade() != null ? product.getRefurbGrade().name() : null);
-        response.setBasePrice(product.getBasePrice());
-        response.setDiscountType(product.getDiscountType() != null ? product.getDiscountType().name() : null);
-        response.setDiscountValue(product.getDiscountValue());
-        response.setEffectivePrice(computeEffectivePrice(product));
         response.setSku(product.getSku());
         response.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
         response.setIsSuperDeal(product.getIsSuperDeal());

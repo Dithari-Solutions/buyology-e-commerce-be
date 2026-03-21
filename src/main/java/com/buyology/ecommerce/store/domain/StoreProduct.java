@@ -30,7 +30,7 @@ public class StoreProduct {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
-    // Store-specific price — overrides the global product basePrice
+    // Store-specific price — all pricing lives here, not on the global product
     @Column(name = "store_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal storePrice;
 

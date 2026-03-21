@@ -1,7 +1,6 @@
 package com.buyology.ecommerce.product.domain;
 
 import jakarta.persistence.*;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -15,17 +14,14 @@ public class Product {
     @GeneratedValue
     private UUID id;
 
-    // Many-to-one relationship to category
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
     private ProductCategory category;
 
-    // Optional brand
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     private Brand brand;
 
-    // Product type enum
     @Enumerated(EnumType.STRING)
     @Column(name = "product_type", length = 20)
     private ProductType productType;
@@ -33,27 +29,16 @@ public class Product {
     @Column(name = "is_refurbished", nullable = false)
     private Boolean isRefurbished = false;
 
-    // Refurbishment grade enum
     @Enumerated(EnumType.STRING)
     @Column(name = "refurb_grade", length = 10)
     private RefurbGrade refurbGrade;
-
-    @Column(name = "base_price", precision = 12, scale = 2, nullable = false)
-    private BigDecimal basePrice;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "discount_type", length = 20)
-    private DiscountType discountType;
-
-    @Column(name = "discount_value", precision = 12, scale = 2)
-    private BigDecimal discountValue;
 
     @Column(name = "sku", nullable = false, unique = true, length = 255)
     private String sku;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "availability_status", length = 20)
-    private AvailabilityStatus availabilityStatus = AvailabilityStatus.IN_STOCK;
+    private AvailabilityStatus availabilityStatus = AvailabilityStatus.PRE_ORDER;
 
     @Column(name = "is_super_deal", nullable = false)
     private Boolean isSuperDeal = false;
@@ -92,6 +77,7 @@ public class Product {
         C
     }
 
+    // Kept here because StoreProduct references Product.DiscountType
     public enum DiscountType {
         FIXED,
         PERCENTAGE
@@ -102,20 +88,16 @@ public class Product {
     }
 
     public Product(ProductCategory category, Brand brand, ProductType productType, Boolean isRefurbished,
-            RefurbGrade refurbGrade, BigDecimal basePrice, DiscountType discountType, BigDecimal discountValue,
-            String sku, String status, AvailabilityStatus availabilityStatus,
+            RefurbGrade refurbGrade, String sku, String status, AvailabilityStatus availabilityStatus,
             Boolean isSuperDeal, Boolean isLimitedStock) {
         this.category = category;
         this.brand = brand;
         this.productType = productType;
         this.isRefurbished = isRefurbished != null ? isRefurbished : false;
         this.refurbGrade = refurbGrade;
-        this.basePrice = basePrice;
-        this.discountType = discountType;
-        this.discountValue = discountValue;
         this.sku = sku;
         this.status = status != null ? status : "ACTIVE";
-        this.availabilityStatus = availabilityStatus != null ? availabilityStatus : AvailabilityStatus.IN_STOCK;
+        this.availabilityStatus = availabilityStatus != null ? availabilityStatus : AvailabilityStatus.PRE_ORDER;
         this.isSuperDeal = isSuperDeal != null ? isSuperDeal : false;
         this.isLimitedStock = isLimitedStock != null ? isLimitedStock : false;
     }
@@ -128,7 +110,7 @@ public class Product {
         this.updatedAt = now;
         if (this.isRefurbished == null) this.isRefurbished = false;
         if (this.status == null) this.status = "ACTIVE";
-        if (this.availabilityStatus == null) this.availabilityStatus = AvailabilityStatus.IN_STOCK;
+        if (this.availabilityStatus == null) this.availabilityStatus = AvailabilityStatus.PRE_ORDER;
         if (this.isSuperDeal == null) this.isSuperDeal = false;
         if (this.isLimitedStock == null) this.isLimitedStock = false;
     }
@@ -185,30 +167,6 @@ public class Product {
 
     public void setRefurbGrade(RefurbGrade refurbGrade) {
         this.refurbGrade = refurbGrade;
-    }
-
-    public BigDecimal getBasePrice() {
-        return basePrice;
-    }
-
-    public void setBasePrice(BigDecimal basePrice) {
-        this.basePrice = basePrice;
-    }
-
-    public DiscountType getDiscountType() {
-        return discountType;
-    }
-
-    public void setDiscountType(DiscountType discountType) {
-        this.discountType = discountType;
-    }
-
-    public BigDecimal getDiscountValue() {
-        return discountValue;
-    }
-
-    public void setDiscountValue(BigDecimal discountValue) {
-        this.discountValue = discountValue;
     }
 
     public String getSku() {

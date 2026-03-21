@@ -19,10 +19,6 @@ public class ProductResponse {
     private String productType;
     private Boolean isRefurbished;
     private String refurbGrade;
-    private BigDecimal basePrice;
-    private String discountType;
-    private BigDecimal discountValue;
-    private BigDecimal effectivePrice;
     private String sku;
     private String availabilityStatus;
     private Boolean isSuperDeal;
@@ -169,23 +165,19 @@ public class ProductResponse {
         public void setMedia(List<MediaDto> media) { this.media = media; }
     }
 
-    @Schema(description = "Product variant with its linked spec option IDs")
+    @Schema(description = "Product variant definition — price and stock are set per-store by store admins")
     public static class VariantDto {
 
         private UUID id;
         private String sku;
-        private BigDecimal price;
-        private Integer stock;
         private List<UUID> specOptionIds;
 
         public VariantDto() {
         }
 
-        public VariantDto(UUID id, String sku, BigDecimal price, Integer stock, List<UUID> specOptionIds) {
+        public VariantDto(UUID id, String sku, List<UUID> specOptionIds) {
             this.id = id;
             this.sku = sku;
-            this.price = price;
-            this.stock = stock;
             this.specOptionIds = specOptionIds;
         }
 
@@ -193,10 +185,6 @@ public class ProductResponse {
         public void setId(UUID id) { this.id = id; }
         public String getSku() { return sku; }
         public void setSku(String sku) { this.sku = sku; }
-        public BigDecimal getPrice() { return price; }
-        public void setPrice(BigDecimal price) { this.price = price; }
-        public Integer getStock() { return stock; }
-        public void setStock(Integer stock) { this.stock = stock; }
         public List<UUID> getSpecOptionIds() { return specOptionIds; }
         public void setSpecOptionIds(List<UUID> specOptionIds) { this.specOptionIds = specOptionIds; }
     }
@@ -225,14 +213,6 @@ public class ProductResponse {
     public void setIsRefurbished(Boolean isRefurbished) { this.isRefurbished = isRefurbished; }
     public String getRefurbGrade() { return refurbGrade; }
     public void setRefurbGrade(String refurbGrade) { this.refurbGrade = refurbGrade; }
-    public BigDecimal getBasePrice() { return basePrice; }
-    public void setBasePrice(BigDecimal basePrice) { this.basePrice = basePrice; }
-    public String getDiscountType() { return discountType; }
-    public void setDiscountType(String discountType) { this.discountType = discountType; }
-    public BigDecimal getDiscountValue() { return discountValue; }
-    public void setDiscountValue(BigDecimal discountValue) { this.discountValue = discountValue; }
-    public BigDecimal getEffectivePrice() { return effectivePrice; }
-    public void setEffectivePrice(BigDecimal effectivePrice) { this.effectivePrice = effectivePrice; }
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }
     public String getStatus() { return status; }

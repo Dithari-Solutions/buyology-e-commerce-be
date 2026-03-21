@@ -2,7 +2,6 @@ package com.buyology.ecommerce.product.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.math.BigDecimal;
 import java.util.UUID;
 
 @Schema(description = "Filter parameters for product search — all fields are optional")
@@ -19,12 +18,6 @@ public class ProductFilterRequest {
 
     @Schema(description = "Category ID to filter by")
     private UUID categoryId;
-
-    @Schema(description = "Minimum price (inclusive)")
-    private BigDecimal minPrice;
-
-    @Schema(description = "Maximum price (inclusive)")
-    private BigDecimal maxPrice;
 
     @Schema(description = "Only super deals", example = "true")
     private Boolean isSuperDeal;
@@ -65,12 +58,6 @@ public class ProductFilterRequest {
 
     public UUID getCategoryId() { return categoryId; }
     public void setCategoryId(UUID categoryId) { this.categoryId = categoryId; }
-
-    public BigDecimal getMinPrice() { return minPrice; }
-    public void setMinPrice(BigDecimal minPrice) { this.minPrice = minPrice; }
-
-    public BigDecimal getMaxPrice() { return maxPrice; }
-    public void setMaxPrice(BigDecimal maxPrice) { this.maxPrice = maxPrice; }
 
     public Boolean getIsSuperDeal() { return isSuperDeal; }
     public void setIsSuperDeal(Boolean isSuperDeal) { this.isSuperDeal = isSuperDeal; }

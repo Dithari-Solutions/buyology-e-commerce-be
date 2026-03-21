@@ -16,6 +16,10 @@ import com.buyology.ecommerce.product.domain.ProductVariant;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
+import com.buyology.ecommerce.store.domain.StoreProduct;
+import com.buyology.ecommerce.store.domain.StoreProductVariant;
+import com.buyology.ecommerce.store.repository.StoreProductRepository;
+import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -37,6 +41,8 @@ public class CartService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ProductSpecOptionRepository specOptionRepository;
+    private final StoreProductRepository storeProductRepository;
+    private final StoreProductVariantRepository storeProductVariantRepository;
 
     public CartService(
             CartRepository cartRepository,
@@ -45,7 +51,9 @@ public class CartService {
             AuthCredentialRepository authCredentialRepository,
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
-            ProductSpecOptionRepository specOptionRepository) {
+            ProductSpecOptionRepository specOptionRepository,
+            StoreProductRepository storeProductRepository,
+            StoreProductVariantRepository storeProductVariantRepository) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
@@ -53,6 +61,8 @@ public class CartService {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.specOptionRepository = specOptionRepository;
+        this.storeProductRepository = storeProductRepository;
+        this.storeProductVariantRepository = storeProductVariantRepository;
     }
 
     // ─── Get or create active cart ────────────────────────────────────────────
@@ -107,8 +117,31 @@ public class CartService {
             }
         }
 
-        // Calculate unit price: variant price (or product base price) + sum of spec additional prices
-        BigDecimal basePrice = variant != null ? variant.getPrice() : resolveEffectiveProductPrice(product);
+        // Resolve store product — storeId is required for pricing
+        if (request.getStoreId() == null) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "storeId is required");
+        }
+        StoreProduct storeProduct = storeProductRepository
+                .findByStore_IdAndProduct_IdAndIsActiveTrue(request.getStoreId(), product.getId())
+                .orElse(null);
+        if (storeProduct == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product is not available in the selected store");
+        }
+
+        // Determine base price: use store-variant price if a variant is selected, otherwise store-product price
+        BigDecimal basePrice;
+        if (variant != null) {
+            StoreProductVariant storeVariant = storeProductVariantRepository
+                    .findByStoreProduct_IdAndVariant_Id(storeProduct.getId(), variant.getId())
+                    .orElse(null);
+            if (storeVariant == null || !storeVariant.getIsActive()) {
+                return ApiResponse.failure(HttpStatus.NOT_FOUND, "Variant is not available in the selected store");
+            }
+            basePrice = storeVariant.getStorePrice();
+        } else {
+            basePrice = storeProduct.getStorePrice();
+        }
+
         BigDecimal specAdditional = selectedSpecOptions.stream()
                 .map(ProductSpecOption::getAdditionalPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -255,21 +288,6 @@ public class CartService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         cart.setTotalPrice(total);
         cartRepository.save(cart);
-    }
-
-    private BigDecimal resolveEffectiveProductPrice(Product product) {
-        if (product.getDiscountType() == null || product.getDiscountValue() == null) {
-            return product.getBasePrice();
-        }
-        return switch (product.getDiscountType()) {
-            case FIXED -> product.getBasePrice().subtract(product.getDiscountValue()).max(BigDecimal.ZERO);
-            case PERCENTAGE -> {
-                BigDecimal discount = product.getBasePrice()
-                        .multiply(product.getDiscountValue())
-                        .divide(BigDecimal.valueOf(100));
-                yield product.getBasePrice().subtract(discount).max(BigDecimal.ZERO);
-            }
-        };
     }
 
     private CartResponse buildCartResponse(Cart cart) {

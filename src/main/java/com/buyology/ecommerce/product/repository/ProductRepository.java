@@ -22,4 +22,6 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     List<Product> findByStatusNotAndCategoryId(String status, UUID categoryId);
 
     List<Product> findByStatusAndDeletedAtBefore(String status, Instant cutoff);
+
+    boolean existsBySku(String sku);
 }
