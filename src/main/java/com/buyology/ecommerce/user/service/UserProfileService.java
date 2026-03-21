@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.user.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.dto.ProfileResponse;
@@ -30,13 +32,16 @@ public class UserProfileService {
     private final UserRepository userRepo;
     private final UserProfilesRepository profilesRepo;
     private final UserAddressRepository addressRepo;
+    private final AuthCredentialRepository authCredentialRepo;
 
     public UserProfileService(UserRepository userRepo,
                                UserProfilesRepository profilesRepo,
-                               UserAddressRepository addressRepo) {
+                               UserAddressRepository addressRepo,
+                               AuthCredentialRepository authCredentialRepo) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
         this.addressRepo = addressRepo;
+        this.authCredentialRepo = authCredentialRepo;
     }
 
     // =========================================================================
@@ -157,8 +162,17 @@ public class UserProfileService {
     private ProfileResponse toResponse(Users user, UserProfiles profile) {
         List<String> missing = computeMissingFields(user, profile);
 
+        // Resolve email from auth_credentials — pick the first non-null email
+        // (a user may have multiple credentials: e.g. EMAIL + Google OAuth)
+        String email = authCredentialRepo.findByUserId(user.getId()).stream()
+                .map(AuthCredentials::getEmail)
+                .filter(e -> e != null && !e.isBlank())
+                .findFirst()
+                .orElse(null);
+
         ProfileResponse res = new ProfileResponse();
         res.setUserId(user.getId());
+        res.setEmail(email);
         res.setFirstName(user.getFirstName());
         res.setLastName(user.getLastName());
         res.setPhoneNumber(profile.getPhoneNumber());

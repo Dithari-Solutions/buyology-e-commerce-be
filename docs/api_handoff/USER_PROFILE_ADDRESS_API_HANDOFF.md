@@ -48,6 +48,7 @@ Call this when the profile page mounts to populate all fields.
 ```json
 {
   "userId": "uuid",
+  "email": "ahmed@example.com",
   "firstName": "Ahmed",
   "lastName": "Al Mansouri",
   "phoneNumber": "+971501234567",
@@ -62,6 +63,7 @@ Call this when the profile page mounts to populate all fields.
 
 | Field | Type | Notes |
 |---|---|---|
+| `email` | string \| null | Read-only — sourced from `auth_credentials`. `null` for OAuth-only users with no email on record |
 | `paymentReady` | boolean | `true` when all 4 required fields are filled. Use this to show/hide a "complete your profile" banner |
 | `missingFields` | string[] | Lists what is still missing. Empty array when `paymentReady` is `true` |
 | `avatarUrl` | string \| null | Relative path — prepend the base URL to display the image |
