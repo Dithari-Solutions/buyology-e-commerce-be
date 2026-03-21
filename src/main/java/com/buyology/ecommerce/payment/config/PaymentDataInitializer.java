@@ -47,8 +47,17 @@ public class PaymentDataInitializer implements ApplicationRunner {
                     return p;
                 });
 
+        String apiKey = props.getApiKey();
+        // Log prefix/suffix to diagnose key truncation or wrong value — never logs the full key
+        if (apiKey != null && apiKey.length() > 10) {
+            log.info("Paymob API key loaded: starts='{}' ends='{}' length={}",
+                    apiKey.substring(0, 6), apiKey.substring(apiKey.length() - 4), apiKey.length());
+        } else {
+            log.warn("Paymob API key is missing or too short — check PAYMOB_API_KEY env var");
+        }
+
         provider.setBaseUrl(props.getBaseUrl());
-        provider.setApiKey(props.getApiKey());
+        provider.setApiKey(apiKey);
         provider.setHmacSecret(props.getHmacSecret());
         providerRepo.save(provider);
 
