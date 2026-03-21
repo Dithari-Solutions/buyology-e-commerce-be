@@ -37,49 +37,52 @@ public class PaymentDataInitializer implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // Always sync credentials from env — handles rotated API keys without manual DB edits
         PaymentProvider provider = providerRepo.findByName(PROVIDER_NAME)
                 .orElseGet(() -> {
                     PaymentProvider p = new PaymentProvider();
                     p.setName(PROVIDER_NAME);
-                    p.setBaseUrl(props.getBaseUrl());
-                    p.setApiKey(props.getApiKey());
-                    p.setHmacSecret(props.getHmacSecret());
                     p.setActive(true);
-                    log.info("Seeding PaymentProvider: {}", PROVIDER_NAME);
-                    return providerRepo.save(p);
+                    log.info("Creating PaymentProvider: {}", PROVIDER_NAME);
+                    return p;
                 });
 
-        seedMethod(provider, PaymentMethodType.CARD,
+        provider.setBaseUrl(props.getBaseUrl());
+        provider.setApiKey(props.getApiKey());
+        provider.setHmacSecret(props.getHmacSecret());
+        providerRepo.save(provider);
+
+        upsertMethod(provider, PaymentMethodType.CARD,
                 props.getCard().getIntegrationId(),
                 props.getCard().getIframeId());
 
-        seedMethod(provider, PaymentMethodType.TABBY,
+        upsertMethod(provider, PaymentMethodType.TABBY,
                 props.getTabby().getIntegrationId(),
                 null);
 
-        seedMethod(provider, PaymentMethodType.TAMARA,
+        upsertMethod(provider, PaymentMethodType.TAMARA,
                 props.getTamara().getIntegrationId(),
                 null);
     }
 
-    private void seedMethod(PaymentProvider provider,
-                            PaymentMethodType type,
-                            String integrationId,
-                            String iframeId) {
-        boolean exists = methodConfigRepo
+    private void upsertMethod(PaymentProvider provider,
+                               PaymentMethodType type,
+                               String integrationId,
+                               String iframeId) {
+        PaymentMethodConfig cfg = methodConfigRepo
                 .findByProviderAndMethodTypeAndIsActiveTrue(provider, type)
-                .isPresent();
+                .orElseGet(() -> {
+                    PaymentMethodConfig c = new PaymentMethodConfig();
+                    c.setProvider(provider);
+                    c.setMethodType(type);
+                    c.setCurrency("AED");
+                    c.setActive(true);
+                    log.info("Creating PaymentMethodConfig: {}", type);
+                    return c;
+                });
 
-        if (!exists) {
-            PaymentMethodConfig cfg = new PaymentMethodConfig();
-            cfg.setProvider(provider);
-            cfg.setMethodType(type);
-            cfg.setIntegrationId(integrationId);
-            cfg.setIframeId(iframeId);
-            cfg.setCurrency("AED");
-            cfg.setActive(true);
-            methodConfigRepo.save(cfg);
-            log.info("Seeded PaymentMethodConfig: {}", type);
-        }
+        cfg.setIntegrationId(integrationId);
+        cfg.setIframeId(iframeId);
+        methodConfigRepo.save(cfg);
     }
 }
