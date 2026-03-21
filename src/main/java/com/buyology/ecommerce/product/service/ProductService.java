@@ -395,6 +395,21 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    /**
+     * Returns active products for the given IDs, mapped to the requested language.
+     * Used by the quick-delivery flow to convert pre-filtered product IDs to full responses.
+     */
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByIds(List<UUID> productIds, String lang) {
+        if (productIds.isEmpty()) {
+            return ApiResponse.success(List.of(), "No quick delivery products available in your area");
+        }
+        List<ProductResponse> responses = productRepository.findAllById(productIds).stream()
+                .filter(p -> "ACTIVE".equals(p.getStatus()))
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        return ApiResponse.success(responses, "Quick delivery products fetched successfully");
+    }
+
     // ========================
     // Private helpers
     // ========================
