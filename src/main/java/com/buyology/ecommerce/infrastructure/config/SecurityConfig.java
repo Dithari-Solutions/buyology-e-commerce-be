@@ -27,7 +27,9 @@ public class SecurityConfig {
                                 "/webjars/**"
                         ).permitAll()
                         // Allow static resources
-                        .requestMatchers("/story/**", "/product/**", "/review/**", "/css/**", "/js/**", "/images/**").permitAll()
+                        .requestMatchers("/story/**", "/product/**", "/review/**", "/store/**", "/user/**", "/css/**", "/js/**", "/images/**").permitAll()
+                        // Payment webhook — must be reachable by Paymob without a JWT
+                        .requestMatchers("/api/payments/webhook").permitAll()
                         // All other requests
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())

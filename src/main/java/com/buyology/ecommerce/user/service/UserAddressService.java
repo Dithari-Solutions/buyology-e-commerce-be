@@ -1,0 +1,199 @@
+package com.buyology.ecommerce.user.service;
+
+import com.buyology.ecommerce.infrastructure.config.OtpProperties;
+import com.buyology.ecommerce.user.domain.PhoneOtp;
+import com.buyology.ecommerce.user.domain.UserAddress;
+import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.dto.AddressResponse;
+import com.buyology.ecommerce.user.dto.SaveAddressRequest;
+import com.buyology.ecommerce.user.repository.PhoneOtpRepository;
+import com.buyology.ecommerce.user.repository.UserAddressRepository;
+import com.buyology.ecommerce.user.repository.UserRepository;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+
+@Service
+public class UserAddressService {
+
+    private final UserAddressRepository addressRepo;
+    private final PhoneOtpRepository phoneOtpRepo;
+    private final UserRepository userRepo;
+    private final SmsService smsService;
+    private final OtpProperties otpProperties;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    public UserAddressService(UserAddressRepository addressRepo,
+                               PhoneOtpRepository phoneOtpRepo,
+                               UserRepository userRepo,
+                               SmsService smsService,
+                               OtpProperties otpProperties) {
+        this.addressRepo = addressRepo;
+        this.phoneOtpRepo = phoneOtpRepo;
+        this.userRepo = userRepo;
+        this.smsService = smsService;
+        this.otpProperties = otpProperties;
+    }
+
+    // =========================================================================
+    // Send phone OTP
+    // =========================================================================
+
+    @Transactional
+    public void sendPhoneOtp(UUID userId, String phoneNumber) {
+        // Enforce resend cooldown
+        phoneOtpRepo.findTopByUserIdAndPhoneNumberOrderByCreatedAtDesc(userId, phoneNumber)
+                .ifPresent(existing -> {
+                    long secondsSince = ChronoUnit.SECONDS.between(existing.getCreatedAt(), Instant.now());
+                    if (secondsSince < otpProperties.getResendCooldownSeconds()) {
+                        long waitSeconds = otpProperties.getResendCooldownSeconds() - secondsSince;
+                        throw new IllegalStateException(
+                                "Please wait " + waitSeconds + " seconds before requesting a new OTP.");
+                    }
+                });
+
+        String otpCode = String.format("%06d", secureRandom.nextInt(1_000_000));
+
+        PhoneOtp otp = new PhoneOtp();
+        otp.setUserId(userId);
+        otp.setPhoneNumber(phoneNumber);
+        otp.setOtpCode(otpCode);
+        otp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
+        phoneOtpRepo.save(otp);
+
+        smsService.sendOtp(phoneNumber, otpCode);
+    }
+
+    // =========================================================================
+    // Save address (verifies OTP + geocodes)
+    // =========================================================================
+
+    @Transactional
+    public AddressResponse saveAddress(UUID userId, SaveAddressRequest req) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+
+        // ── Clear existing default if this address will be the new default ─────
+        if (req.isDefault()) {
+            addressRepo.clearDefaultForUser(user);
+        }
+
+        // ── 4. Persist address ────────────────────────────────────────────────
+        UserAddress address = new UserAddress();
+        address.setUser(user);
+        address.setFirstName(req.getFirstName());
+        address.setLastName(req.getLastName());
+        address.setPhoneNumber(req.getPhoneNumber());
+        address.setPhoneVerified(false); // set to true once SMS OTP is re-enabled
+        address.setLabel(req.getLabel());
+        address.setAddressLine1(req.getAddressLine1());
+        address.setAddressLine2(req.getAddressLine2());
+        address.setCity(req.getCity());
+        address.setState(req.getState());
+        address.setCountry(req.getCountry());
+        address.setPostalCode(req.getPostalCode());
+        // geocoding will be set once custom map service is integrated
+        address.setFormattedAddress(null);
+        address.setLatitude(null);
+        address.setLongitude(null);
+        address.setAddressVerified(false);
+        address.setDefault(req.isDefault());
+
+        return toResponse(addressRepo.save(address));
+    }
+
+    // =========================================================================
+    // Queries
+    // =========================================================================
+
+    public List<AddressResponse> getAddresses(UUID userId) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        return addressRepo.findAllByUser(user)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    public AddressResponse getAddress(UUID userId, UUID addressId) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        UserAddress address = addressRepo.findByIdAndUser(addressId, user)
+                .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
+        return toResponse(address);
+    }
+
+    // =========================================================================
+    // Set default
+    // =========================================================================
+
+    @Transactional
+    public AddressResponse setDefault(UUID userId, UUID addressId) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        UserAddress address = addressRepo.findByIdAndUser(addressId, user)
+                .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
+
+        addressRepo.clearDefaultForUser(user);
+        address.setDefault(true);
+        return toResponse(addressRepo.save(address));
+    }
+
+    // =========================================================================
+    // Delete
+    // =========================================================================
+
+    @Transactional
+    public void deleteAddress(UUID userId, UUID addressId) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        UserAddress address = addressRepo.findByIdAndUser(addressId, user)
+                .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
+        addressRepo.delete(address);
+    }
+
+    // =========================================================================
+    // Scheduled cleanup
+    // =========================================================================
+
+    @Scheduled(cron = "0 0 * * * *") // every hour
+    @Transactional
+    public void cleanupExpiredOtps() {
+        phoneOtpRepo.deleteExpired(Instant.now());
+    }
+
+    // =========================================================================
+    // Mapping
+    // =========================================================================
+
+    private AddressResponse toResponse(UserAddress a) {
+        AddressResponse res = new AddressResponse();
+        res.setId(a.getId());
+        res.setFirstName(a.getFirstName());
+        res.setLastName(a.getLastName());
+        res.setPhoneNumber(a.getPhoneNumber());
+        res.setPhoneVerified(a.isPhoneVerified());
+        res.setLabel(a.getLabel());
+        res.setAddressLine1(a.getAddressLine1());
+        res.setAddressLine2(a.getAddressLine2());
+        res.setCity(a.getCity());
+        res.setState(a.getState());
+        res.setCountry(a.getCountry());
+        res.setPostalCode(a.getPostalCode());
+        res.setFormattedAddress(a.getFormattedAddress());
+        res.setLatitude(a.getLatitude());
+        res.setLongitude(a.getLongitude());
+        res.setAddressVerified(a.isAddressVerified());
+        res.setDefault(a.isDefault());
+        res.setCreatedAt(a.getCreatedAt());
+        res.setUpdatedAt(a.getUpdatedAt());
+        return res;
+    }
+}

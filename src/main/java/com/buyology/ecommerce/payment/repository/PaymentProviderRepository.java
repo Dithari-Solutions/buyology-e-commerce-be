@@ -10,6 +10,8 @@ import java.util.UUID;
 @Repository
 public interface PaymentProviderRepository extends JpaRepository<PaymentProvider, UUID> {
 
+    Optional<PaymentProvider> findByName(String name);
+
     Optional<PaymentProvider> findByNameAndIsActiveTrue(String name);
 
     Optional<PaymentProvider> findFirstByIsActiveTrue();

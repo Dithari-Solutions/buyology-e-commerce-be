@@ -6,6 +6,7 @@ import com.buyology.ecommerce.payment.enums.PaymentMethodType;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.repository.*;
+import com.buyology.ecommerce.user.service.UserProfileService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -30,6 +31,7 @@ public class PaymentService {
     private final PaymentRefundRepository refundRepo;
     private final PaymobClient paymobClient;
     private final ObjectMapper objectMapper;
+    private final UserProfileService userProfileService;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -39,7 +41,8 @@ public class PaymentService {
             PaymentWebhookEventRepository webhookEventRepo,
             PaymentRefundRepository refundRepo,
             PaymobClient paymobClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            UserProfileService userProfileService) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.providerOrderRepo = providerOrderRepo;
@@ -48,6 +51,7 @@ public class PaymentService {
         this.refundRepo = refundRepo;
         this.paymobClient = paymobClient;
         this.objectMapper = objectMapper;
+        this.userProfileService = userProfileService;
     }
 
     // =========================================================================
@@ -56,6 +60,9 @@ public class PaymentService {
 
     @Transactional
     public PaymentInitiatedResponse initiatePayment(InitiatePaymentRequest req) {
+        // Guard: user must have firstName, lastName, phoneNumber, and at least one address
+        userProfileService.checkPaymentReadiness(req.getCustomerId());
+
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
 

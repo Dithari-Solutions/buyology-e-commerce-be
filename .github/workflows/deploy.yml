@@ -56,6 +56,8 @@ jobs:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       PAYMOB_API_KEY: ${{ secrets.PAYMOB_API_KEY }}
       PAYMOB_HMAC_SECRET: ${{ secrets.PAYMOB_HMAC_SECRET }}
+      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
 
     steps:
       - name: Deploy to VPS
@@ -64,7 +66,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME,PAYMOB_API_KEY,PAYMOB_HMAC_SECRET
+          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME,PAYMOB_API_KEY,PAYMOB_HMAC_SECRET,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN
           script: |
             docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
 
@@ -95,4 +97,7 @@ jobs:
               -e "PAYMOB_CARD_IFRAME_ID=24836" \
               -e "PAYMOB_TABBY_INTEGRATION_ID=44953" \
               -e "PAYMOB_TAMARA_INTEGRATION_ID=44437" \
+              -e "TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID" \
+              -e "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" \
+              -e "TWILIO_PHONE_NUMBER=+1your_twilio_number" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
