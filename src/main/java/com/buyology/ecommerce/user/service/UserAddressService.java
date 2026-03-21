@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.user.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.infrastructure.config.OtpProperties;
 import com.buyology.ecommerce.user.domain.PhoneOtp;
 import com.buyology.ecommerce.user.domain.UserAddress;
@@ -26,6 +28,7 @@ public class UserAddressService {
     private final UserAddressRepository addressRepo;
     private final PhoneOtpRepository phoneOtpRepo;
     private final UserRepository userRepo;
+    private final AuthCredentialRepository authCredentialRepo;
     private final SmsService smsService;
     private final OtpProperties otpProperties;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -33,11 +36,13 @@ public class UserAddressService {
     public UserAddressService(UserAddressRepository addressRepo,
                                PhoneOtpRepository phoneOtpRepo,
                                UserRepository userRepo,
+                               AuthCredentialRepository authCredentialRepo,
                                SmsService smsService,
                                OtpProperties otpProperties) {
         this.addressRepo = addressRepo;
         this.phoneOtpRepo = phoneOtpRepo;
         this.userRepo = userRepo;
+        this.authCredentialRepo = authCredentialRepo;
         this.smsService = smsService;
         this.otpProperties = otpProperties;
     }
@@ -47,9 +52,12 @@ public class UserAddressService {
     // =========================================================================
 
     @Transactional
-    public void sendPhoneOtp(UUID userId, String phoneNumber) {
+    public void sendPhoneOtp(UUID authCredId, String phoneNumber) {
+        Users user = resolveUser(authCredId);
+        UUID internalUserId = user.getId();
+
         // Enforce resend cooldown
-        phoneOtpRepo.findTopByUserIdAndPhoneNumberOrderByCreatedAtDesc(userId, phoneNumber)
+        phoneOtpRepo.findTopByUserIdAndPhoneNumberOrderByCreatedAtDesc(internalUserId, phoneNumber)
                 .ifPresent(existing -> {
                     long secondsSince = ChronoUnit.SECONDS.between(existing.getCreatedAt(), Instant.now());
                     if (secondsSince < otpProperties.getResendCooldownSeconds()) {
@@ -62,7 +70,7 @@ public class UserAddressService {
         String otpCode = String.format("%06d", secureRandom.nextInt(1_000_000));
 
         PhoneOtp otp = new PhoneOtp();
-        otp.setUserId(userId);
+        otp.setUserId(internalUserId);
         otp.setPhoneNumber(phoneNumber);
         otp.setOtpCode(otpCode);
         otp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
@@ -77,8 +85,7 @@ public class UserAddressService {
 
     @Transactional
     public AddressResponse saveAddress(UUID userId, SaveAddressRequest req) {
-        Users user = userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        Users user = resolveUser(userId);
 
         // ── Clear existing default if this address will be the new default ─────
         if (req.isDefault()) {
@@ -114,8 +121,7 @@ public class UserAddressService {
     // =========================================================================
 
     public List<AddressResponse> getAddresses(UUID userId) {
-        Users user = userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        Users user = resolveUser(userId);
         return addressRepo.findAllByUser(user)
                 .stream()
                 .map(this::toResponse)
@@ -123,8 +129,7 @@ public class UserAddressService {
     }
 
     public AddressResponse getAddress(UUID userId, UUID addressId) {
-        Users user = userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        Users user = resolveUser(userId);
         UserAddress address = addressRepo.findByIdAndUser(addressId, user)
                 .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
         return toResponse(address);
@@ -136,8 +141,7 @@ public class UserAddressService {
 
     @Transactional
     public AddressResponse setDefault(UUID userId, UUID addressId) {
-        Users user = userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        Users user = resolveUser(userId);
         UserAddress address = addressRepo.findByIdAndUser(addressId, user)
                 .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
 
@@ -152,11 +156,25 @@ public class UserAddressService {
 
     @Transactional
     public void deleteAddress(UUID userId, UUID addressId) {
-        Users user = userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+        Users user = resolveUser(userId);
         UserAddress address = addressRepo.findByIdAndUser(addressId, user)
                 .orElseThrow(() -> new NoSuchElementException("Address not found: " + addressId));
         addressRepo.delete(address);
+    }
+
+    // =========================================================================
+    // Private helpers
+    // =========================================================================
+
+    /**
+     * Resolves a Users record from the auth_credentials.id that the JWT puts in the {userId} path variable.
+     * The JWT sub claim is auth_credentials.id, not users.id.
+     */
+    private Users resolveUser(UUID authCredId) {
+        AuthCredentials creds = authCredentialRepo.findById(authCredId)
+                .orElseThrow(() -> new NoSuchElementException("Auth credentials not found: " + authCredId));
+        return userRepo.findById(creds.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("User not found for credentials: " + authCredId));
     }
 
     // =========================================================================

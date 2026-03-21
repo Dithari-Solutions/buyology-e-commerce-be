@@ -146,9 +146,15 @@ public class UserProfileService {
     // Private helpers
     // =========================================================================
 
-    private Users findUser(UUID userId) {
-        return userRepo.findById(userId)
-                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+    /**
+     * Resolves a Users record from the auth_credentials.id that the JWT puts in the {userId} path variable.
+     * The JWT sub claim is auth_credentials.id, not users.id.
+     */
+    private Users findUser(UUID authCredId) {
+        AuthCredentials creds = authCredentialRepo.findById(authCredId)
+                .orElseThrow(() -> new NoSuchElementException("Auth credentials not found: " + authCredId));
+        return userRepo.findById(creds.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("User not found for credentials: " + authCredId));
     }
 
     private UserProfiles findOrCreateProfile(Users user) {
