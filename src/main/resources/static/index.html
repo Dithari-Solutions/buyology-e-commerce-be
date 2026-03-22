@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buyology — Backend API</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f4fb;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #402F75;
+      color: #fff;
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      box-shadow: 0 2px 12px rgba(64,47,117,0.18);
+    }
+
+    header .logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    header .logo span {
+      color: #FBBB14;
+    }
+
+    header .badge {
+      background: rgba(251,187,20,0.18);
+      color: #FBBB14;
+      border: 1px solid rgba(251,187,20,0.4);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 12px;
+      letter-spacing: 0.5px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #402F75 0%, #5b44a8 100%);
+      color: #fff;
+      text-align: center;
+      padding: 80px 2rem 100px;
+    }
+
+    .hero h1 {
+      font-size: 2.8rem;
+      font-weight: 800;
+      margin-bottom: 1rem;
+      line-height: 1.2;
+    }
+
+    .hero h1 span { color: #FBBB14; }
+
+    .hero p {
+      font-size: 1.15rem;
+      opacity: 0.85;
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    .main {
+      max-width: 1100px;
+      margin: -48px auto 0;
+      padding: 0 1.5rem 4rem;
+    }
+
+    .status-bar {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.2rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      box-shadow: 0 4px 24px rgba(64,47,117,0.10);
+      margin-bottom: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: #555;
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+    .dot.purple { background: #402F75; }
+    .dot.yellow { background: #FBBB14; }
+
+    .status-item strong { color: #1a1a2e; }
+
+    h2.section-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #402F75;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h2.section-title::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(to right, rgba(64,47,117,0.15), transparent);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 3rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.4rem 1.6rem;
+      box-shadow: 0 2px 12px rgba(64,47,117,0.07);
+      border-left: 4px solid #402F75;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 28px rgba(64,47,117,0.13);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 9px;
+      background: #f5f4fb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #402F75;
+    }
+
+    .card p {
+      font-size: 0.87rem;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 0.9rem;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      background: #f5f4fb;
+      color: #402F75;
+      border: 1px solid rgba(64,47,117,0.15);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 3px 10px;
+    }
+
+    .tag.yellow {
+      background: rgba(251,187,20,0.1);
+      color: #b8860b;
+      border-color: rgba(251,187,20,0.3);
+    }
+
+    footer {
+      background: #402F75;
+      color: rgba(255,255,255,0.7);
+      text-align: center;
+      padding: 1.6rem;
+      font-size: 0.85rem;
+    }
+
+    footer strong { color: #FBBB14; }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 2rem; }
+      .status-bar { gap: 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Buy<span>ology</span></div>
+  <div class="badge">REST API v1</div>
+</header>
+
+<div class="hero">
+  <h1>Buyology <span>Backend</span> API</h1>
+  <p>E-commerce REST API powering products, stores, payments, authentication, and more.</p>
+</div>
+
+<div class="main">
+
+  <div class="status-bar">
+    <div class="status-item"><span class="dot green"></span> <strong>Server Online</strong></div>
+    <div class="status-item"><span class="dot purple"></span> <strong>Base URL:</strong> /api</div>
+    <div class="status-item"><span class="dot yellow"></span> <strong>Auth:</strong> JWT + Cookie</div>
+  </div>
+
+  <h2 class="section-title">API Modules</h2>
+
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">🔐</div>
+        <h3>Authentication</h3>
+      </div>
+      <p>JWT-based auth with refresh tokens, OTP verification, and OAuth2 social login.</p>
+      <div class="tag-list">
+        <span class="tag">Sign Up / In</span>
+        <span class="tag">OTP Email</span>
+        <span class="tag">Google OAuth</span>
+        <span class="tag">Refresh Token</span>
+        <span class="tag yellow">Password Reset</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">📦</div>
+        <h3>Products</h3>
+      </div>
+      <p>Full product catalog with categories, brands, variants, specs, media, and accessories.</p>
+      <div class="tag-list">
+        <span class="tag">Categories</span>
+        <span class="tag">Brands</span>
+        <span class="tag">Variants</span>
+        <span class="tag">Global Specs</span>
+        <span class="tag yellow">Quick Delivery</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">🏪</div>
+        <h3>Stores</h3>
+      </div>
+      <p>Multi-store support with locations, store-level products, and country management.</p>
+      <div class="tag-list">
+        <span class="tag">Store CRUD</span>
+        <span class="tag">Locations</span>
+        <span class="tag">Store Products</span>
+        <span class="tag yellow">Countries</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">💳</div>
+        <h3>Payments</h3>
+      </div>
+      <p>Paymob integration supporting card payments, Tabby BNPL, and Tamara installments.</p>
+      <div class="tag-list">
+        <span class="tag">Paymob Card</span>
+        <span class="tag">Tabby</span>
+        <span class="tag">Tamara</span>
+        <span class="tag yellow">Webhook</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">🛒</div>
+        <h3>Cart</h3>
+      </div>
+      <p>User cart management — add, update, remove items and retrieve cart contents.</p>
+      <div class="tag-list">
+        <span class="tag">Add Item</span>
+        <span class="tag">Update Qty</span>
+        <span class="tag">Remove Item</span>
+        <span class="tag yellow">Cart Summary</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">⭐</div>
+        <h3>Reviews & Q&A</h3>
+      </div>
+      <p>Product reviews with ratings and a customer Q&A system with admin moderation.</p>
+      <div class="tag-list">
+        <span class="tag">Reviews</span>
+        <span class="tag">Ratings</span>
+        <span class="tag">Questions</span>
+        <span class="tag yellow">Admin Moderation</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">📖</div>
+        <h3>Stories</h3>
+      </div>
+      <p>Instagram-style stories with media uploads, translations, and view tracking.</p>
+      <div class="tag-list">
+        <span class="tag">Create Story</span>
+        <span class="tag">Media Upload</span>
+        <span class="tag">Translations</span>
+        <span class="tag yellow">View Tracking</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon">👤</div>
+        <h3>Users</h3>
+      </div>
+      <p>User profiles, saved addresses, roles, and fine-grained permission management.</p>
+      <div class="tag-list">
+        <span class="tag">Profiles</span>
+        <span class="tag">Addresses</span>
+        <span class="tag">Roles</span>
+        <span class="tag yellow">Permissions</span>
+      </div>
+    </div>
+
+  </div>
+
+
+</div>
+
+<footer>
+  &copy; 2025 <strong>Buyology</strong> — E-commerce Backend API &nbsp;·&nbsp; Built with Spring Boot
+</footer>
+
+</body>
+</html>
