@@ -16,6 +16,8 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
 
     Optional<StoreProduct> findByStore_IdAndProduct_IdAndIsActiveTrue(UUID storeId, UUID productId);
 
+    List<StoreProduct> findByStore_IdAndDeletedAtIsNull(UUID storeId);
+
     /**
      * Returns distinct active products that belong to any of the given stores.
      * Only products with status ACTIVE and store-product rows that are active
