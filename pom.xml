@@ -131,6 +131,12 @@
 			<version>10.1.0</version>
 		</dependency>
 
+		<!-- WebClient (non-blocking HTTP client for courier service proxy) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webflux</artifactId>
+		</dependency>
+
 		<!-- Redis + Bucket4j rate limiting -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
