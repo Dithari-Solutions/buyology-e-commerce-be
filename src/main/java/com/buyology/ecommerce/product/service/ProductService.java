@@ -376,6 +376,20 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getSuperDeals(String lang) {
+        List<ProductResponse> responses = productRepository.findByStatusAndIsSuperDeal("ACTIVE", true).stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        return ApiResponse.success(responses, "Super deal products fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getLimitedStockProducts(String lang) {
+        List<ProductResponse> responses = productRepository.findByStatusAndIsLimitedStock("ACTIVE", true).stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        return ApiResponse.success(responses, "Limited stock products fetched successfully");
+    }
+
     /**
      * Returns active products for the given IDs, mapped to the requested language.
      * Used by the quick-delivery flow to convert pre-filtered product IDs to full responses.
