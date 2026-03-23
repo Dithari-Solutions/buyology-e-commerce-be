@@ -22,7 +22,7 @@ public class CourierServiceClient {
     @Value("${courier.service.timeout-ms:5000}")
     private long timeoutMs;
 
-    public CourierServiceClient(@Value("${courier.service.url}") String baseUrl) {
+    public CourierServiceClient(@Value("${courier.service.url:http://localhost:9090}") String baseUrl) {
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
