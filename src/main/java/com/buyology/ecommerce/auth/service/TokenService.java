@@ -4,7 +4,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -17,6 +21,10 @@ import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.domain.RefreshToken;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.repository.RefreshTokenRepository;
+import com.buyology.ecommerce.role.domain.UserPermission;
+import com.buyology.ecommerce.role.repository.RolePermissionRepository;
+import com.buyology.ecommerce.role.repository.UserPermissionRepository;
+import com.buyology.ecommerce.role.repository.UserRoleRepository;
 
 import java.nio.charset.StandardCharsets;
 
@@ -26,6 +34,9 @@ public class TokenService {
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final RolePermissionRepository rolePermissionRepository;
+    private final UserPermissionRepository userPermissionRepository;
     private final String secret;
     private final long accessTokenValidityMinutes;
     private final long refreshTokenValidityDays;
@@ -33,11 +44,17 @@ public class TokenService {
 
     public TokenService(
             RefreshTokenRepository refreshTokenRepository,
+            UserRoleRepository userRoleRepository,
+            RolePermissionRepository rolePermissionRepository,
+            UserPermissionRepository userPermissionRepository,
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-token-validity-minutes}") long accessTokenValidityMinutes,
             @Value("${jwt.refresh-token-validity-days}") long refreshTokenValidityDays,
             @Value("${cookie.secure:true}") boolean cookieSecure) {
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.rolePermissionRepository = rolePermissionRepository;
+        this.userPermissionRepository = userPermissionRepository;
         this.secret = secret;
         this.accessTokenValidityMinutes = accessTokenValidityMinutes;
         this.refreshTokenValidityDays = refreshTokenValidityDays;
@@ -61,8 +78,41 @@ public class TokenService {
 
         Instant now = Instant.now();
         Instant exp = now.plus(accessTokenValidityMinutes, ChronoUnit.MINUTES);
-        String payloadJson = String.format("{\"sub\":\"%s\",\"iat\":%d,\"exp\":%d}",
+
+        UUID userId = authCredentials.getUserId();
+
+        // Fetch assigned role names and IDs
+        List<String> roleNames = userRoleRepository.findRoleNamesByUserId(userId);
+        List<UUID> roleIds = userRoleRepository.findRoleIdsByUserId(userId);
+
+        // Start with permissions granted by the assigned roles
+        Set<String> effectivePermissions = new HashSet<>();
+        if (!roleIds.isEmpty()) {
+            effectivePermissions.addAll(rolePermissionRepository.findPermissionCodesByRoleIds(roleIds));
+        }
+
+        // Apply direct ALLOW / DENY overrides
+        List<UserPermission> overrides = userPermissionRepository.findWithPermissionByUserId(userId);
+        for (UserPermission override : overrides) {
+            if (override.getEffect() == UserPermission.Effect.ALLOW) {
+                effectivePermissions.add(override.getPermission().getCode());
+            } else if (override.getEffect() == UserPermission.Effect.DENY) {
+                effectivePermissions.remove(override.getPermission().getCode());
+            }
+        }
+
+        String rolesJson = roleNames.stream()
+                .map(r -> "\"" + r + "\"")
+                .collect(Collectors.joining(",", "[", "]"));
+        String permissionsJson = effectivePermissions.stream()
+                .map(p -> "\"" + p + "\"")
+                .collect(Collectors.joining(",", "[", "]"));
+
+        String payloadJson = String.format(
+                "{\"sub\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
                 authCredentials.getId(),
+                rolesJson,
+                permissionsJson,
                 now.getEpochSecond(),
                 exp.getEpochSecond());
 
