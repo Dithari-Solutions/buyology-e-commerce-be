@@ -4,13 +4,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.Map;
 
-@Component
+// No longer used — replaced by CourierServiceTokenProvider (HMAC service JWT)
 public class KeycloakTokenProvider {
 
     private static final Logger log = LoggerFactory.getLogger(KeycloakTokenProvider.class);

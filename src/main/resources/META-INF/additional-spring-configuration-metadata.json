@@ -5,6 +5,35 @@
       "type": "java.lang.Boolean",
       "description": "Whether to set the Secure flag on auth cookies. Set to false for local HTTP development, true in production (HTTPS).",
       "defaultValue": true
+    },
+    {
+      "name": "courier.service.url",
+      "type": "java.lang.String",
+      "description": "Base URL of the courier microservice.",
+      "defaultValue": "https://api-courier.dithari.com"
+    },
+    {
+      "name": "courier.service.timeout-ms",
+      "type": "java.lang.Long",
+      "description": "HTTP timeout in milliseconds for calls to the courier microservice.",
+      "defaultValue": 5000
+    },
+    {
+      "name": "courier.service.jwt.secret",
+      "type": "java.lang.String",
+      "description": "Shared HMAC secret used to sign service-to-service JWTs sent to the courier service. Must be at least 32 ASCII characters and match ECOMMERCE_SERVICE_JWT_SECRET on the courier side."
+    },
+    {
+      "name": "courier.service.jwt.issuer",
+      "type": "java.lang.String",
+      "description": "JWT issuer claim included in courier service tokens.",
+      "defaultValue": "buyology-ecommerce-service"
+    },
+    {
+      "name": "courier.service.jwt.expiry-seconds",
+      "type": "java.lang.Long",
+      "description": "TTL in seconds for courier service JWTs. Keep short — tokens are single-use effectively.",
+      "defaultValue": 60
     }
   ]
 }

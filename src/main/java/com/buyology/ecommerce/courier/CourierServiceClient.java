@@ -19,21 +19,27 @@ public class CourierServiceClient {
     private static final Logger log = LoggerFactory.getLogger(CourierServiceClient.class);
 
     private final WebClient webClient;
+    private final CourierServiceTokenProvider tokenProvider;
 
     @Value("${courier.service.timeout-ms:5000}")
     private long timeoutMs;
 
-    public CourierServiceClient(@Value("${courier.service.url:http://localhost:8081}") String baseUrl) {
-        this.webClient = WebClient.builder()
+    public CourierServiceClient(
+            @Value("${courier.service.url:https://api-courier.dithari.com}") String baseUrl,
+            CourierServiceTokenProvider tokenProvider
+    ) {
+        this.webClient     = WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
+        this.tokenProvider = tokenProvider;
     }
 
     /**
      * Forward a courier creation request to the courier service.
      */
-    public ResponseEntity<String> createCourier(Object request, String bearerToken, String clientIp) {
+    public ResponseEntity<String> createCourier(Object request, String clientIp) {
+        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.post()
                     .uri("/api/auth/admin/couriers")
@@ -63,7 +69,6 @@ public class CourierServiceClient {
      * List couriers — supports optional query params: page, size, status, vehicleType, search.
      */
     public ResponseEntity<String> listCouriers(
-            String bearerToken,
             String clientIp,
             Integer page,
             Integer size,
@@ -71,6 +76,7 @@ public class CourierServiceClient {
             String vehicleType,
             String search
     ) {
+        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromPath("/api/admin/couriers");
             if (page != null)        uriBuilder.queryParam("page", page);
@@ -107,7 +113,8 @@ public class CourierServiceClient {
     /**
      * Get a single courier by ID.
      */
-    public ResponseEntity<String> getCourierById(String courierId, String bearerToken, String clientIp) {
+    public ResponseEntity<String> getCourierById(String courierId, String clientIp) {
+        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.get()
                     .uri("/api/admin/couriers/{id}", courierId)
@@ -138,9 +145,9 @@ public class CourierServiceClient {
     public ResponseEntity<String> updateCourierStatus(
             String courierId,
             Object request,
-            String bearerToken,
             String clientIp
     ) {
+        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.patch()
                     .uri("/api/admin/couriers/{id}/status", courierId)
@@ -169,7 +176,8 @@ public class CourierServiceClient {
     /**
      * Delete (deactivate) a courier account.
      */
-    public ResponseEntity<String> deleteCourier(String courierId, String bearerToken, String clientIp) {
+    public ResponseEntity<String> deleteCourier(String courierId, String clientIp) {
+        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.delete()
                     .uri("/api/admin/couriers/{id}", courierId)

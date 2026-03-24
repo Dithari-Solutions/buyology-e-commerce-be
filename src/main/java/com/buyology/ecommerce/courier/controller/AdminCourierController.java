@@ -1,7 +1,6 @@
 package com.buyology.ecommerce.courier.controller;
 
 import com.buyology.ecommerce.courier.CourierServiceClient;
-import com.buyology.ecommerce.courier.KeycloakTokenProvider;
 import com.buyology.ecommerce.courier.dto.CreateCourierRequest;
 import com.buyology.ecommerce.courier.dto.UpdateCourierStatusRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,17 +19,14 @@ import org.springframework.web.bind.annotation.*;
 public class AdminCourierController {
 
     private final CourierServiceClient courierServiceClient;
-    private final KeycloakTokenProvider keycloakTokenProvider;
     private final ObjectMapper objectMapper;
 
     public AdminCourierController(
             CourierServiceClient courierServiceClient,
-            KeycloakTokenProvider keycloakTokenProvider,
             ObjectMapper objectMapper
     ) {
-        this.courierServiceClient  = courierServiceClient;
-        this.keycloakTokenProvider = keycloakTokenProvider;
-        this.objectMapper          = objectMapper;
+        this.courierServiceClient = courierServiceClient;
+        this.objectMapper         = objectMapper;
     }
 
     @PostMapping
@@ -40,9 +36,8 @@ public class AdminCourierController {
             @Valid @RequestBody CreateCourierRequest request,
             HttpServletRequest httpRequest
     ) {
-        String bearerToken = keycloakTokenProvider.getBearerToken();
-        String clientIp    = resolveClientIp(httpRequest);
-        return parseUpstream(courierServiceClient.createCourier(request, bearerToken, clientIp));
+        String clientIp = resolveClientIp(httpRequest);
+        return parseUpstream(courierServiceClient.createCourier(request, clientIp));
     }
 
     @GetMapping
@@ -59,10 +54,9 @@ public class AdminCourierController {
             @Parameter(description = "Search by name or phone")
             @RequestParam(required = false) String search
     ) {
-        String bearerToken = keycloakTokenProvider.getBearerToken();
-        String clientIp    = resolveClientIp(httpRequest);
+        String clientIp = resolveClientIp(httpRequest);
         return parseUpstream(courierServiceClient.listCouriers(
-                bearerToken, clientIp, page, size, status, vehicleType, search));
+                clientIp, page, size, status, vehicleType, search));
     }
 
     @GetMapping("/{courierId}")
@@ -72,9 +66,8 @@ public class AdminCourierController {
             @PathVariable String courierId,
             HttpServletRequest httpRequest
     ) {
-        String bearerToken = keycloakTokenProvider.getBearerToken();
-        String clientIp    = resolveClientIp(httpRequest);
-        return parseUpstream(courierServiceClient.getCourierById(courierId, bearerToken, clientIp));
+        String clientIp = resolveClientIp(httpRequest);
+        return parseUpstream(courierServiceClient.getCourierById(courierId, clientIp));
     }
 
     @PatchMapping("/{courierId}/status")
@@ -85,10 +78,8 @@ public class AdminCourierController {
             @Valid @RequestBody UpdateCourierStatusRequest request,
             HttpServletRequest httpRequest
     ) {
-        String bearerToken = keycloakTokenProvider.getBearerToken();
-        String clientIp    = resolveClientIp(httpRequest);
-        return parseUpstream(courierServiceClient.updateCourierStatus(
-                courierId, request, bearerToken, clientIp));
+        String clientIp = resolveClientIp(httpRequest);
+        return parseUpstream(courierServiceClient.updateCourierStatus(courierId, request, clientIp));
     }
 
     @DeleteMapping("/{courierId}")
@@ -98,9 +89,8 @@ public class AdminCourierController {
             @PathVariable String courierId,
             HttpServletRequest httpRequest
     ) {
-        String bearerToken = keycloakTokenProvider.getBearerToken();
-        String clientIp    = resolveClientIp(httpRequest);
-        return parseUpstream(courierServiceClient.deleteCourier(courierId, bearerToken, clientIp));
+        String clientIp = resolveClientIp(httpRequest);
+        return parseUpstream(courierServiceClient.deleteCourier(courierId, clientIp));
     }
 
     // -------------------------------------------------------------------------
