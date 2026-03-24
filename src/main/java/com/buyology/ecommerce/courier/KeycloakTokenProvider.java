@@ -21,10 +21,10 @@ public class KeycloakTokenProvider {
     private final String clientSecret;
 
     public KeycloakTokenProvider(
-            @Value("${keycloak.server-url}") String serverUrl,
-            @Value("${keycloak.realm}") String realm,
-            @Value("${keycloak.client-id}") String clientId,
-            @Value("${keycloak.client-secret}") String clientSecret
+            @Value("${keycloak.server-url:http://localhost:8080}") String serverUrl,
+            @Value("${keycloak.realm:buyology}") String realm,
+            @Value("${keycloak.client-id:ecommerce-backend}") String clientId,
+            @Value("${keycloak.client-secret:}") String clientSecret
     ) {
         this.webClient    = WebClient.builder().baseUrl(serverUrl).build();
         this.realm        = realm;
