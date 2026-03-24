@@ -40,6 +40,7 @@ public class CourierServiceClient {
      */
     public ResponseEntity<String> createCourier(Object request, String clientIp) {
         String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
+        log.info("[DEBUG] Service JWT sent to courier: {}", bearerToken);
         try {
             return webClient.post()
                     .uri("/api/auth/admin/couriers")
