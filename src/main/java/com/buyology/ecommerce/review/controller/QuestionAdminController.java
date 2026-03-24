@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/questions")
+@PreAuthorize("hasRole('SUPERADMIN') or hasRole('CUSTOMER_SUPPORT') or hasRole('ADMIN')")
 @Tag(name = "Questions (Admin)", description = "Admin APIs for moderating questions and managing answers")
 public class QuestionAdminController {
 

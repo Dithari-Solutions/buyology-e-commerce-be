@@ -34,7 +34,7 @@ public class AdminCourierController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
     @Operation(summary = "Create a new courier (admin only)")
     public ResponseEntity<Object> createCourier(
             @Valid @RequestBody CreateCourierRequest request,
@@ -46,7 +46,7 @@ public class AdminCourierController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
     @Operation(summary = "List couriers (admin only)")
     public ResponseEntity<Object> listCouriers(
             HttpServletRequest httpRequest,
@@ -66,7 +66,7 @@ public class AdminCourierController {
     }
 
     @GetMapping("/{courierId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
     @Operation(summary = "Get courier details by ID (admin only)")
     public ResponseEntity<Object> getCourierById(
             @PathVariable String courierId,
@@ -78,7 +78,7 @@ public class AdminCourierController {
     }
 
     @PatchMapping("/{courierId}/status")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
     @Operation(summary = "Update courier status (admin only)")
     public ResponseEntity<Object> updateCourierStatus(
             @PathVariable String courierId,
@@ -92,8 +92,8 @@ public class AdminCourierController {
     }
 
     @DeleteMapping("/{courierId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Delete a courier account (ADMIN only)")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @Operation(summary = "Delete a courier account (ADMIN/SUPERADMIN only)")
     public ResponseEntity<Object> deleteCourier(
             @PathVariable String courierId,
             HttpServletRequest httpRequest

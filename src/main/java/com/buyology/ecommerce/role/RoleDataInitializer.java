@@ -1,0 +1,194 @@
+package com.buyology.ecommerce.role;
+
+import com.buyology.ecommerce.role.domain.Permission;
+import com.buyology.ecommerce.role.domain.Role;
+import com.buyology.ecommerce.role.domain.RolePermission;
+import com.buyology.ecommerce.role.domain.RolePermissionId;
+import com.buyology.ecommerce.role.repository.PermissionRepository;
+import com.buyology.ecommerce.role.repository.RolePermissionRepository;
+import com.buyology.ecommerce.role.repository.RoleRepository;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * Seeds predefined roles and permissions on every startup (idempotent).
+ *
+ * Roles and their access:
+ *   CUSTOMER_SUPPORT — review & questions module
+ *   COURIER_ADMIN    — courier module (no delete)
+ *   STORE_ADMIN      — store product assignment for their store
+ *   SUPERADMIN       — full access to all modules
+ */
+@Component
+public class RoleDataInitializer implements ApplicationRunner {
+
+    // ── Permission code lists per role ───────────────────────────────────────
+
+    private static final List<String> CUSTOMER_SUPPORT_PERMISSIONS = List.of(
+            PermissionConstants.REVIEW_READ,
+            PermissionConstants.REVIEW_MODERATE,
+            PermissionConstants.REVIEW_REPLY_CREATE,
+            PermissionConstants.REVIEW_REPLY_UPDATE,
+            PermissionConstants.REVIEW_REPLY_DELETE,
+            PermissionConstants.REVIEW_DELETE,
+            PermissionConstants.QUESTION_READ,
+            PermissionConstants.QUESTION_MODERATE,
+            PermissionConstants.QUESTION_ANSWER_CREATE,
+            PermissionConstants.QUESTION_ANSWER_UPDATE,
+            PermissionConstants.QUESTION_ANSWER_TOGGLE,
+            PermissionConstants.QUESTION_ANSWER_DELETE,
+            PermissionConstants.QUESTION_DELETE
+    );
+
+    private static final List<String> COURIER_ADMIN_PERMISSIONS = List.of(
+            PermissionConstants.COURIER_READ,
+            PermissionConstants.COURIER_CREATE,
+            PermissionConstants.COURIER_UPDATE
+            // courier:delete is reserved for ADMIN / SUPERADMIN
+    );
+
+    private static final List<String> STORE_ADMIN_PERMISSIONS = List.of(
+            PermissionConstants.STORE_READ,
+            PermissionConstants.STORE_UPDATE,
+            PermissionConstants.STORE_PRODUCT_READ,
+            PermissionConstants.STORE_PRODUCT_ASSIGN,
+            PermissionConstants.STORE_PRODUCT_UPDATE,
+            PermissionConstants.STORE_PRODUCT_REMOVE,
+            PermissionConstants.STORE_ADMIN_READ
+    );
+
+    private static final List<String> ALL_PERMISSIONS = List.of(
+            PermissionConstants.REVIEW_READ,
+            PermissionConstants.REVIEW_MODERATE,
+            PermissionConstants.REVIEW_REPLY_CREATE,
+            PermissionConstants.REVIEW_REPLY_UPDATE,
+            PermissionConstants.REVIEW_REPLY_DELETE,
+            PermissionConstants.REVIEW_DELETE,
+            PermissionConstants.QUESTION_READ,
+            PermissionConstants.QUESTION_MODERATE,
+            PermissionConstants.QUESTION_ANSWER_CREATE,
+            PermissionConstants.QUESTION_ANSWER_UPDATE,
+            PermissionConstants.QUESTION_ANSWER_TOGGLE,
+            PermissionConstants.QUESTION_ANSWER_DELETE,
+            PermissionConstants.QUESTION_DELETE,
+            PermissionConstants.COURIER_READ,
+            PermissionConstants.COURIER_CREATE,
+            PermissionConstants.COURIER_UPDATE,
+            PermissionConstants.COURIER_DELETE,
+            PermissionConstants.STORE_READ,
+            PermissionConstants.STORE_UPDATE,
+            PermissionConstants.STORE_PRODUCT_READ,
+            PermissionConstants.STORE_PRODUCT_ASSIGN,
+            PermissionConstants.STORE_PRODUCT_UPDATE,
+            PermissionConstants.STORE_PRODUCT_REMOVE,
+            PermissionConstants.STORE_ADMIN_READ,
+            PermissionConstants.STORE_ADMIN_ASSIGN,
+            PermissionConstants.STORE_ADMIN_UPDATE,
+            PermissionConstants.STORE_ADMIN_REMOVE
+    );
+
+    // ── Role definitions ─────────────────────────────────────────────────────
+
+    private record RoleDefinition(String name, String description, List<String> permissions) {}
+
+    private static final List<RoleDefinition> ROLE_DEFINITIONS = List.of(
+            new RoleDefinition(
+                    "CUSTOMER_SUPPORT",
+                    "Moderates customer reviews and product questions",
+                    CUSTOMER_SUPPORT_PERMISSIONS),
+            new RoleDefinition(
+                    "COURIER_ADMIN",
+                    "Manages courier accounts and delivery operations",
+                    COURIER_ADMIN_PERMISSIONS),
+            new RoleDefinition(
+                    "STORE_ADMIN",
+                    "Manages product assignments and inventory for their store",
+                    STORE_ADMIN_PERMISSIONS),
+            new RoleDefinition(
+                    "SUPERADMIN",
+                    "Full access to all modules and operations",
+                    ALL_PERMISSIONS)
+    );
+
+    // ── Repositories ─────────────────────────────────────────────────────────
+
+    private final RoleRepository roleRepository;
+    private final PermissionRepository permissionRepository;
+    private final RolePermissionRepository rolePermissionRepository;
+
+    public RoleDataInitializer(RoleRepository roleRepository,
+                               PermissionRepository permissionRepository,
+                               RolePermissionRepository rolePermissionRepository) {
+        this.roleRepository = roleRepository;
+        this.permissionRepository = permissionRepository;
+        this.rolePermissionRepository = rolePermissionRepository;
+    }
+
+    // ── Startup logic ─────────────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public void run(ApplicationArguments args) {
+        // Ensure every permission code exists in the permissions table
+        Map<String, Permission> permByCode = ensurePermissions();
+
+        // Ensure every role exists and has exactly the configured permissions
+        for (RoleDefinition def : ROLE_DEFINITIONS) {
+            Role role = ensureRole(def.name(), def.description());
+            ensureRolePermissions(role, def.permissions(), permByCode);
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Map<String, Permission> ensurePermissions() {
+        return ALL_PERMISSIONS.stream()
+                .map(code -> permissionRepository.findByCode(code).orElseGet(() -> {
+                    Permission p = new Permission();
+                    p.setCode(code);
+                    p.setDescription(humanise(code));
+                    return permissionRepository.save(p);
+                }))
+                .collect(Collectors.toMap(Permission::getCode, Function.identity()));
+    }
+
+    private Role ensureRole(String name, String description) {
+        return roleRepository.findByName(name).orElseGet(() -> {
+            Role r = new Role();
+            r.setName(name);
+            r.setDescription(description);
+            r.setIsSystem(true);
+            return roleRepository.save(r);
+        });
+    }
+
+    private void ensureRolePermissions(Role role, List<String> codes, Map<String, Permission> permByCode) {
+        for (String code : codes) {
+            Permission permission = permByCode.get(code);
+            if (permission == null) continue;
+            if (!rolePermissionRepository.existsByIdRoleIdAndIdPermissionId(role.getId(), permission.getId())) {
+                RolePermission rp = new RolePermission();
+                rp.setId(new RolePermissionId(role.getId(), permission.getId()));
+                rp.setRole(role);
+                rp.setPermission(permission);
+                rolePermissionRepository.save(rp);
+            }
+        }
+    }
+
+    /** Converts "courier:reply:create" → "Courier reply create" */
+    private String humanise(String code) {
+        return Arrays.stream(code.split(":"))
+                .reduce((a, b) -> a + " " + b)
+                .map(s -> Character.toUpperCase(s.charAt(0)) + s.substring(1))
+                .orElse(code);
+    }
+}
