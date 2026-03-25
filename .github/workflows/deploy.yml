@@ -75,6 +75,15 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME,PAYMOB_API_KEY,PAYMOB_SECRET_KEY,PAYMOB_PUBLIC_KEY,PAYMOB_HMAC_SECRET,PAYMOB_CARD_INTEGRATION_ID,PAYMOB_CARD_IFRAME_ID,PAYMOB_TABBY_INTEGRATION_ID,PAYMOB_TAMARA_INTEGRATION_ID,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN
           script: |
+            # --- DEBUG: verify COURIER_SERVICE_PRIVATE_KEY arrives on VPS ---
+            COURIER_KEY_INLINE="${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}"
+            if [ -z "$COURIER_KEY_INLINE" ]; then
+              echo "DEBUG: COURIER_SERVICE_PRIVATE_KEY is EMPTY (secret not set or injection failed)"
+            else
+              echo "DEBUG: COURIER_SERVICE_PRIVATE_KEY length=${#COURIER_KEY_INLINE} first10=${COURIER_KEY_INLINE:0:10}"
+            fi
+            # --- END DEBUG ---
+
             docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
 
             docker stop ecommerce-app || true
