@@ -65,8 +65,21 @@ public class CourierServiceTokenProvider {
 
     // ── private ───────────────────────────────────────────────────────────────
 
-    private static RSAPrivateKey parsePrivateKey(String pem) {
+    /**
+     * Accepts two formats:
+     *  1. Raw PKCS8 PEM  (starts with "-----BEGIN")
+     *  2. Base64-encoded PEM (no newlines) — used by CI/CD to safely pass
+     *     multiline values through shell env vars
+     */
+    private static RSAPrivateKey parsePrivateKey(String input) {
         try {
+            String trimmed = input.trim();
+
+            // If not a PEM header, assume the whole value is base64-encoded PEM
+            String pem = trimmed.startsWith("-----")
+                    ? trimmed
+                    : new String(Base64.getDecoder().decode(trimmed));
+
             String cleaned = pem
                     .replace("-----BEGIN PRIVATE KEY-----", "")
                     .replace("-----END PRIVATE KEY-----", "")
@@ -78,7 +91,8 @@ public class CourierServiceTokenProvider {
                     .generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Failed to parse COURIER_SERVICE_PRIVATE_KEY — ensure it is a PKCS8 PEM", e);
+                    "Failed to parse COURIER_SERVICE_PRIVATE_KEY — ensure it is a PKCS8 PEM " +
+                    "(raw or base64-encoded)", e);
         }
     }
 }

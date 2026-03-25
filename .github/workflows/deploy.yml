@@ -80,6 +80,10 @@ jobs:
             docker stop ecommerce-app || true
             docker rm ecommerce-app || true
 
+            # PEM keys contain newlines which break shell -e quoting.
+            # Base64-encode here; the app decodes it at startup.
+            COURIER_KEY_B64=$(printf '%s' "$COURIER_SERVICE_PRIVATE_KEY" | base64 -w 0)
+
             docker run -d \
               --name ecommerce-app \
               -p 8080:8080 \
@@ -109,5 +113,5 @@ jobs:
               -e "TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID" \
               -e "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" \
               -e "TWILIO_PHONE_NUMBER=+1your_twilio_number" \
-              -e "COURIER_SERVICE_PRIVATE_KEY=$COURIER_SERVICE_PRIVATE_KEY" \
+              -e "COURIER_SERVICE_PRIVATE_KEY=$COURIER_KEY_B64" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
