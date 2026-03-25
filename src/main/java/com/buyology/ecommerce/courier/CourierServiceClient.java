@@ -39,12 +39,12 @@ public class CourierServiceClient {
      * Forward a courier creation request to the courier service.
      */
     public ResponseEntity<String> createCourier(Object request, String clientIp) {
-        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
-        log.info("[DEBUG] Service JWT sent to courier: {}", bearerToken);
+        String token = tokenProvider.generateServiceToken();
+        log.info("[COURIER-CLIENT] POST /api/v1/couriers ip={}", clientIp);
         try {
-            return webClient.post()
+            ResponseEntity<String> response = webClient.post()
                     .uri("/api/v1/couriers")
-                    .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .bodyValue(request)
                     .retrieve()
@@ -56,10 +56,13 @@ public class CourierServiceClient {
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
+            log.info("[COURIER-CLIENT] POST /api/v1/couriers → {}", response.getStatusCode().value());
+            return response;
         } catch (CourierServiceException ex) {
+            log.warn("[COURIER-CLIENT] POST /api/v1/couriers → {} body={}", ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("Courier service call failed: {}", ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] POST /api/v1/couriers failed: {}", ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");
@@ -77,7 +80,7 @@ public class CourierServiceClient {
             String vehicleType,
             String search
     ) {
-        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
+        String token = tokenProvider.generateServiceToken();
         try {
             UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromPath("/api/v1/couriers");
             if (page != null)        uriBuilder.queryParam("page", page);
@@ -87,10 +90,11 @@ public class CourierServiceClient {
             if (search != null)      uriBuilder.queryParam("search", search);
 
             String uri = uriBuilder.toUriString();
+            log.info("[COURIER-CLIENT] GET {} ip={}", uri, clientIp);
 
-            return webClient.get()
+            ResponseEntity<String> response = webClient.get()
                     .uri(uri)
-                    .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .retrieve()
                     .onStatus(
@@ -101,10 +105,13 @@ public class CourierServiceClient {
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
+            log.info("[COURIER-CLIENT] GET {} → {}", uri, response.getStatusCode().value());
+            return response;
         } catch (CourierServiceException ex) {
+            log.warn("[COURIER-CLIENT] GET /api/v1/couriers → {} body={}", ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("Courier service list call failed: {}", ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] GET /api/v1/couriers failed: {}", ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");
@@ -115,11 +122,12 @@ public class CourierServiceClient {
      * Get a single courier by ID.
      */
     public ResponseEntity<String> getCourierById(String courierId, String clientIp) {
-        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
+        String token = tokenProvider.generateServiceToken();
+        log.info("[COURIER-CLIENT] GET /api/v1/couriers/{} ip={}", courierId, clientIp);
         try {
-            return webClient.get()
+            ResponseEntity<String> response = webClient.get()
                     .uri("/api/v1/couriers/{id}", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .retrieve()
                     .onStatus(
@@ -130,10 +138,13 @@ public class CourierServiceClient {
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
+            log.info("[COURIER-CLIENT] GET /api/v1/couriers/{} → {}", courierId, response.getStatusCode().value());
+            return response;
         } catch (CourierServiceException ex) {
+            log.warn("[COURIER-CLIENT] GET /api/v1/couriers/{} → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("Courier service getById call failed: {}", ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] GET /api/v1/couriers/{} failed: {}", courierId, ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");
@@ -148,11 +159,12 @@ public class CourierServiceClient {
             Object request,
             String clientIp
     ) {
-        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
+        String token = tokenProvider.generateServiceToken();
+        log.info("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status ip={}", courierId, clientIp);
         try {
-            return webClient.patch()
+            ResponseEntity<String> response = webClient.patch()
                     .uri("/api/v1/couriers/{id}/status", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .bodyValue(request)
                     .retrieve()
@@ -164,10 +176,13 @@ public class CourierServiceClient {
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
+            log.info("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status → {}", courierId, response.getStatusCode().value());
+            return response;
         } catch (CourierServiceException ex) {
+            log.warn("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("Courier service updateStatus call failed: {}", ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status failed: {}", courierId, ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");
@@ -178,11 +193,12 @@ public class CourierServiceClient {
      * Delete (deactivate) a courier account.
      */
     public ResponseEntity<String> deleteCourier(String courierId, String clientIp) {
-        String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
+        String token = tokenProvider.generateServiceToken();
+        log.info("[COURIER-CLIENT] DELETE /api/v1/couriers/{} ip={}", courierId, clientIp);
         try {
-            return webClient.delete()
+            ResponseEntity<String> response = webClient.delete()
                     .uri("/api/v1/couriers/{id}", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .retrieve()
                     .onStatus(
@@ -193,10 +209,13 @@ public class CourierServiceClient {
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
+            log.info("[COURIER-CLIENT] DELETE /api/v1/couriers/{} → {}", courierId, response.getStatusCode().value());
+            return response;
         } catch (CourierServiceException ex) {
+            log.warn("[COURIER-CLIENT] DELETE /api/v1/couriers/{} → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("Courier service delete call failed: {}", ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] DELETE /api/v1/couriers/{} failed: {}", courierId, ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");

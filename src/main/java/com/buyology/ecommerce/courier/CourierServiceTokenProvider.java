@@ -2,17 +2,22 @@ package com.buyology.ecommerce.courier;
 
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 
 @Component
 public class CourierServiceTokenProvider {
+
+    private static final Logger log = LoggerFactory.getLogger(CourierServiceTokenProvider.class);
 
     private final SecretKey key;
     private final String issuer;
@@ -37,7 +42,7 @@ public class CourierServiceTokenProvider {
      */
     public String generateServiceToken() {
         Instant now = Instant.now();
-        return Jwts.builder()
+        String token = Jwts.builder()
                 .issuer(issuer)
                 .subject("ecommerce-backend")
                 .claim("roles", List.of("COURIER_ADMIN"))
@@ -45,5 +50,16 @@ public class CourierServiceTokenProvider {
                 .expiration(Date.from(now.plusSeconds(expirySeconds)))
                 .signWith(key)
                 .compact();
+
+        // Decode and log the payload to verify iss/sub/roles are present
+        try {
+            String[] parts = token.split("\\.");
+            String decodedPayload = new String(Base64.getUrlDecoder().decode(parts[1]));
+            log.info("[COURIER-TOKEN] Generated service JWT payload: {}", decodedPayload);
+        } catch (Exception e) {
+            log.warn("[COURIER-TOKEN] Could not decode generated token for logging: {}", e.getMessage());
+        }
+
+        return token;
     }
 }
