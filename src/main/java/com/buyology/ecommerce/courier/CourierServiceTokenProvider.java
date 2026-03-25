@@ -31,7 +31,7 @@ public class CourierServiceTokenProvider {
     private final long expirySeconds;
 
     public CourierServiceTokenProvider(
-            @Value("${courier.service.jwt.private-key}") String privateKeyPem,
+            @Value("${courier.service.jwt.private-key:}") String privateKeyPem,
             @Value("${courier.service.jwt.issuer:buyology-ecommerce-service}") String issuer,
             @Value("${courier.service.jwt.expiry-seconds:60}") long expirySeconds
     ) {
