@@ -43,7 +43,7 @@ public class CourierServiceClient {
         log.info("[DEBUG] Service JWT sent to courier: {}", bearerToken);
         try {
             return webClient.post()
-                    .uri("/api/auth/admin/couriers")
+                    .uri("/api/v1/couriers")
                     .header(HttpHeaders.AUTHORIZATION, bearerToken)
                     .header("X-Forwarded-For", clientIp)
                     .bodyValue(request)
@@ -79,7 +79,7 @@ public class CourierServiceClient {
     ) {
         String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
-            UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromPath("/api/admin/couriers");
+            UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromPath("/api/v1/couriers");
             if (page != null)        uriBuilder.queryParam("page", page);
             if (size != null)        uriBuilder.queryParam("size", size);
             if (status != null)      uriBuilder.queryParam("status", status);
@@ -118,7 +118,7 @@ public class CourierServiceClient {
         String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.get()
-                    .uri("/api/admin/couriers/{id}", courierId)
+                    .uri("/api/v1/couriers/{id}", courierId)
                     .header(HttpHeaders.AUTHORIZATION, bearerToken)
                     .header("X-Forwarded-For", clientIp)
                     .retrieve()
@@ -151,7 +151,7 @@ public class CourierServiceClient {
         String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.patch()
-                    .uri("/api/admin/couriers/{id}/status", courierId)
+                    .uri("/api/v1/couriers/{id}/status", courierId)
                     .header(HttpHeaders.AUTHORIZATION, bearerToken)
                     .header("X-Forwarded-For", clientIp)
                     .bodyValue(request)
@@ -181,7 +181,7 @@ public class CourierServiceClient {
         String bearerToken = "Bearer " + tokenProvider.generateServiceToken();
         try {
             return webClient.delete()
-                    .uri("/api/admin/couriers/{id}", courierId)
+                    .uri("/api/v1/couriers/{id}", courierId)
                     .header(HttpHeaders.AUTHORIZATION, bearerToken)
                     .header("X-Forwarded-For", clientIp)
                     .retrieve()

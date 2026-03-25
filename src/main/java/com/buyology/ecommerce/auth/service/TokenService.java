@@ -13,6 +13,8 @@ import java.util.stream.Collectors;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,8 @@ import java.nio.charset.StandardCharsets;
 
 @Service
 public class TokenService {
+
+    private static final Logger log = LoggerFactory.getLogger(TokenService.class);
 
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
@@ -140,14 +144,26 @@ public class TokenService {
     public boolean validateAccessToken(String token) {
         try {
             String[] parts = token.split("\\.");
-            if (parts.length != 3) return false;
+            if (parts.length != 3) {
+                log.warn("[JWT] Invalid structure: {} parts", parts.length);
+                return false;
+            }
 
-            if (!sign(parts[0] + "." + parts[1], secret).equals(parts[2])) return false;
+            String expected = sign(parts[0] + "." + parts[1], secret);
+            if (!expected.equals(parts[2])) {
+                log.warn("[JWT] Signature mismatch. expected={} actual={}", expected, parts[2]);
+                return false;
+            }
 
             String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
             long exp = Long.parseLong(payloadJson.replaceAll(".*\"exp\":(\\d+).*", "$1"));
-            return Instant.now().getEpochSecond() < exp;
+            if (Instant.now().getEpochSecond() >= exp) {
+                log.warn("[JWT] Token expired. exp={} now={}", exp, Instant.now().getEpochSecond());
+                return false;
+            }
+            return true;
         } catch (Exception e) {
+            log.warn("[JWT] Validation exception: {}", e.getMessage());
             return false;
         }
     }
