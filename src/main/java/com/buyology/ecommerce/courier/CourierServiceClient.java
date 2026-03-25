@@ -3,13 +3,14 @@ package com.buyology.ecommerce.courier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.Duration;
 
@@ -19,203 +20,116 @@ public class CourierServiceClient {
     private static final Logger log = LoggerFactory.getLogger(CourierServiceClient.class);
 
     private final WebClient webClient;
-    private final CourierServiceTokenProvider tokenProvider;
 
-    @Value("${courier.service.timeout-ms:5000}")
+    @Value("${courier.service.timeout-ms:10000}")
     private long timeoutMs;
 
     public CourierServiceClient(
-            @Value("${courier.service.url:https://api-courier.dithari.com}") String baseUrl,
-            CourierServiceTokenProvider tokenProvider
+            @Value("${courier.service.url:http://localhost:8081}") String baseUrl
     ) {
-        this.webClient     = WebClient.builder()
+        this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
-        this.tokenProvider = tokenProvider;
     }
 
-    /**
-     * Forward a courier creation request to the courier service.
-     */
-    public ResponseEntity<String> createCourier(Object request, String clientIp) {
-        String token = tokenProvider.generateServiceToken();
-        log.info("[COURIER-CLIENT] POST /api/v1/couriers ip={}", clientIp);
-        try {
-            ResponseEntity<String> response = webClient.post()
-                    .uri("/api/v1/couriers")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .header("X-Forwarded-For", clientIp)
-                    .bodyValue(request)
-                    .retrieve()
-                    .onStatus(
-                            status -> status.is4xxClientError() || status.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new CourierServiceException(
-                                            clientResponse.statusCode().value(), body)))
-                    .toEntity(String.class)
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .block();
-            log.info("[COURIER-CLIENT] POST /api/v1/couriers → {}", response.getStatusCode().value());
-            return response;
-        } catch (CourierServiceException ex) {
-            log.warn("[COURIER-CLIENT] POST /api/v1/couriers → {} body={}", ex.getStatusCode(), ex.getBody());
-            return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
-        } catch (Exception ex) {
-            log.error("[COURIER-CLIENT] POST /api/v1/couriers failed: {}", ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
-                          "\"message\":\"Courier service is temporarily unavailable.\"}");
-        }
-    }
-
-    /**
-     * List couriers — supports optional query params: page, size, status, vehicleType, search.
-     */
-    public ResponseEntity<String> listCouriers(
-            String clientIp,
-            Integer page,
-            Integer size,
-            String status,
-            String vehicleType,
-            String search
-    ) {
-        String token = tokenProvider.generateServiceToken();
-        try {
-            UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromPath("/api/v1/couriers");
-            if (page != null)        uriBuilder.queryParam("page", page);
-            if (size != null)        uriBuilder.queryParam("size", size);
-            if (status != null)      uriBuilder.queryParam("status", status);
-            if (vehicleType != null) uriBuilder.queryParam("vehicleType", vehicleType);
-            if (search != null)      uriBuilder.queryParam("search", search);
-
-            String uri = uriBuilder.toUriString();
-            log.info("[COURIER-CLIENT] GET {} ip={}", uri, clientIp);
-
-            ResponseEntity<String> response = webClient.get()
-                    .uri(uri)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .header("X-Forwarded-For", clientIp)
-                    .retrieve()
-                    .onStatus(
-                            s -> s.is4xxClientError() || s.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new CourierServiceException(
-                                            clientResponse.statusCode().value(), body)))
-                    .toEntity(String.class)
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .block();
-            log.info("[COURIER-CLIENT] GET {} → {}", uri, response.getStatusCode().value());
-            return response;
-        } catch (CourierServiceException ex) {
-            log.warn("[COURIER-CLIENT] GET /api/v1/couriers → {} body={}", ex.getStatusCode(), ex.getBody());
-            return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
-        } catch (Exception ex) {
-            log.error("[COURIER-CLIENT] GET /api/v1/couriers failed: {}", ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
-                          "\"message\":\"Courier service is temporarily unavailable.\"}");
-        }
-    }
-
-    /**
-     * Get a single courier by ID.
-     */
-    public ResponseEntity<String> getCourierById(String courierId, String clientIp) {
-        String token = tokenProvider.generateServiceToken();
-        log.info("[COURIER-CLIENT] GET /api/v1/couriers/{} ip={}", courierId, clientIp);
-        try {
-            ResponseEntity<String> response = webClient.get()
-                    .uri("/api/v1/couriers/{id}", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .header("X-Forwarded-For", clientIp)
-                    .retrieve()
-                    .onStatus(
-                            s -> s.is4xxClientError() || s.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new CourierServiceException(
-                                            clientResponse.statusCode().value(), body)))
-                    .toEntity(String.class)
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .block();
-            log.info("[COURIER-CLIENT] GET /api/v1/couriers/{} → {}", courierId, response.getStatusCode().value());
-            return response;
-        } catch (CourierServiceException ex) {
-            log.warn("[COURIER-CLIENT] GET /api/v1/couriers/{} → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
-            return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
-        } catch (Exception ex) {
-            log.error("[COURIER-CLIENT] GET /api/v1/couriers/{} failed: {}", courierId, ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
-                          "\"message\":\"Courier service is temporarily unavailable.\"}");
-        }
-    }
-
-    /**
-     * Update a courier's account status (ACTIVE, SUSPENDED, etc.).
-     */
-    public ResponseEntity<String> updateCourierStatus(
-            String courierId,
-            Object request,
+    /** Forward a multipart POST request (e.g. courier creation). */
+    public ResponseEntity<String> forwardMultipart(
+            String uri,
+            MultiValueMap<String, HttpEntity<?>> body,
+            String bearerToken,
             String clientIp
     ) {
-        String token = tokenProvider.generateServiceToken();
-        log.info("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status ip={}", courierId, clientIp);
-        try {
-            ResponseEntity<String> response = webClient.patch()
-                    .uri("/api/v1/couriers/{id}/status", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .header("X-Forwarded-For", clientIp)
-                    .bodyValue(request)
-                    .retrieve()
-                    .onStatus(
-                            s -> s.is4xxClientError() || s.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new CourierServiceException(
-                                            clientResponse.statusCode().value(), body)))
-                    .toEntity(String.class)
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .block();
-            log.info("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status → {}", courierId, response.getStatusCode().value());
-            return response;
-        } catch (CourierServiceException ex) {
-            log.warn("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
-            return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
-        } catch (Exception ex) {
-            log.error("[COURIER-CLIENT] PATCH /api/v1/couriers/{}/status failed: {}", courierId, ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
-                          "\"message\":\"Courier service is temporarily unavailable.\"}");
-        }
+        log.info("[COURIER-CLIENT] POST {} ip={}", uri, clientIp);
+        return execute(
+                webClient.post()
+                        .uri(uri)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .header("X-Forwarded-For", clientIp)
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .bodyValue(body)
+        );
     }
 
-    /**
-     * Delete (deactivate) a courier account.
-     */
-    public ResponseEntity<String> deleteCourier(String courierId, String clientIp) {
-        String token = tokenProvider.generateServiceToken();
-        log.info("[COURIER-CLIENT] DELETE /api/v1/couriers/{} ip={}", courierId, clientIp);
-        try {
-            ResponseEntity<String> response = webClient.delete()
-                    .uri("/api/v1/couriers/{id}", courierId)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+    /** Forward a multipart PATCH request (e.g. courier profile update). */
+    public ResponseEntity<String> forwardMultipartPatch(
+            String uri,
+            MultiValueMap<String, HttpEntity<?>> body,
+            String bearerToken,
+            String clientIp
+    ) {
+        log.info("[COURIER-CLIENT] PATCH {} ip={}", uri, clientIp);
+        return execute(
+                webClient.patch()
+                        .uri(uri)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .header("X-Forwarded-For", clientIp)
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .bodyValue(body)
+        );
+    }
+
+    /** Forward a JSON body request (POST or PATCH). */
+    public ResponseEntity<String> forwardJson(
+            String method,
+            String uri,
+            Object body,
+            String bearerToken,
+            String clientIp
+    ) {
+        log.info("[COURIER-CLIENT] {} {} ip={}", method, uri, clientIp);
+        WebClient.RequestBodySpec spec = switch (method.toUpperCase()) {
+            case "POST"  -> webClient.post().uri(uri);
+            case "PATCH" -> webClient.patch().uri(uri);
+            default      -> throw new IllegalArgumentException("Unsupported method: " + method);
+        };
+        return execute(
+                spec.header(HttpHeaders.AUTHORIZATION, bearerToken)
                     .header("X-Forwarded-For", clientIp)
-                    .retrieve()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+        );
+    }
+
+    /** Forward a no-body request (GET or DELETE). Query string is appended as-is. */
+    public ResponseEntity<String> forwardNoBody(
+            String method,
+            String uri,
+            String queryString,
+            String bearerToken,
+            String clientIp
+    ) {
+        String fullUri = (queryString != null && !queryString.isBlank()) ? uri + "?" + queryString : uri;
+        log.info("[COURIER-CLIENT] {} {} ip={}", method, fullUri, clientIp);
+        WebClient.RequestHeadersSpec<?> spec = switch (method.toUpperCase()) {
+            case "GET"    -> webClient.get().uri(fullUri);
+            case "DELETE" -> webClient.delete().uri(fullUri);
+            default       -> throw new IllegalArgumentException("Unsupported method: " + method);
+        };
+        return execute(
+                spec.header(HttpHeaders.AUTHORIZATION, bearerToken)
+                    .header("X-Forwarded-For", clientIp)
+        );
+    }
+
+    // ── shared execute ────────────────────────────────────────────────────────
+
+    private ResponseEntity<String> execute(WebClient.RequestHeadersSpec<?> spec) {
+        try {
+            ResponseEntity<String> response = spec.retrieve()
                     .onStatus(
                             s -> s.is4xxClientError() || s.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new CourierServiceException(
-                                            clientResponse.statusCode().value(), body)))
+                            r -> r.bodyToMono(String.class)
+                                    .map(b -> new CourierServiceException(r.statusCode().value(), b)))
                     .toEntity(String.class)
                     .timeout(Duration.ofMillis(timeoutMs))
                     .block();
-            log.info("[COURIER-CLIENT] DELETE /api/v1/couriers/{} → {}", courierId, response.getStatusCode().value());
+            log.info("[COURIER-CLIENT] → {}", response.getStatusCode().value());
             return response;
         } catch (CourierServiceException ex) {
-            log.warn("[COURIER-CLIENT] DELETE /api/v1/couriers/{} → {} body={}", courierId, ex.getStatusCode(), ex.getBody());
+            log.warn("[COURIER-CLIENT] → {} body={}", ex.getStatusCode(), ex.getBody());
             return ResponseEntity.status(ex.getStatusCode()).body(ex.getBody());
         } catch (Exception ex) {
-            log.error("[COURIER-CLIENT] DELETE /api/v1/couriers/{} failed: {}", courierId, ex.getMessage(), ex);
+            log.error("[COURIER-CLIENT] call failed: {}", ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"error\":\"Bad Gateway\"," +
                           "\"message\":\"Courier service is temporarily unavailable.\"}");

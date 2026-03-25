@@ -1,31 +1,30 @@
 package com.buyology.ecommerce.courier.controller;
 
 import com.buyology.ecommerce.courier.CourierServiceClient;
-import com.buyology.ecommerce.courier.dto.CreateCourierRequest;
-import com.buyology.ecommerce.courier.dto.UpdateCourierStatusRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/couriers")
-@Tag(name = "Admin — Couriers", description = "Admin operations for managing courier accounts.")
+@Tag(name = "Admin — Couriers", description = "Admin proxy to buyology-courier-service.")
 public class AdminCourierController {
 
-    private static final Logger log = LoggerFactory.getLogger(AdminCourierController.class);
-
     private final CourierServiceClient courierServiceClient;
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper         objectMapper;
 
     public AdminCourierController(
             CourierServiceClient courierServiceClient,
@@ -35,113 +34,172 @@ public class AdminCourierController {
         this.objectMapper         = objectMapper;
     }
 
-    @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
-    @Operation(summary = "Create a new courier (admin only)")
+    // ── POST /api/admin/couriers ───────────────────────────────────────────────
+    // Proxies → POST /api/auth/admin/couriers
+    //
+    // multipart/form-data parts:
+    //   "data"                — JSON (CreateCourierRequest fields)
+    //   "profileImage"        — profile photo       (JPEG/PNG/WebP, ≤10 MB, optional)
+    //   "vehicleRegistration" — registration doc    (JPEG/PNG/WebP, ≤10 MB, optional)
+    //   "drivingLicenceFront" — licence front image (JPEG/PNG/WebP, ≤10 MB, required for SCOOTER/CAR)
+    //   "drivingLicenceBack"  — licence back image  (JPEG/PNG/WebP, ≤10 MB, required for SCOOTER/CAR)
+
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Create a new courier — multipart form")
     public ResponseEntity<Object> createCourier(
-            @Valid @RequestBody CreateCourierRequest request,
+            @RequestPart("data") String dataJson,
+            @RequestPart(value = "profileImage",        required = false) MultipartFile profileImage,
+            @RequestPart(value = "vehicleRegistration", required = false) MultipartFile vehicleRegistration,
+            @RequestPart(value = "drivingLicenceFront", required = false) MultipartFile drivingLicenceFront,
+            @RequestPart(value = "drivingLicenceBack",  required = false) MultipartFile drivingLicenceBack,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
             HttpServletRequest httpRequest
-    ) {
-        String clientIp = resolveClientIp(httpRequest);
-        logIncomingRequest("POST", "/api/admin/couriers", clientIp);
-        ResponseEntity<String> upstream = courierServiceClient.createCourier(request, clientIp);
-        logUpstreamResponse("POST", "/api/admin/couriers", upstream);
-        return parseUpstream(upstream);
+    ) throws IOException {
+        MultiValueMap<String, HttpEntity<?>> body = new LinkedMultiValueMap<>();
+        body.add("data", new HttpEntity<>(dataJson, jsonHeaders()));
+        addFilePart(body, "profileImage",        profileImage);
+        addFilePart(body, "vehicleRegistration", vehicleRegistration);
+        addFilePart(body, "drivingLicenceFront", drivingLicenceFront);
+        addFilePart(body, "drivingLicenceBack",  drivingLicenceBack);
+
+        return parsed(courierServiceClient.forwardMultipart(
+                "/api/auth/admin/couriers", body, bearerToken, clientIp(httpRequest)));
     }
+
+    // ── GET /api/admin/couriers ────────────────────────────────────────────────
+    // Proxies → GET /api/v1/couriers
+    // Query params forwarded as-is: status, vehicleType, isAvailable, page, size, sort
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
-    @Operation(summary = "List couriers (admin only)")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "List couriers with optional filters")
     public ResponseEntity<Object> listCouriers(
-            HttpServletRequest httpRequest,
-            @Parameter(description = "Page number (0-based)") @RequestParam(required = false) Integer page,
-            @Parameter(description = "Page size")             @RequestParam(required = false) Integer size,
-            @Parameter(description = "Filter by status: ACTIVE, SUSPENDED, INACTIVE, PENDING")
-            @RequestParam(required = false) String status,
-            @Parameter(description = "Filter by vehicle type: BICYCLE, FOOT, SCOOTER, CAR")
-            @RequestParam(required = false) String vehicleType,
-            @Parameter(description = "Search by name or phone")
-            @RequestParam(required = false) String search
-    ) {
-        String clientIp = resolveClientIp(httpRequest);
-        log.info("[COURIER] GET /api/admin/couriers ip={} page={} size={} status={} vehicleType={} search={}",
-                clientIp, page, size, status, vehicleType, search);
-        logAuthContext();
-        ResponseEntity<String> upstream = courierServiceClient.listCouriers(clientIp, page, size, status, vehicleType, search);
-        logUpstreamResponse("GET", "/api/admin/couriers", upstream);
-        return parseUpstream(upstream);
-    }
-
-    @GetMapping("/{courierId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
-    @Operation(summary = "Get courier details by ID (admin only)")
-    public ResponseEntity<Object> getCourierById(
-            @PathVariable String courierId,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
             HttpServletRequest httpRequest
     ) {
-        String clientIp = resolveClientIp(httpRequest);
-        logIncomingRequest("GET", "/api/admin/couriers/" + courierId, clientIp);
-        ResponseEntity<String> upstream = courierServiceClient.getCourierById(courierId, clientIp);
-        logUpstreamResponse("GET", "/api/admin/couriers/" + courierId, upstream);
-        return parseUpstream(upstream);
+        return parsed(courierServiceClient.forwardNoBody(
+                "GET", "/api/v1/couriers",
+                httpRequest.getQueryString(), bearerToken, clientIp(httpRequest)));
     }
 
-    @PatchMapping("/{courierId}/status")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
-    @Operation(summary = "Update courier status (admin only)")
-    public ResponseEntity<Object> updateCourierStatus(
-            @PathVariable String courierId,
-            @Valid @RequestBody UpdateCourierStatusRequest request,
+    // ── GET /api/admin/couriers/{id} ───────────────────────────────────────────
+    // Proxies → GET /api/v1/couriers/{id}
+    // Response includes profileImageUrl and drivingLicenceImageUrl (relative paths)
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Get courier by ID — includes image URLs")
+    public ResponseEntity<Object> getCourier(
+            @PathVariable UUID id,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
             HttpServletRequest httpRequest
     ) {
-        String clientIp = resolveClientIp(httpRequest);
-        logIncomingRequest("PATCH", "/api/admin/couriers/" + courierId + "/status", clientIp);
-        ResponseEntity<String> upstream = courierServiceClient.updateCourierStatus(courierId, request, clientIp);
-        logUpstreamResponse("PATCH", "/api/admin/couriers/" + courierId + "/status", upstream);
-        return parseUpstream(upstream);
+        return parsed(courierServiceClient.forwardNoBody(
+                "GET", "/api/v1/couriers/" + id,
+                null, bearerToken, clientIp(httpRequest)));
     }
 
-    @DeleteMapping("/{courierId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
-    @Operation(summary = "Delete a courier account (ADMIN/SUPERADMIN only)")
+    // ── PATCH /api/admin/couriers/{id} ─────────────────────────────────────────
+    // Proxies → PATCH /api/v1/couriers/{id}
+    //
+    // multipart/form-data parts (all optional — only provided fields are updated):
+    //   "data"               — JSON (UpdateCourierRequest fields)
+    //   "profileImage"       — new profile photo         (JPEG/PNG/WebP, ≤10 MB)
+    //   "drivingLicenceImage"— new driving licence image  (JPEG/PNG/WebP, ≤10 MB)
+
+    @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Update courier profile fields and/or images — multipart form")
+    public ResponseEntity<Object> updateCourier(
+            @PathVariable UUID id,
+            @RequestPart("data") String dataJson,
+            @RequestPart(value = "profileImage",        required = false) MultipartFile profileImage,
+            @RequestPart(value = "drivingLicenceImage", required = false) MultipartFile drivingLicenceImage,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
+            HttpServletRequest httpRequest
+    ) throws IOException {
+        MultiValueMap<String, HttpEntity<?>> body = new LinkedMultiValueMap<>();
+        body.add("data", new HttpEntity<>(dataJson, jsonHeaders()));
+        addFilePart(body, "profileImage",        profileImage);
+        addFilePart(body, "drivingLicenceImage", drivingLicenceImage);
+
+        return parsed(courierServiceClient.forwardMultipartPatch(
+                "/api/v1/couriers/" + id, body, bearerToken, clientIp(httpRequest)));
+    }
+
+    // ── PATCH /api/admin/couriers/{id}/status ──────────────────────────────────
+    // Proxies → PATCH /api/v1/couriers/{id}/status
+    // Body: { "status": "ACTIVE" | "OFFLINE" | "SUSPENDED" }
+
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Update courier operational status")
+    public ResponseEntity<Object> updateStatus(
+            @PathVariable UUID id,
+            @RequestBody Object body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
+            HttpServletRequest httpRequest
+    ) {
+        return parsed(courierServiceClient.forwardJson(
+                "PATCH", "/api/v1/couriers/" + id + "/status",
+                body, bearerToken, clientIp(httpRequest)));
+    }
+
+    // ── PATCH /api/admin/couriers/{id}/availability ────────────────────────────
+    // Proxies → PATCH /api/v1/couriers/{id}/availability
+    // Body: { "available": true | false }
+
+    @PatchMapping("/{id}/availability")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Toggle courier availability")
+    public ResponseEntity<Object> updateAvailability(
+            @PathVariable UUID id,
+            @RequestBody Object body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
+            HttpServletRequest httpRequest
+    ) {
+        return parsed(courierServiceClient.forwardJson(
+                "PATCH", "/api/v1/couriers/" + id + "/availability",
+                body, bearerToken, clientIp(httpRequest)));
+    }
+
+    // ── DELETE /api/admin/couriers/{id} ────────────────────────────────────────
+    // Proxies → DELETE /api/v1/couriers/{id}
+    // Returns 204 No Content
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "Soft-delete a courier")
     public ResponseEntity<Object> deleteCourier(
-            @PathVariable String courierId,
+            @PathVariable UUID id,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String bearerToken,
             HttpServletRequest httpRequest
     ) {
-        String clientIp = resolveClientIp(httpRequest);
-        logIncomingRequest("DELETE", "/api/admin/couriers/" + courierId, clientIp);
-        ResponseEntity<String> upstream = courierServiceClient.deleteCourier(courierId, clientIp);
-        logUpstreamResponse("DELETE", "/api/admin/couriers/" + courierId, upstream);
-        return parseUpstream(upstream);
+        return parsed(courierServiceClient.forwardNoBody(
+                "DELETE", "/api/v1/couriers/" + id,
+                null, bearerToken, clientIp(httpRequest)));
     }
 
-    // -------------------------------------------------------------------------
+    // ── helpers ────────────────────────────────────────────────────────────────
 
-    private void logIncomingRequest(String method, String path, String clientIp) {
-        log.info("[COURIER] {} {} ip={}", method, path, clientIp);
-        logAuthContext();
+    private void addFilePart(MultiValueMap<String, HttpEntity<?>> body,
+                              String partName, MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) return;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                file.getContentType() != null ? file.getContentType() : "application/octet-stream"));
+        headers.setContentDispositionFormData(partName, file.getOriginalFilename());
+        body.add(partName, new HttpEntity<>(file.getResource(), headers));
     }
 
-    private void logAuthContext() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null) {
-            log.warn("[COURIER] No authentication in SecurityContext");
-        } else {
-            log.info("[COURIER] principal={} authenticated={} authorities={}",
-                    auth.getName(), auth.isAuthenticated(), auth.getAuthorities());
-        }
+    private HttpHeaders jsonHeaders() {
+        HttpHeaders h = new HttpHeaders();
+        h.setContentType(MediaType.APPLICATION_JSON);
+        return h;
     }
 
-    private void logUpstreamResponse(String method, String path, ResponseEntity<String> upstream) {
-        int status = upstream.getStatusCode().value();
-        if (status >= 400) {
-            log.warn("[COURIER] Upstream {} {} → {} body={}", method, path, status, upstream.getBody());
-        } else {
-            log.info("[COURIER] Upstream {} {} → {}", method, path, status);
-        }
-    }
-
-    private ResponseEntity<Object> parseUpstream(ResponseEntity<String> upstream) {
+    private ResponseEntity<Object> parsed(ResponseEntity<String> upstream) {
         try {
             Object parsed = objectMapper.readValue(upstream.getBody(), Object.class);
             return ResponseEntity.status(upstream.getStatusCode()).body(parsed);
@@ -150,11 +208,9 @@ public class AdminCourierController {
         }
     }
 
-    private String resolveClientIp(HttpServletRequest request) {
+    private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
+        if (forwarded != null && !forwarded.isBlank()) return forwarded.split(",")[0].trim();
         return request.getRemoteAddr();
     }
 }

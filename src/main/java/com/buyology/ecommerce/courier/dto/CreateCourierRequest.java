@@ -1,7 +1,6 @@
 package com.buyology.ecommerce.courier.dto;
 
 import jakarta.validation.constraints.*;
-
 import java.time.LocalDate;
 
 public record CreateCourierRequest(
@@ -19,9 +18,6 @@ public record CreateCourierRequest(
         @Email @Size(max = 150)
         String email,
 
-        @org.hibernate.validator.constraints.URL @Size(max = 2048)
-        String profileImageUrl,
-
         // Auth
         @NotBlank @Size(min = 8, max = 100)
         String initialPassword,
@@ -36,16 +32,7 @@ public record CreateCourierRequest(
         @Size(max = 50)  String vehicleColor,
         @Size(max = 50)  String licensePlate,
 
-        @org.hibernate.validator.constraints.URL @Size(max = 2048)
-        String vehicleRegistrationUrl,
-
-        // Driving licence — required only for SCOOTER and CAR
+        // Driving licence text fields — required for SCOOTER and CAR
         @Size(max = 100) String drivingLicenseNumber,
-        LocalDate drivingLicenseExpiry,
-
-        @org.hibernate.validator.constraints.URL @Size(max = 2048)
-        String drivingLicenseFrontUrl,
-
-        @org.hibernate.validator.constraints.URL @Size(max = 2048)
-        String drivingLicenseBackUrl
+        LocalDate drivingLicenseExpiry
 ) {}
