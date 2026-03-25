@@ -1,65 +1,84 @@
 package com.buyology.ecommerce.courier;
 
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 
+/**
+ * Generates short-lived RS256-signed JWTs for service-to-service calls to the
+ * courier service. The courier service validates these tokens with the
+ * corresponding RSA public key — no shared secret required.
+ *
+ * Set COURIER_SERVICE_PRIVATE_KEY to the full PEM content of courier-private.pem.
+ */
 @Component
 public class CourierServiceTokenProvider {
 
     private static final Logger log = LoggerFactory.getLogger(CourierServiceTokenProvider.class);
 
-    private final SecretKey key;
+    private final RSAPrivateKey privateKey;
     private final String issuer;
     private final long expirySeconds;
 
     public CourierServiceTokenProvider(
-            @Value("${courier.service.jwt.secret}") String secret,
+            @Value("${courier.service.jwt.private-key}") String privateKeyPem,
             @Value("${courier.service.jwt.issuer:buyology-ecommerce-service}") String issuer,
             @Value("${courier.service.jwt.expiry-seconds:60}") long expirySeconds
     ) {
-        if (secret == null || secret.isBlank()) {
-            throw new IllegalStateException("courier.service.jwt.secret must be set");
+        if (privateKeyPem == null || privateKeyPem.isBlank()) {
+            throw new IllegalStateException(
+                    "courier.service.jwt.private-key must be set (set COURIER_SERVICE_PRIVATE_KEY env var)");
         }
-        this.key           = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.privateKey    = parsePrivateKey(privateKeyPem);
         this.issuer        = issuer;
         this.expirySeconds = expirySeconds;
+        log.info("[COURIER-TOKEN] RS256 token provider initialised (issuer={})", issuer);
     }
 
     /**
-     * Generates a short-lived HMAC-signed service JWT per request.
-     * The courier service validates this token with the same shared secret.
+     * Generates a short-lived RS256-signed JWT identifying the acting admin.
+     *
+     * @param adminId the ecommerce-backend user ID of the admin making the call
+     *                (embedded as JWT subject for courier-service audit logging)
      */
-    public String generateServiceToken() {
+    public String generateToken(String adminId) {
         Instant now = Instant.now();
-        String token = Jwts.builder()
+        return Jwts.builder()
                 .issuer(issuer)
-                .subject("ecommerce-backend")
+                .subject(adminId)
                 .claim("roles", List.of("COURIER_ADMIN"))
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(expirySeconds)))
-                .signWith(key)
+                .signWith(privateKey)   // JJWT auto-selects RS256 for RSA private keys
                 .compact();
+    }
 
-        // Decode and log the payload to verify iss/sub/roles are present
+    // ── private ───────────────────────────────────────────────────────────────
+
+    private static RSAPrivateKey parsePrivateKey(String pem) {
         try {
-            String[] parts = token.split("\\.");
-            String decodedPayload = new String(Base64.getUrlDecoder().decode(parts[1]));
-            log.info("[COURIER-TOKEN] Generated service JWT payload: {}", decodedPayload);
+            String cleaned = pem
+                    .replace("-----BEGIN PRIVATE KEY-----", "")
+                    .replace("-----END PRIVATE KEY-----", "")
+                    .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+                    .replace("-----END RSA PRIVATE KEY-----", "")
+                    .replaceAll("\\s+", "");
+            byte[] keyBytes = Base64.getDecoder().decode(cleaned);
+            return (RSAPrivateKey) KeyFactory.getInstance("RSA")
+                    .generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
         } catch (Exception e) {
-            log.warn("[COURIER-TOKEN] Could not decode generated token for logging: {}", e.getMessage());
+            throw new IllegalStateException(
+                    "Failed to parse COURIER_SERVICE_PRIVATE_KEY — ensure it is a PKCS8 PEM", e);
         }
-
-        return token;
     }
 }

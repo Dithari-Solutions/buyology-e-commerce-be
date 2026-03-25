@@ -20,30 +20,32 @@ public class CourierServiceClient {
     private static final Logger log = LoggerFactory.getLogger(CourierServiceClient.class);
 
     private final WebClient webClient;
+    private final CourierServiceTokenProvider tokenProvider;
 
     @Value("${courier.service.timeout-ms:10000}")
     private long timeoutMs;
 
     public CourierServiceClient(
-            @Value("${courier.service.url:http://localhost:8081}") String baseUrl
+            @Value("${courier.service.url:http://localhost:8081}") String baseUrl,
+            CourierServiceTokenProvider tokenProvider
     ) {
-        this.webClient = WebClient.builder()
-                .baseUrl(baseUrl)
-                .build();
+        this.webClient     = WebClient.builder().baseUrl(baseUrl).build();
+        this.tokenProvider = tokenProvider;
     }
 
     /** Forward a multipart POST request (e.g. courier creation). */
     public ResponseEntity<String> forwardMultipart(
             String uri,
             MultiValueMap<String, HttpEntity<?>> body,
-            String bearerToken,
+            String adminId,
             String clientIp
     ) {
-        log.info("[COURIER-CLIENT] POST {} ip={}", uri, clientIp);
+        String token = tokenProvider.generateToken(adminId);
+        log.info("[COURIER-CLIENT] POST {} ip={} adminId={}", uri, clientIp, adminId);
         return execute(
                 webClient.post()
                         .uri(uri)
-                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("X-Forwarded-For", clientIp)
                         .contentType(MediaType.MULTIPART_FORM_DATA)
                         .bodyValue(body)
@@ -54,14 +56,15 @@ public class CourierServiceClient {
     public ResponseEntity<String> forwardMultipartPatch(
             String uri,
             MultiValueMap<String, HttpEntity<?>> body,
-            String bearerToken,
+            String adminId,
             String clientIp
     ) {
-        log.info("[COURIER-CLIENT] PATCH {} ip={}", uri, clientIp);
+        String token = tokenProvider.generateToken(adminId);
+        log.info("[COURIER-CLIENT] PATCH {} ip={} adminId={}", uri, clientIp, adminId);
         return execute(
                 webClient.patch()
                         .uri(uri)
-                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("X-Forwarded-For", clientIp)
                         .contentType(MediaType.MULTIPART_FORM_DATA)
                         .bodyValue(body)
@@ -73,17 +76,18 @@ public class CourierServiceClient {
             String method,
             String uri,
             Object body,
-            String bearerToken,
+            String adminId,
             String clientIp
     ) {
-        log.info("[COURIER-CLIENT] {} {} ip={}", method, uri, clientIp);
+        String token = tokenProvider.generateToken(adminId);
+        log.info("[COURIER-CLIENT] {} {} ip={} adminId={}", method, uri, clientIp, adminId);
         WebClient.RequestBodySpec spec = switch (method.toUpperCase()) {
             case "POST"  -> webClient.post().uri(uri);
             case "PATCH" -> webClient.patch().uri(uri);
             default      -> throw new IllegalArgumentException("Unsupported method: " + method);
         };
         return execute(
-                spec.header(HttpHeaders.AUTHORIZATION, bearerToken)
+                spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(body)
@@ -95,18 +99,19 @@ public class CourierServiceClient {
             String method,
             String uri,
             String queryString,
-            String bearerToken,
+            String adminId,
             String clientIp
     ) {
+        String token  = tokenProvider.generateToken(adminId);
         String fullUri = (queryString != null && !queryString.isBlank()) ? uri + "?" + queryString : uri;
-        log.info("[COURIER-CLIENT] {} {} ip={}", method, fullUri, clientIp);
+        log.info("[COURIER-CLIENT] {} {} ip={} adminId={}", method, fullUri, clientIp, adminId);
         WebClient.RequestHeadersSpec<?> spec = switch (method.toUpperCase()) {
             case "GET"    -> webClient.get().uri(fullUri);
             case "DELETE" -> webClient.delete().uri(fullUri);
             default       -> throw new IllegalArgumentException("Unsupported method: " + method);
         };
         return execute(
-                spec.header(HttpHeaders.AUTHORIZATION, bearerToken)
+                spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .header("X-Forwarded-For", clientIp)
         );
     }
