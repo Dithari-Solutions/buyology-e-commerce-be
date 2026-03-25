@@ -42,6 +42,7 @@ public class TokenService {
     private final RolePermissionRepository rolePermissionRepository;
     private final UserPermissionRepository userPermissionRepository;
     private final String secret;
+    private final String issuer;
     private final long accessTokenValidityMinutes;
     private final long refreshTokenValidityDays;
     private final boolean cookieSecure;
@@ -52,6 +53,7 @@ public class TokenService {
             RolePermissionRepository rolePermissionRepository,
             UserPermissionRepository userPermissionRepository,
             @Value("${jwt.secret}") String secret,
+            @Value("${jwt.issuer:buyology-ecommerce-service}") String issuer,
             @Value("${jwt.access-token-validity-minutes}") long accessTokenValidityMinutes,
             @Value("${jwt.refresh-token-validity-days}") long refreshTokenValidityDays,
             @Value("${cookie.secure:true}") boolean cookieSecure) {
@@ -60,6 +62,7 @@ public class TokenService {
         this.rolePermissionRepository = rolePermissionRepository;
         this.userPermissionRepository = userPermissionRepository;
         this.secret = secret;
+        this.issuer = issuer;
         this.accessTokenValidityMinutes = accessTokenValidityMinutes;
         this.refreshTokenValidityDays = refreshTokenValidityDays;
         this.cookieSecure = cookieSecure;
@@ -113,7 +116,8 @@ public class TokenService {
                 .collect(Collectors.joining(",", "[", "]"));
 
         String payloadJson = String.format(
-                "{\"sub\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
+                "{\"iss\":\"%s\",\"sub\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
+                issuer,
                 authCredentials.getId(),
                 rolesJson,
                 permissionsJson,
