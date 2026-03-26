@@ -61,7 +61,7 @@ public class AdminCourierController {
         addFilePart(body, "profileImage",        profileImage);
         addFilePart(body, "vehicleRegistration", vehicleRegistration);
         addFilePart(body, "drivingLicenceFront", drivingLicenceFront);
-        addFilePart(body, "drivingLicenceBack",  drivingLicenceFront);
+        addFilePart(body, "drivingLicenceBack",  drivingLicenceBack);
 
         return parsed(courierServiceClient.forwardMultipart(
                 "/api/auth/admin/couriers", body, adminId(), clientIp(httpRequest)));
