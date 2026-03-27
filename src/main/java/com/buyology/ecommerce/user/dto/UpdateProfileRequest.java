@@ -23,6 +23,18 @@ public class UpdateProfileRequest {
 
     private LocalDate dateOfBirth;
 
+    /** ISO 3166-1 alpha-3 country code for browsing stores (e.g. "UAE", "AZE"). */
+    @Size(max = 3)
+    private String selectedCountryCode;
+
+    /** ISO 4217 currency code for price display (e.g. "AZN", "AED"). */
+    @Size(max = 3)
+    private String preferredCurrency;
+
+    /** UI language preference ("EN", "AZ", "AR"). */
+    @Size(max = 5)
+    private String preferredLanguage;
+
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
 
@@ -34,4 +46,13 @@ public class UpdateProfileRequest {
 
     public LocalDate getDateOfBirth() { return dateOfBirth; }
     public void setDateOfBirth(LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
+
+    public String getSelectedCountryCode() { return selectedCountryCode; }
+    public void setSelectedCountryCode(String selectedCountryCode) { this.selectedCountryCode = selectedCountryCode; }
+
+    public String getPreferredCurrency() { return preferredCurrency; }
+    public void setPreferredCurrency(String preferredCurrency) { this.preferredCurrency = preferredCurrency; }
+
+    public String getPreferredLanguage() { return preferredLanguage; }
+    public void setPreferredLanguage(String preferredLanguage) { this.preferredLanguage = preferredLanguage; }
 }

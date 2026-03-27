@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.user.dto.ProfileResponse;
 import com.buyology.ecommerce.user.dto.UpdateProfileRequest;
 import com.buyology.ecommerce.user.service.UserProfileService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -52,5 +53,22 @@ public class UserProfileController {
             @PathVariable UUID userId,
             @RequestPart("avatar") MultipartFile file) {
         return ApiResponse.success(profileService.updateAvatar(userId, file), "Avatar updated successfully");
+    }
+
+    /**
+     * Set the user's selected country for store browsing.
+     * The currency is automatically derived from the country unless explicitly provided.
+     * Example: countryCode=UAE → preferredCurrency auto-set to AED.
+     * If the user's own currency differs (e.g. AZN), pass currency=AZN to override.
+     */
+    @Operation(summary = "Set country preference and auto-derive currency")
+    @PatchMapping("/country-preference")
+    public ResponseEntity<ApiResponse<ProfileResponse>> updateCountryPreference(
+            @PathVariable UUID userId,
+            @RequestParam String countryCode,
+            @RequestParam(required = false) String currency) {
+        return ApiResponse.success(
+                profileService.updateCountryPreference(userId, countryCode, currency),
+                "Country preference updated successfully");
     }
 }

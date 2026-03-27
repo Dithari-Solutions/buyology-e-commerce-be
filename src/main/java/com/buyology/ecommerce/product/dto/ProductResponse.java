@@ -33,6 +33,29 @@ public class ProductResponse {
     private String title;
     private String description;
     private String slug;
+
+    /**
+     * Lowest price for this product in the requested country's stores,
+     * already converted to the requested display currency.
+     * Null when no countryCode was supplied or the product isn't listed in that country.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal storePrice;
+
+    /**
+     * ISO 4217 currency code the storePrice is expressed in (e.g. "AZN", "AED").
+     * Null when storePrice is null.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String currency;
+
+    /**
+     * Whether this product is available in at least one store in the requested country.
+     * Null when no countryCode was supplied.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean availableInSelectedCountry;
+
     private List<MediaDto> media;
     private List<SpecGroupDto> specs;
     private List<ColorOptionDto> colors;
@@ -229,6 +252,12 @@ public class ProductResponse {
     public void setDescription(String description) { this.description = description; }
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
+    public BigDecimal getStorePrice() { return storePrice; }
+    public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+    public Boolean getAvailableInSelectedCountry() { return availableInSelectedCountry; }
+    public void setAvailableInSelectedCountry(Boolean availableInSelectedCountry) { this.availableInSelectedCountry = availableInSelectedCountry; }
     public List<MediaDto> getMedia() { return media; }
     public void setMedia(List<MediaDto> media) { this.media = media; }
     public List<SpecGroupDto> getSpecs() { return specs; }

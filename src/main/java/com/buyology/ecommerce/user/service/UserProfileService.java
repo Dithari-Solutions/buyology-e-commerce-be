@@ -2,6 +2,8 @@ package com.buyology.ecommerce.user.service;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.store.domain.Country;
+import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.dto.ProfileResponse;
@@ -33,15 +35,18 @@ public class UserProfileService {
     private final UserProfilesRepository profilesRepo;
     private final UserAddressRepository addressRepo;
     private final AuthCredentialRepository authCredentialRepo;
+    private final CountryRepository countryRepo;
 
     public UserProfileService(UserRepository userRepo,
                                UserProfilesRepository profilesRepo,
                                UserAddressRepository addressRepo,
-                               AuthCredentialRepository authCredentialRepo) {
+                               AuthCredentialRepository authCredentialRepo,
+                               CountryRepository countryRepo) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
         this.addressRepo = addressRepo;
         this.authCredentialRepo = authCredentialRepo;
+        this.countryRepo = countryRepo;
     }
 
     // =========================================================================
@@ -77,8 +82,46 @@ public class UserProfileService {
         if (req.getDateOfBirth() != null) {
             profile.setDateOfBirth(req.getDateOfBirth());
         }
+        if (req.getPreferredLanguage() != null && !req.getPreferredLanguage().isBlank()) {
+            profile.setPreferredLanguage(req.getPreferredLanguage().toUpperCase());
+        }
+        // If a new country is provided, auto-derive its currency unless explicitly overridden
+        if (req.getSelectedCountryCode() != null && !req.getSelectedCountryCode().isBlank()) {
+            String countryCode = req.getSelectedCountryCode().toUpperCase();
+            profile.setSelectedCountryCode(countryCode);
+            if (req.getPreferredCurrency() == null || req.getPreferredCurrency().isBlank()) {
+                countryRepo.findByCode(countryCode).ifPresent(c -> profile.setPreferredCurrency(c.getCurrency()));
+            }
+        }
+        if (req.getPreferredCurrency() != null && !req.getPreferredCurrency().isBlank()) {
+            profile.setPreferredCurrency(req.getPreferredCurrency().toUpperCase());
+        }
         profilesRepo.save(profile);
 
+        return toResponse(user, profile);
+    }
+
+    // =========================================================================
+    // Update country preference (sets country + auto-derives currency)
+    // =========================================================================
+
+    @Transactional
+    public ProfileResponse updateCountryPreference(UUID userId, String countryCode, String currency) {
+        Users user = findUser(userId);
+        UserProfiles profile = findOrCreateProfile(user);
+
+        String code = countryCode.toUpperCase();
+        Country country = countryRepo.findByCode(code)
+                .orElseThrow(() -> new IllegalArgumentException("Country not found: " + code));
+
+        profile.setSelectedCountryCode(code);
+        // Use explicit currency if provided, otherwise derive from country
+        if (currency != null && !currency.isBlank()) {
+            profile.setPreferredCurrency(currency.toUpperCase());
+        } else {
+            profile.setPreferredCurrency(country.getCurrency());
+        }
+        profilesRepo.save(profile);
         return toResponse(user, profile);
     }
 
@@ -186,6 +229,9 @@ public class UserProfileService {
         res.setAvatarUrl(profile.getAvatarUrl());
         res.setPaymentReady(missing.isEmpty());
         res.setMissingFields(missing);
+        res.setSelectedCountryCode(profile.getSelectedCountryCode());
+        res.setPreferredCurrency(profile.getPreferredCurrency());
+        res.setPreferredLanguage(profile.getPreferredLanguage());
         res.setCreatedAt(profile.getCreatedAt());
         res.setUpdatedAt(profile.getUpdatedAt());
         return res;

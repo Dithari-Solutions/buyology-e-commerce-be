@@ -41,7 +41,7 @@ public class QuickDeliveryService {
      * </ol>
      */
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getQuickDeliveryProducts(
-            double userLat, double userLng, String lang) {
+            double userLat, double userLng, String lang, String countryCode, String currency) {
 
         List<UUID> nearbyStoreIds = storeLocationRepository
                 .findStoreIdsWithinRadius(userLat, userLng, THIRTY_MIN_RADIUS_KM);
@@ -56,6 +56,6 @@ public class QuickDeliveryService {
                 .map(p -> p.getId())
                 .toList();
 
-        return productService.getProductsByIds(productIds, lang);
+        return productService.getProductsByIds(productIds, lang, countryCode, currency);
     }
 }

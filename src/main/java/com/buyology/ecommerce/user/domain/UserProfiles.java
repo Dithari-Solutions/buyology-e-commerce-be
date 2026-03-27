@@ -34,6 +34,26 @@ public class UserProfiles {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    /**
+     * ISO 3166-1 alpha-3 country code the user has selected for browsing stores (e.g. "UAE", "AZE").
+     * Defaults to the country detected from the user's location at signup or explicitly set by the user.
+     */
+    @Column(name = "selected_country_code", length = 3)
+    private String selectedCountryCode;
+
+    /**
+     * ISO 4217 currency code the user prefers for price display (e.g. "AZN", "AED", "USD").
+     * Defaults to the native currency of selectedCountryCode. Can be changed independently.
+     */
+    @Column(name = "preferred_currency", length = 3)
+    private String preferredCurrency;
+
+    /**
+     * UI language preference (e.g. "EN", "AZ", "AR").
+     */
+    @Column(name = "preferred_language", length = 5)
+    private String preferredLanguage;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -118,6 +138,30 @@ public class UserProfiles {
 
     public void setAvatarUrl(String avatarUrl) {
         this.avatarUrl = avatarUrl;
+    }
+
+    public String getSelectedCountryCode() {
+        return selectedCountryCode;
+    }
+
+    public void setSelectedCountryCode(String selectedCountryCode) {
+        this.selectedCountryCode = selectedCountryCode;
+    }
+
+    public String getPreferredCurrency() {
+        return preferredCurrency;
+    }
+
+    public void setPreferredCurrency(String preferredCurrency) {
+        this.preferredCurrency = preferredCurrency;
+    }
+
+    public String getPreferredLanguage() {
+        return preferredLanguage;
+    }
+
+    public void setPreferredLanguage(String preferredLanguage) {
+        this.preferredLanguage = preferredLanguage;
     }
 
     public Instant getCreatedAt() {

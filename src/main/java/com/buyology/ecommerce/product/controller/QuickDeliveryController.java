@@ -46,8 +46,14 @@ public class QuickDeliveryController {
             @RequestParam @NotNull @DecimalMin("-180.0") @DecimalMax("180.0") Double lng,
 
             @Parameter(description = "Response language code (e.g. en, az, ar)", required = true)
-            @RequestParam String lang) {
+            @RequestParam String lang,
 
-        return quickDeliveryService.getQuickDeliveryProducts(lat, lng, lang);
+            @Parameter(description = "ISO 3166-1 alpha-3 country code to scope store pricing (e.g. UAE, AZE)")
+            @RequestParam(required = false) String countryCode,
+
+            @Parameter(description = "ISO 4217 currency for price display (e.g. AZN, AED). Defaults to the country's native currency.")
+            @RequestParam(required = false) String currency) {
+
+        return quickDeliveryService.getQuickDeliveryProducts(lat, lng, lang, countryCode, currency);
     }
 }

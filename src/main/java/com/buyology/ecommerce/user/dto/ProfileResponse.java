@@ -28,6 +28,15 @@ public class ProfileResponse {
      */
     private List<String> missingFields;
 
+    /** ISO 3166-1 alpha-3 country code for browsing stores (e.g. "UAE", "AZE"). */
+    private String selectedCountryCode;
+
+    /** ISO 4217 currency for price display (e.g. "AZN", "AED"). */
+    private String preferredCurrency;
+
+    /** UI language preference (e.g. "EN", "AZ", "AR"). */
+    private String preferredLanguage;
+
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -57,6 +66,15 @@ public class ProfileResponse {
 
     public List<String> getMissingFields() { return missingFields; }
     public void setMissingFields(List<String> missingFields) { this.missingFields = missingFields; }
+
+    public String getSelectedCountryCode() { return selectedCountryCode; }
+    public void setSelectedCountryCode(String selectedCountryCode) { this.selectedCountryCode = selectedCountryCode; }
+
+    public String getPreferredCurrency() { return preferredCurrency; }
+    public void setPreferredCurrency(String preferredCurrency) { this.preferredCurrency = preferredCurrency; }
+
+    public String getPreferredLanguage() { return preferredLanguage; }
+    public void setPreferredLanguage(String preferredLanguage) { this.preferredLanguage = preferredLanguage; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

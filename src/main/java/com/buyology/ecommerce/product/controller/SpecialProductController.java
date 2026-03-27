@@ -27,14 +27,18 @@ public class SpecialProductController {
     @Operation(summary = "Get all active super-deal products")
     @GetMapping("/super-deals")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getSuperDeals(
-            @RequestParam String lang) {
-        return productService.getSuperDeals(lang);
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency) {
+        return productService.getSuperDeals(lang, countryCode, currency);
     }
 
     @Operation(summary = "Get all active limited-stock products")
     @GetMapping("/limited-stock")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getLimitedStockProducts(
-            @RequestParam String lang) {
-        return productService.getLimitedStockProducts(lang);
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency) {
+        return productService.getLimitedStockProducts(lang, countryCode, currency);
     }
 }
