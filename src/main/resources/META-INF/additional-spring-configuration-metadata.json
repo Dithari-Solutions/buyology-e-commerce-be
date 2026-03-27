@@ -40,6 +40,126 @@
       "type": "java.lang.Integer",
       "description": "Number of days without any login after which a customer account is automatically suspended.",
       "defaultValue": 90
+    },
+    {
+      "name": "otp.expiry-minutes",
+      "type": "java.lang.Integer",
+      "description": "How long (in minutes) a generated OTP code remains valid before expiring.",
+      "defaultValue": 10
+    },
+    {
+      "name": "otp.resend-cooldown-seconds",
+      "type": "java.lang.Integer",
+      "description": "Minimum seconds the user must wait before requesting a new OTP of the same type.",
+      "defaultValue": 60
+    },
+    {
+      "name": "jwt.secret",
+      "type": "java.lang.String",
+      "description": "HMAC-SHA256 secret used to sign and verify JWT access tokens. Must be kept private."
+    },
+    {
+      "name": "jwt.access-token-validity-minutes",
+      "type": "java.lang.Long",
+      "description": "Lifetime of a JWT access token in minutes.",
+      "defaultValue": 15
+    },
+    {
+      "name": "jwt.refresh-token-validity-days",
+      "type": "java.lang.Long",
+      "description": "Lifetime of a refresh token in days.",
+      "defaultValue": 7
+    },
+    {
+      "name": "google.client-id",
+      "type": "java.lang.String",
+      "description": "Google OAuth2 client ID from Google Cloud Console."
+    },
+    {
+      "name": "google.client-secret",
+      "type": "java.lang.String",
+      "description": "Google OAuth2 client secret from Google Cloud Console."
+    },
+    {
+      "name": "google.redirect-uri",
+      "type": "java.lang.String",
+      "description": "OAuth2 redirect URI registered in Google Cloud Console."
+    },
+    {
+      "name": "twilio.sendgrid.api-key",
+      "type": "java.lang.String",
+      "description": "Twilio SendGrid API key used to send transactional emails."
+    },
+    {
+      "name": "twilio.sendgrid.from-email",
+      "type": "java.lang.String",
+      "description": "Verified sender email address used as the From address for all outgoing emails."
+    },
+    {
+      "name": "twilio.sendgrid.from-name",
+      "type": "java.lang.String",
+      "description": "Display name shown alongside the from email address.",
+      "defaultValue": "Buyology"
+    },
+    {
+      "name": "twilio.account-sid",
+      "type": "java.lang.String",
+      "description": "Twilio Account SID used for SMS OTP delivery."
+    },
+    {
+      "name": "twilio.auth-token",
+      "type": "java.lang.String",
+      "description": "Twilio Auth Token used to authenticate SMS API requests."
+    },
+    {
+      "name": "twilio.phone-number",
+      "type": "java.lang.String",
+      "description": "Twilio phone number used as the sender for outbound SMS messages."
+    },
+    {
+      "name": "paymob.api-key",
+      "type": "java.lang.String",
+      "description": "Paymob API key. Set via PAYMOB_API_KEY environment variable."
+    },
+    {
+      "name": "paymob.secret-key",
+      "type": "java.lang.String",
+      "description": "Paymob secret key for server-side authentication. Set via PAYMOB_SECRET_KEY env var."
+    },
+    {
+      "name": "paymob.public-key",
+      "type": "java.lang.String",
+      "description": "Paymob public key used on the client side. Set via PAYMOB_PUBLIC_KEY env var."
+    },
+    {
+      "name": "paymob.hmac-secret",
+      "type": "java.lang.String",
+      "description": "HMAC secret used to verify Paymob webhook signatures. Set via PAYMOB_HMAC_SECRET env var."
+    },
+    {
+      "name": "paymob.base-url",
+      "type": "java.lang.String",
+      "description": "Base URL for Paymob API calls. Set via PAYMOB_BASE_URL env var."
+    },
+    {
+      "name": "paymob.card.integration-id",
+      "type": "java.lang.String",
+      "description": "Paymob integration ID for card payments. Set via PAYMOB_CARD_INTEGRATION_ID env var."
+    },
+    {
+      "name": "paymob.card.iframe-id",
+      "type": "java.lang.String",
+      "description": "Paymob iframe ID for card payment UI embedding. Set via PAYMOB_CARD_IFRAME_ID env var."
+    },
+    {
+      "name": "paymob.tabby.integration-id",
+      "type": "java.lang.String",
+      "description": "Paymob integration ID for Tabby (buy now pay later). Set via PAYMOB_TABBY_INTEGRATION_ID env var."
+    },
+    {
+      "name": "paymob.tamara.integration-id",
+      "type": "java.lang.String",
+      "description": "Paymob integration ID for Tamara (buy now pay later). Set via PAYMOB_TAMARA_INTEGRATION_ID env var."
     }
   ]
 }
