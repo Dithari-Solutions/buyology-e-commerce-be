@@ -182,6 +182,8 @@ public class AuthService {
         newUser.setUserType(Users.UserType.CUSTOMER);
         newUser.setIsGuest(false);
         newUser.setStatus("ACTIVE");
+        newUser.setRegistrationIp(extractClientIp(httpRequest));
+        newUser.setRegistrationDevice(extractDeviceInfo(httpRequest));
         userRepository.save(newUser);
 
         AuthCredentials credentials = new AuthCredentials();
@@ -320,6 +322,8 @@ public class AuthService {
         newUser.setUserType(Users.UserType.ADMIN);
         newUser.setIsGuest(false);
         newUser.setStatus("ACTIVE");
+        newUser.setRegistrationIp(extractClientIp(httpRequest));
+        newUser.setRegistrationDevice(extractDeviceInfo(httpRequest));
         userRepository.save(newUser);
 
         AuthCredentials credentials = new AuthCredentials();
@@ -337,6 +341,7 @@ public class AuthService {
 
     // ── Signin ────────────────────────────────────────────────────────────────
 
+    @Transactional
     public ResponseEntity<ApiResponse<SignInResponse>> signin(
             SignInRequest request, HttpServletRequest httpRequest) {
         try {
@@ -507,6 +512,11 @@ public class AuthService {
     private ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
             AuthCredentials credentials, HttpServletRequest httpRequest) {
 
+        userRepository.findById(credentials.getUserId()).ifPresent(user -> {
+            user.setLastLoginAt(Instant.now());
+            userRepository.save(user);
+        });
+
         String accessToken = tokenService.generateAccessToken(credentials);
         var refreshToken = tokenService.generateRefreshToken(credentials, extractDeviceInfo(httpRequest));
         String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.getToken());
@@ -522,5 +532,13 @@ public class AuthService {
         String ua = request.getHeader("User-Agent");
         if (ua == null) return null;
         return ua.length() > 500 ? ua.substring(0, 500) : ua;
+    }
+
+    private String extractClientIp(HttpServletRequest request) {
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].strip();
+        }
+        return request.getRemoteAddr();
     }
 }

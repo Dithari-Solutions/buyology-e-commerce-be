@@ -34,6 +34,12 @@ public class Users {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE"; // ACTIVE, SUSPENDED
 
+    @Column(name = "registration_ip", length = 45)
+    private String registrationIp;
+
+    @Column(name = "registration_device", length = 500)
+    private String registrationDevice;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
@@ -134,6 +140,22 @@ public class Users {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getRegistrationIp() {
+        return registrationIp;
+    }
+
+    public void setRegistrationIp(String registrationIp) {
+        this.registrationIp = registrationIp;
+    }
+
+    public String getRegistrationDevice() {
+        return registrationDevice;
+    }
+
+    public void setRegistrationDevice(String registrationDevice) {
+        this.registrationDevice = registrationDevice;
     }
 
     public Instant getDeletedAt() {

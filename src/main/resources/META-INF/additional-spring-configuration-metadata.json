@@ -34,6 +34,12 @@
       "type": "java.lang.Long",
       "description": "TTL in seconds for courier service JWTs. Keep short — tokens are single-use effectively.",
       "defaultValue": 60
+    },
+    {
+      "name": "inactivity.block-after-days",
+      "type": "java.lang.Integer",
+      "description": "Number of days without any login after which a customer account is automatically suspended.",
+      "defaultValue": 90
     }
   ]
 }

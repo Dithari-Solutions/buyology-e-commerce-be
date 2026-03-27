@@ -17,6 +17,10 @@ public class AdminUserDetailResponse {
     private String status;
     private Instant joinedAt;
 
+    // ── Registration metadata ─────────────────────────────────────────────────
+    private String registrationIp;
+    private String registrationDevice;
+
     // ── Profile ───────────────────────────────────────────────────────────────
     private String firstName;
     private String lastName;
@@ -50,6 +54,12 @@ public class AdminUserDetailResponse {
 
     public Instant getJoinedAt() { return joinedAt; }
     public void setJoinedAt(Instant joinedAt) { this.joinedAt = joinedAt; }
+
+    public String getRegistrationIp() { return registrationIp; }
+    public void setRegistrationIp(String registrationIp) { this.registrationIp = registrationIp; }
+
+    public String getRegistrationDevice() { return registrationDevice; }
+    public void setRegistrationDevice(String registrationDevice) { this.registrationDevice = registrationDevice; }
 
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }

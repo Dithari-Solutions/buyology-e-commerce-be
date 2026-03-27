@@ -133,6 +133,8 @@ public class AdminUserService {
             detail.setDateOfBirth(profile.getDateOfBirth());
             detail.setAvatarUrl(profile.getAvatarUrl());
         }
+        detail.setRegistrationIp(user.getRegistrationIp());
+        detail.setRegistrationDevice(user.getRegistrationDevice());
         detail.setFavorites(favoriteListResponse);
         detail.setActiveCart(cartResponse);
 
