@@ -1,7 +1,7 @@
 package com.buyology.ecommerce.currency.service;
 
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -11,8 +11,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Fetches live exchange rates from api.frankfurter.app (free, no API key required).
- * Rates are cached per base currency for 1 hour to avoid hammering the external API.
+ * Fetches live exchange rates from api.frankfurter.app (free, no API key, ECB data).
+ * Rates are cached per currency pair for 1 hour.
  *
  * Example call: GET https://api.frankfurter.app/latest?from=AED&to=AZN
  * Response: {"amount":1.0,"base":"AED","date":"...","rates":{"AZN":0.46}}
@@ -23,23 +23,18 @@ public class CurrencyExchangeService {
     private static final String FRANKFURTER_BASE_URL = "https://api.frankfurter.app";
     private static final int CACHE_TTL_HOURS = 1;
 
-    private final WebClient webClient;
-
-    // Cache: "AED->AZN" -> (rate, fetchedAt)
+    private final RestClient restClient;
     private final Map<String, CachedRate> rateCache = new ConcurrentHashMap<>();
 
-    public CurrencyExchangeService(WebClient.Builder webClientBuilder) {
-        this.webClient = webClientBuilder.baseUrl(FRANKFURTER_BASE_URL).build();
+    public CurrencyExchangeService() {
+        this.restClient = RestClient.builder()
+                .baseUrl(FRANKFURTER_BASE_URL)
+                .build();
     }
 
     /**
      * Converts an amount from one currency to another using live exchange rates.
-     * Returns the original amount unchanged if currencies are the same.
-     *
-     * @param amount       the price to convert
-     * @param fromCurrency ISO 4217 source currency (e.g. "AED")
-     * @param toCurrency   ISO 4217 target currency (e.g. "AZN")
-     * @return converted amount rounded to 2 decimal places
+     * Returns the original amount unchanged if currencies are the same or inputs are null.
      */
     public BigDecimal convert(BigDecimal amount, String fromCurrency, String toCurrency) {
         if (amount == null) return null;
@@ -50,38 +45,24 @@ public class CurrencyExchangeService {
         return amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 
-    /**
-     * Resolves the exchange rate from the cache or fetches fresh data.
-     */
     private BigDecimal getRate(String from, String to) {
         String key = from + "->" + to;
         CachedRate cached = rateCache.get(key);
-
         if (cached != null && !cached.isExpired()) {
             return cached.rate;
         }
-
         BigDecimal rate = fetchRate(from, to);
         rateCache.put(key, new CachedRate(rate));
         return rate;
     }
 
-    /**
-     * Calls the Frankfurter API to get the current exchange rate.
-     * Falls back to 1.0 if the API is unreachable or the currency pair is not found.
-     */
     @SuppressWarnings("unchecked")
     private BigDecimal fetchRate(String from, String to) {
         try {
-            Map<String, Object> response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/latest")
-                            .queryParam("from", from)
-                            .queryParam("to", to)
-                            .build())
+            Map<String, Object> response = restClient.get()
+                    .uri("/latest?from={from}&to={to}", from, to)
                     .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+                    .body(Map.class);
 
             if (response != null) {
                 Map<String, Object> rates = (Map<String, Object>) response.get("rates");
@@ -93,7 +74,7 @@ public class CurrencyExchangeService {
                 }
             }
         } catch (Exception ignored) {
-            // Network error or unsupported currency — fall through to default
+            // Network error or unsupported pair — fall through to 1:1
         }
         return BigDecimal.ONE;
     }
