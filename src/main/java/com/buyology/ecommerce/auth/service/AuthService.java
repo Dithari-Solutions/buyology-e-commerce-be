@@ -361,6 +361,12 @@ public class AuthService {
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
+            var user = userRepository.findById(authCredentials.getUserId()).orElse(null);
+            if (user != null && "SUSPENDED".equals(user.getStatus())) {
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "Your account has been suspended. Please contact support.");
+            }
+
             return buildSigninResponse(authCredentials, httpRequest);
 
         } catch (Exception e) {

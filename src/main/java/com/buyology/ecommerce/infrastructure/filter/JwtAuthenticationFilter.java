@@ -84,14 +84,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         UUID userId = credentials.getUserId();
+
+        // Reject suspended users — their tokens are structurally valid but the account is blocked
+        var userOpt = userRepository.findById(userId);
+        if (userOpt.isEmpty() || "SUSPENDED".equals(userOpt.get().getStatus())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
         // 1. Add ROLE_ authority based on UserType (ADMIN / CUSTOMER)
-        userRepository.findById(userId).ifPresent(user -> {
-            if (user.getUserType() != null) {
-                authorities.add(new SimpleGrantedAuthority("ROLE_" + user.getUserType().name()));
-            }
-        });
+        if (userOpt.get().getUserType() != null) {
+            authorities.add(new SimpleGrantedAuthority("ROLE_" + userOpt.get().getUserType().name()));
+        }
 
         // 2. Add ROLE_ authorities from assigned roles + collect role IDs for permission lookup
         List<UUID> roleIds = userRoleRepository.findRoleIdsByUserId(userId);

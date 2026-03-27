@@ -104,15 +104,21 @@ public class GoogleOAuthService {
                 .findByProviderAndProviderUserId("GOOGLE", googleId);
 
         if (existingCred.isPresent()) {
-            // Update tokens in case they changed
             AuthCredentials cred = existingCred.get();
+
+            Users existingUser = userRepository.findById(cred.getUserId())
+                    .orElseThrow(() -> new RuntimeException("User linked to credentials not found"));
+
+            if ("SUSPENDED".equals(existingUser.getStatus())) {
+                throw new IllegalArgumentException("Your account has been suspended. Please contact support.");
+            }
+
+            // Update tokens in case they changed
             cred.setAccessToken(accessToken);
             cred.setRefreshToken(refreshToken);
             authCredentialRepository.save(cred);
 
-            // Return linked user
-            return userRepository.findById(cred.getUserId())
-                    .orElseThrow(() -> new RuntimeException("User linked to credentials not found"));
+            return existingUser;
         }
 
         // 4️⃣ If not exists, create new Users entity
