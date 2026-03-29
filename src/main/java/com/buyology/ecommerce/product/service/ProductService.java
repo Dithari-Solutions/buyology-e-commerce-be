@@ -966,15 +966,18 @@ public class ProductService {
         Country country = countryRepository.findByCode(code).orElse(null);
         if (country == null) return;
 
-        BigDecimal rawPrice = storeProductRepository.findMinPriceByProductAndCountry(productId, code);
-        boolean available = rawPrice != null;
+        List<Object[]> cheapest = storeProductRepository.findCheapestStoreByProductAndCountry(productId, code);
+        boolean available = !cheapest.isEmpty();
         response.setAvailableInSelectedCountry(available);
 
         if (available) {
+            UUID cheapestStoreId = (UUID) cheapest.get(0)[0];
+            BigDecimal rawPrice = (java.math.BigDecimal) cheapest.get(0)[1];
             String storeCurrency = country.getCurrency();
             String target = (displayCurrency != null && !displayCurrency.isBlank())
                     ? displayCurrency.toUpperCase()
                     : storeCurrency;
+            response.setStoreId(cheapestStoreId);
             response.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
             response.setCurrency(target);
         }
@@ -998,11 +1001,17 @@ public class ProductService {
                 : storeCurrency;
 
         List<UUID> ids = products.stream().map(Product::getId).toList();
-        List<Object[]> rows = storeProductRepository.findMinPricesByProductsAndCountry(ids, code);
+        List<Object[]> rows = storeProductRepository.findCheapestStorePerProductBatch(ids, code);
 
+        // rows: [productId, storeId, price] — take first row per productId (they're already at min price)
+        Map<UUID, UUID> storeMap = new HashMap<>();
         Map<UUID, BigDecimal> priceMap = new HashMap<>();
         for (Object[] row : rows) {
-            priceMap.put((UUID) row[0], (BigDecimal) row[1]);
+            UUID pid = (UUID) row[0];
+            if (!priceMap.containsKey(pid)) {
+                storeMap.put(pid, (UUID) row[1]);
+                priceMap.put(pid, (java.math.BigDecimal) row[2]);
+            }
         }
 
         for (int i = 0; i < responses.size(); i++) {
@@ -1011,6 +1020,7 @@ public class ProductService {
             BigDecimal rawPrice = priceMap.get(pid);
             resp.setAvailableInSelectedCountry(rawPrice != null);
             if (rawPrice != null) {
+                resp.setStoreId(storeMap.get(pid));
                 resp.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
                 resp.setCurrency(target);
             }

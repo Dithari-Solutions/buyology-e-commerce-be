@@ -35,6 +35,14 @@ public class ProductResponse {
     private String slug;
 
     /**
+     * The store that offers the lowest price in the requested country.
+     * The frontend must pass this as {@code storeId} when calling POST /api/cart/{id}/items.
+     * Null when no countryCode was supplied or the product isn't listed in that country.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UUID storeId;
+
+    /**
      * Lowest price for this product in the requested country's stores,
      * already converted to the requested display currency.
      * Null when no countryCode was supplied or the product isn't listed in that country.
@@ -252,6 +260,9 @@ public class ProductResponse {
     public void setDescription(String description) { this.description = description; }
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
     public BigDecimal getStorePrice() { return storePrice; }
     public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
     public String getCurrency() { return currency; }

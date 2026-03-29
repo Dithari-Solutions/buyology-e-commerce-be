@@ -71,13 +71,17 @@ Content-Type: application/json
 
 ```jsonc
 {
-  "storeId": "uuid",          // required — the store the product is purchased from
+  "storeId": "uuid",          // required — read from ProductResponse.storeId (see note below)
   "productId": "uuid",        // required
   "variantId": "uuid",        // optional — for pre-built variants (e.g. refurbished grade)
   "specOptionIds": ["uuid"],  // optional — for DIY/configurable products
   "quantity": 1               // required, minimum 1
 }
 ```
+
+> **Where does `storeId` come from?**
+> Every product listing or detail response includes a `storeId` field when a `countryCode` query parameter is provided. This is the ID of the store that offers the product at the lowest price in that country. Pass it directly as `storeId` in this request.
+> See [Getting storeId from the product API](#getting-storeid-from-the-product-api) for the full flow.
 
 **Rules:**
 - `storeId` is **mandatory**. The store determines the price and the cart's country/currency.
@@ -244,29 +248,83 @@ GET /api/cart/{authCredentialId}?lat=40.4093&lng=49.8671
 
 ---
 
+## Getting storeId from the Product API
+
+`storeId` is **not** something the frontend chooses — it is returned by the backend as part of every product response when a `countryCode` is supplied. It identifies the store that has the lowest price for that product in the user's country.
+
+### Product listing
+
+```
+GET /api/product?lang=EN&countryCode=AZE&currency=AZN
+```
+
+Each item in `data[]` includes:
+
+```jsonc
+{
+  "id": "uuid",           // → use as productId in the cart request
+  "storeId": "uuid",      // → use as storeId in the cart request
+  "storePrice": 149.99,   // displayed price
+  "currency": "AZN",
+  ...
+}
+```
+
+### Product detail page
+
+```
+GET /api/product/{productId}?lang=EN&countryCode=AZE&currency=AZN
+```
+
+Same fields — `storeId` is present in the response.
+
+### Add to cart — correct flow
+
+```
+1. GET /api/product?countryCode=AZE...
+   → response includes product.storeId and product.storePrice
+
+2. User taps "Add to cart"
+
+3. POST /api/cart/{authCredentialId}/items
+   body: {
+     "storeId":   "<product.storeId from step 1>",
+     "productId": "<product.id>",
+     "quantity":  1
+   }
+```
+
+> `storeId` will be `null` in product responses when `countryCode` is **not** supplied (e.g. admin-facing endpoints). Never call `addItem` without a valid `storeId` — it will always return `400`.
+
+---
+
 ## Typical Frontend Flow
 
 ```
-1. User opens cart page
-   └─ GET /api/cart/{authCredentialId}?lat=...&lng=...
+1. User opens product listing (country already resolved from user session/preferences)
+   └─ GET /api/product?lang=EN&countryCode=AZE&currency=AZN
+      → store storeId + productId from each card
 
-2. User taps "Add to cart" on a product listing
+2. User taps "Add to cart"
    └─ POST /api/cart/{authCredentialId}/items
       body: { storeId, productId, variantId?, specOptionIds?, quantity }
       → on 400 "cross-country": prompt user to clear cart or switch country
 
-3. User changes quantity in cart
+3. User opens cart page
+   └─ GET /api/cart/{authCredentialId}?lat=...&lng=...
+
+4. User changes quantity in cart
    └─ PATCH /api/cart/{authCredentialId}/items/{cartItemId}
       body: { quantity }
 
-4. User removes an item
+5. User removes an item
    └─ DELETE /api/cart/{authCredentialId}/items/{cartItemId}
 
-5. User proceeds to checkout
+6. User proceeds to checkout
    └─ POST /api/cart/{authCredentialId}/checkout
       → redirect to order/payment flow
 
-6. User clears cart
+7. User clears cart
    └─ DELETE /api/cart/{authCredentialId}
 ```
 
@@ -277,3 +335,4 @@ GET /api/cart/{authCredentialId}?lat=40.4093&lng=49.8671
 - The cart is created automatically on the first `addItem` call — there is no separate "create cart" endpoint.
 - `CartResponse` always reflects the latest cart state; use the returned object to update your local state after every mutating call (add / update / remove / checkout).
 - Prices stored in the cart are **snapshot prices** at the time of adding. Re-fetching the cart does not re-price items.
+- Always pass `countryCode` when fetching products so that `storeId` and `storePrice` are populated in the response.

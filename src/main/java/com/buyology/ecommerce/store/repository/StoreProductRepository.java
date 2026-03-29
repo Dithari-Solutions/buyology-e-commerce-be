@@ -62,6 +62,25 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
             @Param("countryCode") String countryCode);
 
     /**
+     * Returns [storeId (UUID), storePrice (BigDecimal)] for the store with the lowest price
+     * for the given product in the given country. Results are ordered by price ASC so the
+     * first element is the cheapest. If multiple stores share the same minimum price the
+     * first one by insertion order is returned.
+     */
+    @Query("""
+            SELECT sp.store.id, sp.storePrice FROM StoreProduct sp
+            WHERE sp.product.id = :productId
+              AND sp.store.country.code = :countryCode
+              AND sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+            ORDER BY sp.storePrice ASC
+            """)
+    List<Object[]> findCheapestStoreByProductAndCountry(
+            @Param("productId") UUID productId,
+            @Param("countryCode") String countryCode);
+
+    /**
      * Batch: returns the minimum price per product for a given country.
      * Result rows are [productId (UUID), minPrice (BigDecimal)].
      */
@@ -75,6 +94,31 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
             GROUP BY sp.product.id
             """)
     List<Object[]> findMinPricesByProductsAndCountry(
+            @Param("productIds") List<UUID> productIds,
+            @Param("countryCode") String countryCode);
+
+    /**
+     * Batch: returns [productId (UUID), storeId (UUID), storePrice (BigDecimal)] for the
+     * cheapest store per product in the given country. When multiple stores tie on price
+     * the first one encountered is used — callers should take the first row per productId.
+     */
+    @Query("""
+            SELECT sp.product.id, sp.store.id, sp.storePrice FROM StoreProduct sp
+            WHERE sp.product.id IN :productIds
+              AND sp.store.country.code = :countryCode
+              AND sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+              AND sp.storePrice = (
+                SELECT MIN(sp2.storePrice) FROM StoreProduct sp2
+                WHERE sp2.product.id = sp.product.id
+                  AND sp2.store.country.code = :countryCode
+                  AND sp2.isActive = true
+                  AND sp2.deletedAt IS NULL
+                  AND sp2.store.deletedAt IS NULL
+              )
+            """)
+    List<Object[]> findCheapestStorePerProductBatch(
             @Param("productIds") List<UUID> productIds,
             @Param("countryCode") String countryCode);
 }
