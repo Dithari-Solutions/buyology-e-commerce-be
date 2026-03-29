@@ -29,6 +29,14 @@ public class Cart {
     @Column(name = "total_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal totalPrice = BigDecimal.ZERO;
 
+    /** ISO 3166-1 alpha-3 country code (e.g. "AZE", "ARE"). Set when the first item is added. */
+    @Column(name = "country_code", length = 3)
+    private String countryCode;
+
+    /** ISO 4217 currency code (e.g. "AZN", "AED"). Derived from the country at item-add time. */
+    @Column(name = "currency", length = 3)
+    private String currency;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -69,6 +77,12 @@ public class Cart {
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

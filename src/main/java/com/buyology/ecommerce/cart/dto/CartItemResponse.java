@@ -12,9 +12,12 @@ public class CartItemResponse {
     private String productSku;
     private UUID variantId;
     private String variantSku;
+    private UUID storeId;
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal totalPrice;
+    /** True when the item's store is within the 30-minute delivery radius of the user's location. */
+    private boolean quickDelivery;
     private List<CartItemSpecSelectionResponse> selectedSpecs;
     private Instant createdAt;
     private Instant updatedAt;
@@ -37,6 +40,9 @@ public class CartItemResponse {
     public String getVariantSku() { return variantSku; }
     public void setVariantSku(String variantSku) { this.variantSku = variantSku; }
 
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
     public Integer getQuantity() { return quantity; }
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
 
@@ -45,6 +51,9 @@ public class CartItemResponse {
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+
+    public boolean isQuickDelivery() { return quickDelivery; }
+    public void setQuickDelivery(boolean quickDelivery) { this.quickDelivery = quickDelivery; }
 
     public List<CartItemSpecSelectionResponse> getSelectedSpecs() { return selectedSpecs; }
     public void setSelectedSpecs(List<CartItemSpecSelectionResponse> selectedSpecs) { this.selectedSpecs = selectedSpecs; }

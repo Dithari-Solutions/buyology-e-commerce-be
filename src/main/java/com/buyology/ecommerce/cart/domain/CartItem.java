@@ -27,6 +27,10 @@ public class CartItem {
     @JoinColumn(name = "variant_id")
     private ProductVariant variant;
 
+    /** The store from which this item was priced — needed for quick-delivery proximity check. */
+    @Column(name = "store_id")
+    private UUID storeId;
+
     @Column(name = "quantity", nullable = false)
     private Integer quantity = 1;
 
@@ -45,13 +49,14 @@ public class CartItem {
     public CartItem() {
     }
 
-    public CartItem(Cart cart, Product product, ProductVariant variant, Integer quantity, BigDecimal unitPrice) {
+    public CartItem(Cart cart, Product product, ProductVariant variant, Integer quantity, BigDecimal unitPrice, UUID storeId) {
         this.cart = cart;
         this.product = product;
         this.variant = variant;
         this.quantity = quantity != null ? quantity : 1;
         this.unitPrice = unitPrice;
         this.totalPrice = unitPrice.multiply(BigDecimal.valueOf(this.quantity));
+        this.storeId = storeId;
     }
 
     @PrePersist
@@ -84,6 +89,9 @@ public class CartItem {
 
     public ProductVariant getVariant() { return variant; }
     public void setVariant(ProductVariant variant) { this.variant = variant; }
+
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
 
     public Integer getQuantity() { return quantity; }
     public void setQuantity(Integer quantity) { this.quantity = quantity; }

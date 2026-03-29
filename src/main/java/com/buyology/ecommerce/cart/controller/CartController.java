@@ -23,10 +23,13 @@ public class CartController {
         this.cartService = cartService;
     }
 
-    @Operation(summary = "Get the active cart for a user")
+    @Operation(summary = "Get the active cart for a user. Pass lat/lng to enable the under-30-min delivery badge.")
     @GetMapping("/{authCredentialId}")
-    public ResponseEntity<ApiResponse<CartResponse>> getCart(@PathVariable UUID authCredentialId) {
-        return cartService.getCart(authCredentialId);
+    public ResponseEntity<ApiResponse<CartResponse>> getCart(
+            @PathVariable UUID authCredentialId,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return cartService.getCart(authCredentialId, lat, lng);
     }
 
     @Operation(summary = "Add a product (with optional variant and spec selections) to the cart")

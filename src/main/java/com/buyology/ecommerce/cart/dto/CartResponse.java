@@ -11,6 +11,8 @@ public class CartResponse {
     private UUID authCredentialId;
     private String status;
     private BigDecimal totalPrice;
+    private String countryCode;
+    private String currency;
     private List<CartItemResponse> items;
     private Instant createdAt;
     private Instant updatedAt;
@@ -29,6 +31,12 @@ public class CartResponse {
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
 
     public List<CartItemResponse> getItems() { return items; }
     public void setItems(List<CartItemResponse> items) { this.items = items; }
