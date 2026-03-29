@@ -78,6 +78,9 @@ public class SecurityConfig {
                         // Admin API requires authentication; method-level @PreAuthorize handles role checks
                         .requestMatchers("/api/admin/**").authenticated()
                         .requestMatchers("/api/stores/**").authenticated()
+                        // Order endpoints require authentication
+                        .requestMatchers("/api/orders/**").authenticated()
+                        .requestMatchers("/api/courier/orders/**").authenticated()
                         // All other requests
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())

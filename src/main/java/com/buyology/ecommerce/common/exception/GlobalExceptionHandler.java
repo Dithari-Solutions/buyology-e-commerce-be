@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.common.exception;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.order.exception.OrderNotFoundException;
 import com.buyology.ecommerce.product.domain.ProductNotFoundException;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
 import org.slf4j.Logger;
@@ -34,6 +35,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ProductNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleProductNotFound(ProductNotFoundException ex) {
+        return ApiResponse.failure(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOrderNotFound(OrderNotFoundException ex) {
         return ApiResponse.failure(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 

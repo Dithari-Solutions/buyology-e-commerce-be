@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.payment.service;
 
+import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
 import com.buyology.ecommerce.payment.domain.*;
 import com.buyology.ecommerce.payment.dto.*;
 import com.buyology.ecommerce.payment.enums.PaymentMethodType;
@@ -11,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,7 @@ public class PaymentService {
     private final PaymobClient paymobClient;
     private final ObjectMapper objectMapper;
     private final UserProfileService userProfileService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -45,7 +48,8 @@ public class PaymentService {
             PaymentRefundRepository refundRepo,
             PaymobClient paymobClient,
             ObjectMapper objectMapper,
-            UserProfileService userProfileService) {
+            UserProfileService userProfileService,
+            ApplicationEventPublisher eventPublisher) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.providerOrderRepo = providerOrderRepo;
@@ -55,6 +59,7 @@ public class PaymentService {
         this.paymobClient = paymobClient;
         this.objectMapper = objectMapper;
         this.userProfileService = userProfileService;
+        this.eventPublisher = eventPublisher;
     }
 
     // =========================================================================
@@ -222,6 +227,13 @@ public class PaymentService {
         try {
             applyWebhookToTransaction(transaction, payload, providerTxnId);
             transactionRepo.save(transaction);
+
+            // Notify the order module so it can transition to PAID
+            if (transaction.getStatus() == PaymentStatus.SUCCESS
+                    && transaction.getAppOrderId() != null) {
+                eventPublisher.publishEvent(
+                        new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
+            }
 
             event.setProcessed(true);
             event.setProcessedAt(Instant.now());
