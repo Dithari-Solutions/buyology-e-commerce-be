@@ -22,6 +22,8 @@ import com.buyology.ecommerce.store.domain.StoreProductVariant;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -32,6 +34,8 @@ import java.util.*;
 
 @Service
 public class CartService {
+
+    private static final Logger log = LoggerFactory.getLogger(CartService.class);
 
     private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
@@ -92,20 +96,30 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> addItem(UUID authCredentialId, AddToCartRequest request) {
+        log.debug("addItem called — authCredentialId={} productId={} variantId={} storeId={} qty={}",
+                authCredentialId, request.getProductId(), request.getVariantId(),
+                request.getStoreId(), request.getQuantity());
+
         if (request.getProductId() == null) {
+            log.warn("addItem rejected — productId is null [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "productId is required");
         }
         if (request.getQuantity() == null || request.getQuantity() < 1) {
+            log.warn("addItem rejected — invalid quantity={} [authCredentialId={} productId={}]",
+                    request.getQuantity(), authCredentialId, request.getProductId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
         AuthCredentials authCredential = authCredentialRepository.findById(authCredentialId).orElse(null);
         if (authCredential == null) {
+            log.warn("addItem rejected — authCredentialId={} not found", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
         }
 
         Product product = productRepository.findById(request.getProductId()).orElse(null);
         if (product == null || "DELETED".equals(product.getStatus())) {
+            log.warn("addItem rejected — productId={} not found or deleted [authCredentialId={}]",
+                    request.getProductId(), authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
         }
 
@@ -114,6 +128,8 @@ public class CartService {
         if (request.getVariantId() != null) {
             variant = variantRepository.findById(request.getVariantId()).orElse(null);
             if (variant == null || !variant.getProduct().getId().equals(product.getId())) {
+                log.warn("addItem rejected — variantId={} not found or does not belong to productId={} [authCredentialId={}]",
+                        request.getVariantId(), request.getProductId(), authCredentialId);
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Variant does not belong to the given product");
             }
         }
@@ -124,6 +140,8 @@ public class CartService {
             for (UUID specOptionId : request.getSpecOptionIds()) {
                 ProductSpecOption option = specOptionRepository.findById(specOptionId).orElse(null);
                 if (option == null) {
+                    log.warn("addItem rejected — specOptionId={} not found [authCredentialId={} productId={}]",
+                            specOptionId, authCredentialId, request.getProductId());
                     return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Spec option not found: " + specOptionId);
                 }
                 selectedSpecOptions.add(option);
@@ -132,23 +150,31 @@ public class CartService {
 
         // Resolve store product — storeId is required for pricing
         if (request.getStoreId() == null) {
+            log.warn("addItem rejected — storeId is null [authCredentialId={} productId={}]",
+                    authCredentialId, request.getProductId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "storeId is required");
         }
         StoreProduct storeProduct = storeProductRepository
                 .findByStore_IdAndProduct_IdAndIsActiveTrue(request.getStoreId(), product.getId())
                 .orElse(null);
         if (storeProduct == null) {
+            log.warn("addItem rejected — no active StoreProduct for storeId={} productId={} [authCredentialId={}]",
+                    request.getStoreId(), request.getProductId(), authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product is not available in the selected store");
         }
 
         // Extract country + currency from this store
         String itemCountryCode = storeProduct.getStore().getCountry().getCode();
         String itemCurrency = storeProduct.getStore().getCountry().getCurrency();
+        log.debug("addItem — resolved storeId={} countryCode={} currency={}",
+                request.getStoreId(), itemCountryCode, itemCurrency);
 
         Cart cart = findOrCreateActiveCart(authCredential);
 
         // Enforce single-country carts: once a country is set, all items must match
         if (cart.getCountryCode() != null && !cart.getCountryCode().equals(itemCountryCode)) {
+            log.warn("addItem rejected — country mismatch cartCountry={} itemCountry={} [authCredentialId={} cartId={}]",
+                    cart.getCountryCode(), itemCountryCode, authCredentialId, cart.getId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
                     "All items in a cart must belong to the same country. " +
                     "Current cart country: " + cart.getCountryCode() + ", item country: " + itemCountryCode);
@@ -161,6 +187,8 @@ public class CartService {
                     .findByStoreProduct_IdAndVariant_Id(storeProduct.getId(), variant.getId())
                     .orElse(null);
             if (storeVariant == null || !storeVariant.getIsActive()) {
+                log.warn("addItem rejected — variantId={} not active in storeId={} [authCredentialId={} productId={}]",
+                        variant.getId(), request.getStoreId(), authCredentialId, request.getProductId());
                 return ApiResponse.failure(HttpStatus.NOT_FOUND, "Variant is not available in the selected store");
             }
             basePrice = storeVariant.getStorePrice();
@@ -187,7 +215,10 @@ public class CartService {
 
             if (existing.isPresent()) {
                 CartItem item = existing.get();
-                item.setQuantity(item.getQuantity() + request.getQuantity());
+                int newQty = item.getQuantity() + request.getQuantity();
+                log.debug("addItem — incrementing existing cartItemId={} qty {} -> {} [cartId={}]",
+                        item.getId(), item.getQuantity(), newQty, cart.getId());
+                item.setQuantity(newQty);
                 item.setTotalPrice(item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
                 cartItemRepository.save(item);
                 recalculateCartTotal(cart);
@@ -196,6 +227,9 @@ public class CartService {
         }
 
         // Create new cart item
+        log.debug("addItem — creating new CartItem productId={} variantId={} qty={} unitPrice={} storeId={} [cartId={}]",
+                product.getId(), variant != null ? variant.getId() : null,
+                request.getQuantity(), unitPrice, request.getStoreId(), cart.getId());
         CartItem cartItem = new CartItem(cart, product, variant, request.getQuantity(), unitPrice, request.getStoreId());
         cartItemRepository.save(cartItem);
 
@@ -212,17 +246,25 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> updateItemQuantity(UUID authCredentialId, UUID cartItemId, UpdateCartItemRequest request) {
+        log.debug("updateItemQuantity called — authCredentialId={} cartItemId={} qty={}",
+                authCredentialId, cartItemId, request.getQuantity());
+
         if (request.getQuantity() == null || request.getQuantity() < 1) {
+            log.warn("updateItemQuantity rejected — invalid quantity={} [authCredentialId={} cartItemId={}]",
+                    request.getQuantity(), authCredentialId, cartItemId);
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
         Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
+            log.warn("updateItemQuantity rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
 
         CartItem item = cartItemRepository.findById(cartItemId).orElse(null);
         if (item == null || !item.getCart().getId().equals(cart.getId())) {
+            log.warn("updateItemQuantity rejected — cartItemId={} not found in cartId={} [authCredentialId={}]",
+                    cartItemId, cart.getId(), authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Cart item not found");
         }
 
@@ -238,13 +280,18 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> removeItem(UUID authCredentialId, UUID cartItemId) {
+        log.debug("removeItem called — authCredentialId={} cartItemId={}", authCredentialId, cartItemId);
+
         Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
+            log.warn("removeItem rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
 
         CartItem item = cartItemRepository.findById(cartItemId).orElse(null);
         if (item == null || !item.getCart().getId().equals(cart.getId())) {
+            log.warn("removeItem rejected — cartItemId={} not found in cartId={} [authCredentialId={}]",
+                    cartItemId, cart.getId(), authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Cart item not found");
         }
 
@@ -282,16 +329,22 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> checkout(UUID authCredentialId) {
+        log.debug("checkout called — authCredentialId={}", authCredentialId);
+
         Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
+            log.warn("checkout rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
 
         List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
         if (items.isEmpty()) {
+            log.warn("checkout rejected — cart is empty [authCredentialId={} cartId={}]", authCredentialId, cart.getId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Cart is empty");
         }
 
+        log.info("checkout — cartId={} authCredentialId={} itemCount={} total={} currency={}",
+                cart.getId(), authCredentialId, items.size(), cart.getTotalPrice(), cart.getCurrency());
         cart.setStatus(Cart.CartStatus.CHECKED_OUT);
         cartRepository.save(cart);
 
