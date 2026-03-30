@@ -231,6 +231,12 @@ public class OrderService {
             UUID authCredentialId = cart.getAuthCredential().getId();
             if (userId == null || authCredentialId == null) return;
 
+            // Transition cart to CHECKED_OUT so createOrder's status guard passes
+            if (cart.getStatus() != Cart.CartStatus.CHECKED_OUT) {
+                cart.setStatus(Cart.CartStatus.CHECKED_OUT);
+                cartRepo.save(cart);
+            }
+
             // Delivery method is auto-determined: LOCAL_EXPRESS if all items' stores are
             // within the 30-min radius of the delivery address, otherwise INTERNATIONAL.
             DeliveryMethod deliveryMethod = resolveDeliveryMethod(cartItems, address);
