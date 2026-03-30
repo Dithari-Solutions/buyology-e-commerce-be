@@ -7,6 +7,8 @@ import com.buyology.ecommerce.payment.enums.PaymentMethodType;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.repository.*;
+import com.buyology.ecommerce.user.domain.UserAddress;
+import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.service.UserProfileService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +39,7 @@ public class PaymentService {
     private final PaymobClient paymobClient;
     private final ObjectMapper objectMapper;
     private final UserProfileService userProfileService;
+    private final UserAddressRepository addressRepo;
     private final ApplicationEventPublisher eventPublisher;
 
     public PaymentService(
@@ -49,6 +52,7 @@ public class PaymentService {
             PaymobClient paymobClient,
             ObjectMapper objectMapper,
             UserProfileService userProfileService,
+            UserAddressRepository addressRepo,
             ApplicationEventPublisher eventPublisher) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
@@ -59,6 +63,7 @@ public class PaymentService {
         this.paymobClient = paymobClient;
         this.objectMapper = objectMapper;
         this.userProfileService = userProfileService;
+        this.addressRepo = addressRepo;
         this.eventPublisher = eventPublisher;
     }
 
@@ -83,8 +88,11 @@ public class PaymentService {
                 .multiply(BigDecimal.valueOf(100))
                 .longValue();
 
-        // Build billing_data node
-        ObjectNode billingData = buildBillingData(req);
+        // Build billing_data node — fall back to saved address when frontend omits billing fields
+        UserAddress address = req.getAddressId() != null
+                ? addressRepo.findById(req.getAddressId()).orElse(null)
+                : null;
+        ObjectNode billingData = buildBillingData(req, address);
 
         // Build customer node
         ObjectNode customer = objectMapper.createObjectNode();
@@ -346,7 +354,7 @@ public class PaymentService {
         }
     }
 
-    private ObjectNode buildBillingData(InitiatePaymentRequest req) {
+    private ObjectNode buildBillingData(InitiatePaymentRequest req, UserAddress address) {
         String[] nameParts = req.getBillingName() != null
                 ? req.getBillingName().split(" ", 2)
                 : new String[]{"NA", "NA"};
@@ -354,15 +362,21 @@ public class PaymentService {
         ObjectNode n = objectMapper.createObjectNode();
         n.put("first_name", nameParts[0]);
         n.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
-        n.put("phone_number", req.getCustomerPhone() != null ? req.getCustomerPhone() : "NA");
+        n.put("phone_number", req.getCustomerPhone() != null ? req.getCustomerPhone()
+                : address != null && address.getPhoneNumber() != null ? address.getPhoneNumber() : "NA");
         n.put("apartment", req.getBillingApartment() != null ? req.getBillingApartment() : "NA");
         n.put("floor", req.getBillingFloor() != null ? req.getBillingFloor() : "NA");
-        n.put("street", req.getBillingStreet() != null ? req.getBillingStreet() : "NA");
+        n.put("street", req.getBillingStreet() != null ? req.getBillingStreet()
+                : address != null && address.getAddressLine1() != null ? address.getAddressLine1() : "NA");
         n.put("building", req.getBillingBuilding() != null ? req.getBillingBuilding() : "NA");
-        n.put("city", req.getBillingCity() != null ? req.getBillingCity() : "NA");
-        n.put("country", req.getBillingCountry() != null ? req.getBillingCountry() : "AE");
-        n.put("state", req.getBillingState() != null ? req.getBillingState() : "NA");
-        n.put("postal_code", req.getBillingPostalCode() != null ? req.getBillingPostalCode() : "NA");
+        n.put("city", req.getBillingCity() != null ? req.getBillingCity()
+                : address != null && address.getCity() != null ? address.getCity() : "NA");
+        n.put("country", req.getBillingCountry() != null ? req.getBillingCountry()
+                : address != null && address.getCountry() != null ? address.getCountry() : "AE");
+        n.put("state", req.getBillingState() != null ? req.getBillingState()
+                : address != null && address.getState() != null ? address.getState() : "NA");
+        n.put("postal_code", req.getBillingPostalCode() != null ? req.getBillingPostalCode()
+                : address != null && address.getPostalCode() != null ? address.getPostalCode() : "NA");
         n.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
         return n;
     }
@@ -441,11 +455,8 @@ public class PaymentService {
             return providerOrderRepo.findAll().stream()
                     .filter(po -> po.getProviderOrderId().equals(paymobOrderId))
                     .findFirst()
-                    .flatMap(po -> transactionRepo.findAllByAppOrderId(po.getAppOrderId())
-                            .stream()
-                            .filter(tx -> tx.getStatus() == PaymentStatus.PENDING ||
-                                         tx.getStatus() == PaymentStatus.PROCESSING)
-                            .findFirst())
+                    .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
+                            po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
                     .orElse(null);
         } catch (Exception e) {
             return null;

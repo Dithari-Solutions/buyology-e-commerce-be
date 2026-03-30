@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.payment.repository;
 
+import com.buyology.ecommerce.payment.domain.PaymentProviderOrder;
 import com.buyology.ecommerce.payment.domain.PaymentTransaction;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,4 +18,7 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     Optional<PaymentTransaction> findByProviderTransactionId(String providerTransactionId);
 
     List<PaymentTransaction> findAllByStatus(PaymentStatus status);
+
+    Optional<PaymentTransaction> findFirstByProviderOrderAndStatusIn(
+            PaymentProviderOrder providerOrder, List<PaymentStatus> statuses);
 }
