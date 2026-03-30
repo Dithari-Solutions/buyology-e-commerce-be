@@ -61,6 +61,7 @@ public class PaymentDataInitializer implements ApplicationRunner {
         provider.setSecretKey(props.getSecretKey());
         provider.setPublicKey(props.getPublicKey());
         provider.setHmacSecret(props.getHmacSecret());
+        provider.setNotificationUrl(props.getNotificationUrl());
         providerRepo.save(provider);
 
         upsertMethod(provider, PaymentMethodType.CARD,

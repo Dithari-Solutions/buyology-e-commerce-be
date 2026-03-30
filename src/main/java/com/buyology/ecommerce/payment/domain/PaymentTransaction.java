@@ -29,9 +29,14 @@ public class PaymentTransaction {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    // FK to orders service — stored as plain UUID (cross-service boundary)
-    @Column(name = "app_order_id", nullable = false)
+    // FK to orders service — stored as plain UUID (cross-service boundary).
+    // Null until the order is created (cart-first flow: payment initiates before order exists).
+    @Column(name = "app_order_id")
     private UUID appOrderId;
+
+    // Cart that this payment covers — used to create the order on payment success.
+    @Column(name = "cart_id")
+    private UUID cartId;
 
     // Nullable: set once the Paymob order is created
     @ManyToOne(fetch = FetchType.LAZY)
@@ -119,6 +124,9 @@ public class PaymentTransaction {
 
     public UUID getAppOrderId() { return appOrderId; }
     public void setAppOrderId(UUID appOrderId) { this.appOrderId = appOrderId; }
+
+    public UUID getCartId() { return cartId; }
+    public void setCartId(UUID cartId) { this.cartId = cartId; }
 
     public PaymentProviderOrder getProviderOrder() { return providerOrder; }
     public void setProviderOrder(PaymentProviderOrder providerOrder) { this.providerOrder = providerOrder; }

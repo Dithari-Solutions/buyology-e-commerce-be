@@ -19,8 +19,9 @@ public class PaymentProviderOrder {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    // FK to the orders service — stored as UUID without a DB-level FK (cross-service)
-    @Column(name = "app_order_id", nullable = false)
+    // FK to the orders service — stored as UUID without a DB-level FK (cross-service).
+    // Null for the cart-first flow (order doesn't exist yet when payment is initiated).
+    @Column(name = "app_order_id")
     private UUID appOrderId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

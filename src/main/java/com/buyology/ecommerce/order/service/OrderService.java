@@ -14,8 +14,12 @@ import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
 import com.buyology.ecommerce.order.exception.OrderNotFoundException;
 import com.buyology.ecommerce.order.repository.OrderRepository;
 import com.buyology.ecommerce.order.repository.OrderTrackingEventRepository;
+import com.buyology.ecommerce.payment.domain.PaymentTransaction;
+import com.buyology.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -38,17 +42,23 @@ public class OrderService {
     private final CartRepository cartRepo;
     private final CartItemRepository cartItemRepo;
     private final UserAddressRepository addressRepo;
+    private final PaymentTransactionRepository paymentTransactionRepo;
+    private final ObjectMapper objectMapper;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
                         CartRepository cartRepo,
                         CartItemRepository cartItemRepo,
-                        UserAddressRepository addressRepo) {
+                        UserAddressRepository addressRepo,
+                        PaymentTransactionRepository paymentTransactionRepo,
+                        ObjectMapper objectMapper) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
         this.cartItemRepo = cartItemRepo;
         this.addressRepo = addressRepo;
+        this.paymentTransactionRepo = paymentTransactionRepo;
+        this.objectMapper = objectMapper;
     }
 
     // =========================================================================
@@ -152,15 +162,68 @@ public class OrderService {
 
     /**
      * Listens for PaymentSucceededEvent published by PaymentService.
-     * Transitions the matching order from PENDING_PAYMENT to PAID.
-     * Silently ignores events for unknown orders (defensive — may arrive before order is saved
-     * in edge cases, or for non-order payments).
+     *
+     * Two paths:
+     * 1. Legacy / pre-created order: appOrderId is set → transition PENDING_PAYMENT → PAID.
+     * 2. Cart-first flow: appOrderId is null, cartId is set → create the order from the cart,
+     *    mark it PAID immediately, and back-fill transaction.appOrderId.
      */
     @EventListener
     @Transactional
     public void onPaymentSucceeded(PaymentSucceededEvent event) {
-        orderRepo.findById(event.getOrderId()).ifPresent(order -> {
-            if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
+        // Look up the transaction to determine which flow applies
+        PaymentTransaction tx = paymentTransactionRepo.findById(event.getTransactionId())
+                .orElse(null);
+        if (tx == null) return;
+
+        if (tx.getAppOrderId() != null) {
+            // Path 1 — order already exists, just transition it to PAID
+            orderRepo.findById(tx.getAppOrderId()).ifPresent(order -> {
+                if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
+                    order.setStatus(OrderStatus.PAID);
+                    order.setPaymentTransactionId(event.getTransactionId());
+                    order.setPaidAt(Instant.now());
+                    appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
+                            null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                    orderRepo.save(order);
+                }
+            });
+        } else if (tx.getCartId() != null) {
+            // Path 2 — cart-first flow: create order from cart, mark PAID right away
+            Cart cart = cartRepo.findById(tx.getCartId()).orElse(null);
+            if (cart == null) return;
+
+            // Parse delivery details from transaction metadata
+            UUID addressId = null;
+            DeliveryMethod deliveryMethod = DeliveryMethod.LOCAL_EXPRESS;
+            BigDecimal shippingFee = BigDecimal.ZERO;
+            try {
+                if (tx.getMetadata() != null) {
+                    JsonNode meta = objectMapper.readTree(tx.getMetadata());
+                    if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
+                    if (meta.has("deliveryMethod")) deliveryMethod = DeliveryMethod.valueOf(meta.get("deliveryMethod").asText());
+                    if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
+                }
+            } catch (Exception ignored) { /* use defaults if metadata is malformed */ }
+
+            if (addressId == null) return; // cannot create order without a delivery address
+
+            if (cart.getAuthCredential() == null) return;
+            UUID userId = cart.getAuthCredential().getUserId();
+            UUID authCredentialId = cart.getAuthCredential().getId();
+            if (userId == null || authCredentialId == null) return;
+
+            CreateOrderRequest req = new CreateOrderRequest();
+            req.setCartId(tx.getCartId());
+            req.setAddressId(addressId);
+            req.setDeliveryMethod(deliveryMethod);
+            req.setShippingFee(shippingFee);
+
+            OrderResponse orderResponse = createOrder(userId, authCredentialId, req);
+
+            // Transition immediately to PAID
+            Order order = orderRepo.findById(orderResponse.getId()).orElse(null);
+            if (order != null) {
                 order.setStatus(OrderStatus.PAID);
                 order.setPaymentTransactionId(event.getTransactionId());
                 order.setPaidAt(Instant.now());
@@ -168,7 +231,11 @@ public class OrderService {
                         null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                 orderRepo.save(order);
             }
-        });
+
+            // Back-fill the transaction so future queries can find the order
+            tx.setAppOrderId(orderResponse.getId());
+            paymentTransactionRepo.save(tx);
+        }
     }
 
     // =========================================================================

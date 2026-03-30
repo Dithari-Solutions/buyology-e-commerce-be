@@ -7,11 +7,12 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "paymob")
 public class PaymobProperties {
 
-    private String apiKey;       // legacy — no longer used
-    private String secretKey;    // Intention API: Authorization: Token header
-    private String publicKey;    // Intention API: frontend checkout URL
+    private String apiKey;           // legacy — no longer used
+    private String secretKey;        // Intention API: Authorization: Token header
+    private String publicKey;        // Intention API: frontend checkout URL
     private String hmacSecret;
     private String baseUrl;
+    private String notificationUrl;  // Paymob will POST transaction webhooks to this URL
     private Card card = new Card();
     private Method tabby = new Method();
     private Method tamara = new Method();
@@ -48,6 +49,9 @@ public class PaymobProperties {
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+
+    public String getNotificationUrl() { return notificationUrl; }
+    public void setNotificationUrl(String notificationUrl) { this.notificationUrl = notificationUrl; }
 
     public Card getCard() { return card; }
     public void setCard(Card card) { this.card = card; }

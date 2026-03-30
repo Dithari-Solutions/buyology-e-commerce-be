@@ -55,7 +55,7 @@ public class PaymobClient {
                                            long amountCents, String currency,
                                            int integrationId, String specialReference,
                                            ObjectNode billingData, ObjectNode customer,
-                                           ArrayNode items) {
+                                           ArrayNode items, String notificationUrl) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("amount", amountCents);
         body.put("currency", currency);
@@ -68,6 +68,10 @@ public class PaymobClient {
         body.set("items", items);
         body.set("billing_data", billingData);
         body.set("customer", customer);
+
+        if (notificationUrl != null && !notificationUrl.isBlank()) {
+            body.put("notification_url", notificationUrl);
+        }
 
         JsonNode response = post(baseUrl + "/v1/intention/", body, "Token " + secretKey);
         return new IntentionResult(

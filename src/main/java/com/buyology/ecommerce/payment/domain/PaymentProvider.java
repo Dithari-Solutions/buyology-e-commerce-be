@@ -40,6 +40,10 @@ public class PaymentProvider {
     @Column(name = "base_url", nullable = false, length = 255)
     private String baseUrl;
 
+    // Overrides the dashboard webhook URL — Paymob will POST transaction results here
+    @Column(name = "notification_url", columnDefinition = "TEXT")
+    private String notificationUrl;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
 
@@ -84,6 +88,9 @@ public class PaymentProvider {
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+
+    public String getNotificationUrl() { return notificationUrl; }
+    public void setNotificationUrl(String notificationUrl) { this.notificationUrl = notificationUrl; }
 
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }

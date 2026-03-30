@@ -10,8 +10,20 @@ import java.util.UUID;
 
 public class InitiatePaymentRequest {
 
-    @NotNull
+    // Optional — null for the cart-first flow where the order is created after payment success.
     private UUID appOrderId;
+
+    // Cart-first flow: provide cartId + addressId + deliveryMethod instead of appOrderId.
+    @NotNull
+    private UUID cartId;
+
+    @NotNull
+    private UUID addressId;
+
+    @NotNull
+    private String deliveryMethod;
+
+    private java.math.BigDecimal shippingFee;
 
     @NotNull
     private PaymentMethodType methodType;
@@ -47,6 +59,18 @@ public class InitiatePaymentRequest {
 
     public UUID getAppOrderId() { return appOrderId; }
     public void setAppOrderId(UUID appOrderId) { this.appOrderId = appOrderId; }
+
+    public UUID getCartId() { return cartId; }
+    public void setCartId(UUID cartId) { this.cartId = cartId; }
+
+    public UUID getAddressId() { return addressId; }
+    public void setAddressId(UUID addressId) { this.addressId = addressId; }
+
+    public String getDeliveryMethod() { return deliveryMethod; }
+    public void setDeliveryMethod(String deliveryMethod) { this.deliveryMethod = deliveryMethod; }
+
+    public java.math.BigDecimal getShippingFee() { return shippingFee; }
+    public void setShippingFee(java.math.BigDecimal shippingFee) { this.shippingFee = shippingFee; }
 
     public PaymentMethodType getMethodType() { return methodType; }
     public void setMethodType(PaymentMethodType methodType) { this.methodType = methodType; }

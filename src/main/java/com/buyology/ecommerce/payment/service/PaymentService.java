@@ -108,15 +108,18 @@ public class PaymentService {
         items.add(item);
 
         int integrationId = Integer.parseInt(config.getIntegrationId());
+        // Use cartId as the reference base (appOrderId may be null in cart-first flow)
+        UUID referenceId = req.getCartId() != null ? req.getCartId() : req.getAppOrderId();
         // Unique per attempt — Paymob rejects duplicate special_reference values
-        String specialReference = req.getAppOrderId() + "-" + UUID.randomUUID().toString().substring(0, 8);
+        String specialReference = referenceId + "-" + UUID.randomUUID().toString().substring(0, 8);
 
         // Single API call — replaces the old authenticate → createOrder → generatePaymentKey chain
         PaymobClient.IntentionResult intention = paymobClient.createIntention(
                 provider.getSecretKey(), provider.getBaseUrl(),
                 amountCents, req.getCurrency(),
                 integrationId, specialReference,
-                billingData, customer, items);
+                billingData, customer, items,
+                provider.getNotificationUrl());
 
         // Each intention creates a new provider order row (one per attempt)
         PaymentProviderOrder providerOrder = new PaymentProviderOrder();
@@ -127,10 +130,14 @@ public class PaymentService {
         providerOrder.setCurrency(req.getCurrency());
         providerOrder = providerOrderRepo.save(providerOrder);
 
+        // Build metadata JSON to store address/delivery details needed for order creation
+        String metadata = buildOrderMetadata(req);
+
         // Persist the transaction in PENDING state
         // paymentKeyToken is repurposed to store the clientSecret
         PaymentTransaction tx = new PaymentTransaction();
         tx.setAppOrderId(req.getAppOrderId());
+        tx.setCartId(req.getCartId());
         tx.setProviderOrder(providerOrder);
         tx.setMethodConfig(config);
         tx.setMethodType(req.getMethodType());
@@ -143,6 +150,7 @@ public class PaymentService {
         tx.setCustomerEmail(req.getCustomerEmail());
         tx.setCustomerPhone(req.getCustomerPhone());
         tx.setBillingName(req.getBillingName());
+        tx.setMetadata(metadata);
         tx = transactionRepo.save(tx);
 
         // Unified Checkout URL — works for card, Tabby, and Tamara
@@ -228,9 +236,10 @@ public class PaymentService {
             applyWebhookToTransaction(transaction, payload, providerTxnId);
             transactionRepo.save(transaction);
 
-            // Notify the order module so it can transition to PAID
+            // Notify the order module: either transition an existing order to PAID,
+            // or create a new order from the cart (cart-first flow).
             if (transaction.getStatus() == PaymentStatus.SUCCESS
-                    && transaction.getAppOrderId() != null) {
+                    && (transaction.getAppOrderId() != null || transaction.getCartId() != null)) {
                 eventPublisher.publishEvent(
                         new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
             }
@@ -325,6 +334,18 @@ public class PaymentService {
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    private String buildOrderMetadata(InitiatePaymentRequest req) {
+        try {
+            ObjectNode meta = objectMapper.createObjectNode();
+            if (req.getAddressId() != null) meta.put("addressId", req.getAddressId().toString());
+            if (req.getDeliveryMethod() != null) meta.put("deliveryMethod", req.getDeliveryMethod());
+            if (req.getShippingFee() != null) meta.put("shippingFee", req.getShippingFee().toPlainString());
+            return objectMapper.writeValueAsString(meta);
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     private ObjectNode buildBillingData(InitiatePaymentRequest req) {
         String[] nameParts = req.getBillingName() != null
