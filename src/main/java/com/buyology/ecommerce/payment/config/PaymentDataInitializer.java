@@ -82,17 +82,17 @@ public class PaymentDataInitializer implements ApplicationRunner {
                                String integrationId,
                                String iframeId) {
         PaymentMethodConfig cfg = methodConfigRepo
-                .findByProviderAndMethodTypeAndIsActiveTrue(provider, type)
+                .findByProviderAndMethodType(provider, type)
                 .orElseGet(() -> {
                     PaymentMethodConfig c = new PaymentMethodConfig();
                     c.setProvider(provider);
                     c.setMethodType(type);
                     c.setCurrency("AED");
-                    c.setActive(true);
                     log.info("Creating PaymentMethodConfig: {}", type);
                     return c;
                 });
 
+        cfg.setActive(true);
         cfg.setIntegrationId(integrationId);
         cfg.setIframeId(iframeId);
         methodConfigRepo.save(cfg);

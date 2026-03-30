@@ -14,4 +14,7 @@ public interface PaymentMethodConfigRepository extends JpaRepository<PaymentMeth
 
     Optional<PaymentMethodConfig> findByProviderAndMethodTypeAndIsActiveTrue(
             PaymentProvider provider, PaymentMethodType methodType);
+
+    Optional<PaymentMethodConfig> findByProviderAndMethodType(
+            PaymentProvider provider, PaymentMethodType methodType);
 }
