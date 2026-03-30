@@ -3,7 +3,9 @@ package com.buyology.ecommerce.order.service;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.cart.repository.CartItemRepository;
+import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
+import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.OrderTrackingEvent;
@@ -20,44 +22,55 @@ import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class OrderService {
 
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
     private final OrderRepository orderRepo;
     private final OrderTrackingEventRepository trackingRepo;
     private final CartRepository cartRepo;
     private final CartItemRepository cartItemRepo;
+    private final CartItemSpecSelectionRepository cartItemSpecSelectionRepo;
     private final UserAddressRepository addressRepo;
     private final PaymentTransactionRepository paymentTransactionRepo;
+    private final StoreLocationRepository storeLocationRepo;
     private final ObjectMapper objectMapper;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
                         CartRepository cartRepo,
                         CartItemRepository cartItemRepo,
+                        CartItemSpecSelectionRepository cartItemSpecSelectionRepo,
                         UserAddressRepository addressRepo,
                         PaymentTransactionRepository paymentTransactionRepo,
+                        StoreLocationRepository storeLocationRepo,
                         ObjectMapper objectMapper) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
         this.cartItemRepo = cartItemRepo;
+        this.cartItemSpecSelectionRepo = cartItemSpecSelectionRepo;
         this.addressRepo = addressRepo;
         this.paymentTransactionRepo = paymentTransactionRepo;
+        this.storeLocationRepo = storeLocationRepo;
         this.objectMapper = objectMapper;
     }
 
@@ -162,16 +175,17 @@ public class OrderService {
 
     /**
      * Listens for PaymentSucceededEvent published by PaymentService.
+     * Runs in a new transaction AFTER the payment transaction has committed to SUCCESS,
+     * so order-creation failures never roll back the payment status.
      *
      * Two paths:
-     * 1. Legacy / pre-created order: appOrderId is set → transition PENDING_PAYMENT → PAID.
+     * 1. Pre-created order: appOrderId is set → transition PENDING_PAYMENT → PAID.
      * 2. Cart-first flow: appOrderId is null, cartId is set → create the order from the cart,
-     *    mark it PAID immediately, and back-fill transaction.appOrderId.
+     *    auto-determine delivery method, mark PAID, clear the cart, back-fill appOrderId.
      */
-    @EventListener
-    @Transactional
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onPaymentSucceeded(PaymentSucceededEvent event) {
-        // Look up the transaction to determine which flow applies
         PaymentTransaction tx = paymentTransactionRepo.findById(event.getTransactionId())
                 .orElse(null);
         if (tx == null) return;
@@ -193,25 +207,33 @@ public class OrderService {
             Cart cart = cartRepo.findById(tx.getCartId()).orElse(null);
             if (cart == null) return;
 
-            // Parse delivery details from transaction metadata
+            List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
+            if (cartItems.isEmpty()) return;
+
+            // Parse address and shipping fee from transaction metadata
             UUID addressId = null;
-            DeliveryMethod deliveryMethod = DeliveryMethod.LOCAL_EXPRESS;
             BigDecimal shippingFee = BigDecimal.ZERO;
             try {
                 if (tx.getMetadata() != null) {
                     JsonNode meta = objectMapper.readTree(tx.getMetadata());
                     if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
-                    if (meta.has("deliveryMethod")) deliveryMethod = DeliveryMethod.valueOf(meta.get("deliveryMethod").asText());
                     if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
                 }
             } catch (Exception ignored) { /* use defaults if metadata is malformed */ }
 
-            if (addressId == null) return; // cannot create order without a delivery address
+            if (addressId == null) return;
+
+            UserAddress address = addressRepo.findById(addressId).orElse(null);
+            if (address == null) return;
 
             if (cart.getAuthCredential() == null) return;
             UUID userId = cart.getAuthCredential().getUserId();
             UUID authCredentialId = cart.getAuthCredential().getId();
             if (userId == null || authCredentialId == null) return;
+
+            // Delivery method is auto-determined: LOCAL_EXPRESS if all items' stores are
+            // within the 30-min radius of the delivery address, otherwise INTERNATIONAL.
+            DeliveryMethod deliveryMethod = resolveDeliveryMethod(cartItems, address);
 
             CreateOrderRequest req = new CreateOrderRequest();
             req.setCartId(tx.getCartId());
@@ -235,7 +257,32 @@ public class OrderService {
             // Back-fill the transaction so future queries can find the order
             tx.setAppOrderId(orderResponse.getId());
             paymentTransactionRepo.save(tx);
+
+            // Clear cart items and mark cart ABANDONED so the customer can start fresh
+            for (CartItem item : cartItems) {
+                cartItemSpecSelectionRepo.deleteByCartItemId(item.getId());
+            }
+            cartItemRepo.deleteByCartId(cart.getId());
+            cart.setStatus(Cart.CartStatus.ABANDONED);
+            cart.setTotalPrice(BigDecimal.ZERO);
+            cartRepo.save(cart);
         }
+    }
+
+    /**
+     * Returns LOCAL_EXPRESS if every cart item's store has an active location within
+     * the 30-minute delivery radius of the given address, otherwise INTERNATIONAL.
+     */
+    private DeliveryMethod resolveDeliveryMethod(List<CartItem> cartItems, UserAddress address) {
+        if (address.getLatitude() == null || address.getLongitude() == null) {
+            return DeliveryMethod.INTERNATIONAL;
+        }
+        List<UUID> expressStoreIds = storeLocationRepo.findStoreIdsWithinRadius(
+                address.getLatitude(), address.getLongitude(), THIRTY_MIN_RADIUS_KM);
+        Set<UUID> expressSet = new HashSet<>(expressStoreIds);
+        boolean allLocal = !cartItems.isEmpty() && cartItems.stream()
+                .allMatch(item -> item.getStoreId() != null && expressSet.contains(item.getStoreId()));
+        return allLocal ? DeliveryMethod.LOCAL_EXPRESS : DeliveryMethod.INTERNATIONAL;
     }
 
     // =========================================================================

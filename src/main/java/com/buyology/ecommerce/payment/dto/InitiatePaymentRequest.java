@@ -20,7 +20,7 @@ public class InitiatePaymentRequest {
     @NotNull
     private UUID addressId;
 
-    @NotNull
+    // Delivery method is now auto-determined by the backend based on store proximity
     private String deliveryMethod;
 
     private java.math.BigDecimal shippingFee;
