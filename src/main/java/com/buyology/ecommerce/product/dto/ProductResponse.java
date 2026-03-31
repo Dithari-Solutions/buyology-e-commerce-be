@@ -65,12 +65,19 @@ public class ProductResponse {
     private Boolean availableInSelectedCountry;
 
     /**
-     * True = the cheapest store for this product is within ≤12.5 km of the customer's location
+     * True = the primary store for this product is within ≤12.5 km of the customer's location
      * (express delivery, ≤30 min). False = standard/international shipping.
      * Null when no lat/lng was supplied.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean expressDelivery;
+
+    /**
+     * All stores carrying this product in the requested country, each with their own price
+     * and delivery badge. Null when no countryCode was supplied.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<StoreOptionDto> storeOptions;
 
     private List<MediaDto> media;
     private List<SpecGroupDto> specs;
@@ -81,6 +88,33 @@ public class ProductResponse {
     // ========================
     // Nested DTOs
     // ========================
+
+    @Schema(description = "A store option for this product — price and delivery badge per store")
+    public static class StoreOptionDto {
+
+        private UUID storeId;
+        private BigDecimal storePrice;
+        private String currency;
+        private Boolean expressDelivery;
+
+        public StoreOptionDto() {}
+
+        public StoreOptionDto(UUID storeId, BigDecimal storePrice, String currency, Boolean expressDelivery) {
+            this.storeId = storeId;
+            this.storePrice = storePrice;
+            this.currency = currency;
+            this.expressDelivery = expressDelivery;
+        }
+
+        public UUID getStoreId() { return storeId; }
+        public void setStoreId(UUID storeId) { this.storeId = storeId; }
+        public BigDecimal getStorePrice() { return storePrice; }
+        public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
+        public String getCurrency() { return currency; }
+        public void setCurrency(String currency) { this.currency = currency; }
+        public Boolean getExpressDelivery() { return expressDelivery; }
+        public void setExpressDelivery(Boolean expressDelivery) { this.expressDelivery = expressDelivery; }
+    }
 
     @Schema(description = "Product media item (image or video)")
     public static class MediaDto {
@@ -279,6 +313,8 @@ public class ProductResponse {
     public void setAvailableInSelectedCountry(Boolean availableInSelectedCountry) { this.availableInSelectedCountry = availableInSelectedCountry; }
     public Boolean getExpressDelivery() { return expressDelivery; }
     public void setExpressDelivery(Boolean expressDelivery) { this.expressDelivery = expressDelivery; }
+    public List<StoreOptionDto> getStoreOptions() { return storeOptions; }
+    public void setStoreOptions(List<StoreOptionDto> storeOptions) { this.storeOptions = storeOptions; }
     public List<MediaDto> getMedia() { return media; }
     public void setMedia(List<MediaDto> media) { this.media = media; }
     public List<SpecGroupDto> getSpecs() { return specs; }

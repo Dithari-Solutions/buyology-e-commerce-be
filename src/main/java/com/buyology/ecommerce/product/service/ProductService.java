@@ -973,26 +973,38 @@ public class ProductService {
         Country country = countryRepository.findByCode(code).orElse(null);
         if (country == null) return;
 
-        List<Object[]> cheapest = storeProductRepository.findCheapestStoreByProductAndCountry(productId, code);
-        boolean available = !cheapest.isEmpty();
+        List<Object[]> allStores = storeProductRepository.findCheapestStoreByProductAndCountry(productId, code);
+        boolean available = !allStores.isEmpty();
         response.setAvailableInSelectedCountry(available);
 
         if (available) {
-            UUID cheapestStoreId = (UUID) cheapest.get(0)[0];
-            BigDecimal rawPrice = (java.math.BigDecimal) cheapest.get(0)[1];
             String storeCurrency = country.getCurrency();
             String target = (displayCurrency != null && !displayCurrency.isBlank())
                     ? displayCurrency.toUpperCase()
                     : storeCurrency;
-            response.setStoreId(cheapestStoreId);
-            response.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
-            response.setCurrency(target);
 
-            if (lat != null && lng != null) {
-                List<UUID> expressStoreIds = storeLocationRepository
-                        .findStoreIdsWithinRadius(lat, lng, EXPRESS_RADIUS_KM);
-                response.setExpressDelivery(expressStoreIds.contains(cheapestStoreId));
+            Set<UUID> expressStoreIds = (lat != null && lng != null)
+                    ? new HashSet<>(storeLocationRepository.findStoreIdsWithinRadius(lat, lng, EXPRESS_RADIUS_KM))
+                    : null;
+
+            List<ProductResponse.StoreOptionDto> options = new java.util.ArrayList<>();
+            for (Object[] row : allStores) {
+                UUID sid = (UUID) row[0];
+                BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[1], storeCurrency, target);
+                Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
+                options.add(new ProductResponse.StoreOptionDto(sid, converted, target, express));
             }
+            response.setStoreOptions(options);
+
+            // Primary store: first express store, or cheapest if none are express
+            ProductResponse.StoreOptionDto primary = options.stream()
+                    .filter(o -> Boolean.TRUE.equals(o.getExpressDelivery()))
+                    .findFirst()
+                    .orElse(options.get(0));
+            response.setStoreId(primary.getStoreId());
+            response.setStorePrice(primary.getStorePrice());
+            response.setCurrency(target);
+            response.setExpressDelivery(primary.getExpressDelivery());
         }
     }
 
@@ -1015,17 +1027,13 @@ public class ProductService {
                 : storeCurrency;
 
         List<UUID> ids = products.stream().map(Product::getId).toList();
-        List<Object[]> rows = storeProductRepository.findCheapestStorePerProductBatch(ids, code);
+        List<Object[]> rows = storeProductRepository.findAllStoresPerProductBatch(ids, code);
 
-        // rows: [productId, storeId, price] — take first row per productId (they're already at min price)
-        Map<UUID, UUID> storeMap = new HashMap<>();
-        Map<UUID, BigDecimal> priceMap = new HashMap<>();
+        // Group rows by productId → ordered list of [storeId, rawPrice]
+        Map<UUID, List<Object[]>> storesByProduct = new java.util.LinkedHashMap<>();
         for (Object[] row : rows) {
             UUID pid = (UUID) row[0];
-            if (!priceMap.containsKey(pid)) {
-                storeMap.put(pid, (UUID) row[1]);
-                priceMap.put(pid, (java.math.BigDecimal) row[2]);
-            }
+            storesByProduct.computeIfAbsent(pid, k -> new java.util.ArrayList<>()).add(row);
         }
 
         Set<UUID> expressStoreIds = (lat != null && lng != null)
@@ -1035,16 +1043,27 @@ public class ProductService {
         for (int i = 0; i < responses.size(); i++) {
             ProductResponse resp = responses.get(i);
             UUID pid = products.get(i).getId();
-            BigDecimal rawPrice = priceMap.get(pid);
-            resp.setAvailableInSelectedCountry(rawPrice != null);
-            if (rawPrice != null) {
-                UUID storeId = storeMap.get(pid);
-                resp.setStoreId(storeId);
-                resp.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
-                resp.setCurrency(target);
-                if (expressStoreIds != null) {
-                    resp.setExpressDelivery(expressStoreIds.contains(storeId));
+            List<Object[]> productRows = storesByProduct.get(pid);
+            resp.setAvailableInSelectedCountry(productRows != null && !productRows.isEmpty());
+            if (productRows != null && !productRows.isEmpty()) {
+                List<ProductResponse.StoreOptionDto> options = new java.util.ArrayList<>();
+                for (Object[] row : productRows) {
+                    UUID sid = (UUID) row[1];
+                    BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[2], storeCurrency, target);
+                    Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
+                    options.add(new ProductResponse.StoreOptionDto(sid, converted, target, express));
                 }
+                resp.setStoreOptions(options);
+
+                // Primary store: first express store, or cheapest if none are express
+                ProductResponse.StoreOptionDto primary = options.stream()
+                        .filter(o -> Boolean.TRUE.equals(o.getExpressDelivery()))
+                        .findFirst()
+                        .orElse(options.get(0));
+                resp.setStoreId(primary.getStoreId());
+                resp.setStorePrice(primary.getStorePrice());
+                resp.setCurrency(target);
+                resp.setExpressDelivery(primary.getExpressDelivery());
             }
         }
     }

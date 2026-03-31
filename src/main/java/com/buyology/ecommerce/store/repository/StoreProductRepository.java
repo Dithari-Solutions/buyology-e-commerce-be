@@ -98,6 +98,24 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
             @Param("countryCode") String countryCode);
 
     /**
+     * Batch: returns [productId (UUID), storeId (UUID), storePrice (BigDecimal)] for ALL
+     * active stores per product in the given country, ordered by price ASC.
+     * Use this when you need to show every store option with its own delivery badge.
+     */
+    @Query("""
+            SELECT sp.product.id, sp.store.id, sp.storePrice FROM StoreProduct sp
+            WHERE sp.product.id IN :productIds
+              AND sp.store.country.code = :countryCode
+              AND sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+            ORDER BY sp.storePrice ASC
+            """)
+    List<Object[]> findAllStoresPerProductBatch(
+            @Param("productIds") List<UUID> productIds,
+            @Param("countryCode") String countryCode);
+
+    /**
      * Batch: returns [productId (UUID), storeId (UUID), storePrice (BigDecimal)] for the
      * cheapest store per product in the given country. When multiple stores tie on price
      * the first one encountered is used — callers should take the first row per productId.
