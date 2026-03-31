@@ -27,6 +27,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +45,7 @@ import java.util.UUID;
 @Service
 public class OrderService {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
@@ -191,9 +194,13 @@ public class OrderService {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onPaymentSucceeded(PaymentSucceededEvent event) {
+        log.info("[ORDER] PaymentSucceededEvent received: transactionId={}", event.getTransactionId());
         PaymentTransaction tx = paymentTransactionRepo.findById(event.getTransactionId())
                 .orElse(null);
-        if (tx == null) return;
+        if (tx == null) {
+            log.warn("[ORDER] No PaymentTransaction found for id={}", event.getTransactionId());
+            return;
+        }
 
         if (tx.getAppOrderId() != null) {
             // Path 1 — order already exists, just transition it to PAID
@@ -209,32 +216,56 @@ public class OrderService {
             });
         } else if (tx.getCartId() != null) {
             // Path 2 — cart-first flow: create order from cart, mark PAID right away
+            log.info("[ORDER] Cart-first flow: cartId={}", tx.getCartId());
             Cart cart = cartRepo.findById(tx.getCartId()).orElse(null);
-            if (cart == null) return;
+            if (cart == null) {
+                log.warn("[ORDER] Cart not found: cartId={}", tx.getCartId());
+                return;
+            }
 
             List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
-            if (cartItems.isEmpty()) return;
+            if (cartItems.isEmpty()) {
+                log.warn("[ORDER] Cart has no items: cartId={}", cart.getId());
+                return;
+            }
 
             // Parse address and shipping fee from transaction metadata
             UUID addressId = null;
             BigDecimal shippingFee = BigDecimal.ZERO;
             try {
                 if (tx.getMetadata() != null) {
+                    log.info("[ORDER] Transaction metadata: {}", tx.getMetadata());
                     JsonNode meta = objectMapper.readTree(tx.getMetadata());
                     if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
                     if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
+                } else {
+                    log.warn("[ORDER] Transaction metadata is null: txId={}", tx.getId());
                 }
-            } catch (Exception ignored) { /* use defaults if metadata is malformed */ }
+            } catch (Exception e) {
+                log.warn("[ORDER] Failed to parse transaction metadata: {}", e.getMessage());
+            }
 
-            if (addressId == null) return;
+            if (addressId == null) {
+                log.warn("[ORDER] addressId is null — cannot create order. metadata={}", tx.getMetadata());
+                return;
+            }
 
             UserAddress address = addressRepo.findById(addressId).orElse(null);
-            if (address == null) return;
+            if (address == null) {
+                log.warn("[ORDER] UserAddress not found: addressId={}", addressId);
+                return;
+            }
 
-            if (cart.getAuthCredential() == null) return;
+            if (cart.getAuthCredential() == null) {
+                log.warn("[ORDER] Cart has no authCredential: cartId={}", cart.getId());
+                return;
+            }
             UUID userId = cart.getAuthCredential().getUserId();
             UUID authCredentialId = cart.getAuthCredential().getId();
-            if (userId == null || authCredentialId == null) return;
+            if (userId == null || authCredentialId == null) {
+                log.warn("[ORDER] Missing userId={} or authCredentialId={}", userId, authCredentialId);
+                return;
+            }
 
             // Transition cart to CHECKED_OUT so createOrder's status guard passes
             if (cart.getStatus() != Cart.CartStatus.CHECKED_OUT) {
