@@ -220,8 +220,8 @@ public class PaymentService {
         event.setProcessed(false);
         event = webhookEventRepo.save(event);
 
-        // If HMAC failed: log and stop — never process an invalid webhook
         if (!hmacValid) {
+            log.warn("[HMAC] Signature validation failed — webhook rejected");
             event.setError("HMAC validation failed");
             webhookEventRepo.save(event);
             return;
@@ -441,8 +441,6 @@ public class PaymentService {
             for (byte b : hash) hex.append(String.format("%02x", b));
 
             String computed = hex.toString();
-            log.warn("[HMAC] received={} computed={} match={} concat='{}'",
-                    receivedHmac, computed, computed.equals(receivedHmac), concat);
             return computed.equals(receivedHmac);
         } catch (Exception e) {
             return false;
