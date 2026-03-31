@@ -442,8 +442,11 @@ public class PaymentService {
             for (byte b : hash) hex.append(String.format("%02x", b));
 
             String computed = hex.toString();
+            log.warn("[HMAC] received={} computed={} match={} concat='{}'",
+                    receivedHmac, computed, computed.equals(receivedHmac), concat);
             return computed.equals(receivedHmac);
         } catch (Exception e) {
+            log.warn("[HMAC] Exception during validation: {}", e.getMessage());
             return false;
         }
     }
