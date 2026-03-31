@@ -14,8 +14,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +30,6 @@ import java.util.UUID;
 @Service
 public class PaymentService {
 
-    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentProviderRepository providerRepo;
     private final PaymentMethodConfigRepository methodConfigRepo;
@@ -406,7 +403,7 @@ public class PaymentService {
     private boolean validateHmac(String rawPayload, String receivedHmac, String hmacSecret) {
         try {
             JsonNode node = objectMapper.readTree(rawPayload);
-            JsonNode obj = node.has("obj") ? node.get("obj") : node;
+            JsonNode obj = node.has("transaction") ? node.get("transaction") : node;
 
             // Paymob HMAC fields — order is fixed by the spec
             String[] fields = {
@@ -437,29 +434,27 @@ public class PaymentService {
             StringBuilder hex = new StringBuilder();
             for (byte b : hash) hex.append(String.format("%02x", b));
 
-            String computed = hex.toString();
-            log.warn("[HMAC-DEBUG] received={} computed={} concat={}", receivedHmac, computed, concat);
-            return computed.equals(receivedHmac);
+            return hex.toString().equals(receivedHmac);
         } catch (Exception e) {
             return false;
         }
     }
 
     private String extractProviderTxnId(JsonNode payload) {
-        JsonNode obj = payload.has("obj") ? payload.get("obj") : payload;
+        JsonNode obj = payload.has("transaction") ? payload.get("transaction") : payload;
         JsonNode idNode = obj.get("id");
         return idNode != null && !idNode.isNull() ? idNode.asText() : null;
     }
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode payload) {
         try {
-            JsonNode obj = payload.has("obj") ? payload.get("obj") : payload;
-            JsonNode orderNode = obj.get("order");
-            if (orderNode == null) return null;
-            String paymobOrderId = orderNode.get("id").asText();
+            // Intention API: intention ID is at payload.intention.id (e.g. pi_live_...)
+            JsonNode intentionNode = payload.get("intention");
+            if (intentionNode == null) return null;
+            String intentionId = intentionNode.get("id").asText();
 
             return providerOrderRepo.findAll().stream()
-                    .filter(po -> po.getProviderOrderId().equals(paymobOrderId))
+                    .filter(po -> po.getProviderOrderId().equals(intentionId))
                     .findFirst()
                     .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
                             po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
@@ -470,7 +465,7 @@ public class PaymentService {
     }
 
     private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode payload, String providerTxnId) {
-        JsonNode obj = payload.has("obj") ? payload.get("obj") : payload;
+        JsonNode obj = payload.has("transaction") ? payload.get("transaction") : payload;
 
         tx.setProviderTransactionId(providerTxnId);
         tx.setStatus(PaymentStatus.PROCESSING);
