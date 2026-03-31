@@ -432,19 +432,39 @@ public class PaymentService {
                 concat.append(value != null ? value.asText() : "");
             }
 
+            String concatStr = concat.toString();
+            log.warn("[HMAC] secret_in_db='{}' concat='{}'", hmacSecret, concatStr);
+
+            // Attempt 1: secret as plain UTF-8 bytes
             Mac mac = Mac.getInstance("HmacSHA512");
-            // Paymob HMAC secret is used as a plain UTF-8 string (not hex-decoded)
-            byte[] secretBytes = hmacSecret.getBytes(StandardCharsets.UTF_8);
-            mac.init(new SecretKeySpec(secretBytes, "HmacSHA512"));
-            byte[] hash = mac.doFinal(concat.toString().getBytes(StandardCharsets.UTF_8));
+            byte[] secretUtf8 = hmacSecret.getBytes(StandardCharsets.UTF_8);
+            mac.init(new SecretKeySpec(secretUtf8, "HmacSHA512"));
+            byte[] hashUtf8 = mac.doFinal(concatStr.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexUtf8 = new StringBuilder();
+            for (byte b : hashUtf8) hexUtf8.append(String.format("%02x", b));
+            String computedUtf8 = hexUtf8.toString();
 
-            StringBuilder hex = new StringBuilder();
-            for (byte b : hash) hex.append(String.format("%02x", b));
+            // Attempt 2: secret as hex-decoded raw bytes
+            String computedHex = "";
+            try {
+                if (hmacSecret.length() % 2 == 0) {
+                    byte[] secretRaw = new byte[hmacSecret.length() / 2];
+                    for (int i = 0; i < secretRaw.length; i++) {
+                        secretRaw[i] = (byte) Integer.parseInt(hmacSecret.substring(2 * i, 2 * i + 2), 16);
+                    }
+                    mac = Mac.getInstance("HmacSHA512");
+                    mac.init(new SecretKeySpec(secretRaw, "HmacSHA512"));
+                    byte[] hashRaw = mac.doFinal(concatStr.getBytes(StandardCharsets.UTF_8));
+                    StringBuilder hexRaw = new StringBuilder();
+                    for (byte b : hashRaw) hexRaw.append(String.format("%02x", b));
+                    computedHex = hexRaw.toString();
+                }
+            } catch (Exception ignored) {}
 
-            String computed = hex.toString();
-            log.warn("[HMAC] received={} computed={} match={} concat='{}'",
-                    receivedHmac, computed, computed.equals(receivedHmac), concat);
-            return computed.equals(receivedHmac);
+            log.warn("[HMAC] received={} computedUTF8={} matchUTF8={} computedHEXDECODED={} matchHEX={}",
+                    receivedHmac, computedUtf8, computedUtf8.equals(receivedHmac),
+                    computedHex, computedHex.equals(receivedHmac));
+            return computedUtf8.equals(receivedHmac) || computedHex.equals(receivedHmac);
         } catch (Exception e) {
             log.warn("[HMAC] Exception during validation: {}", e.getMessage());
             return false;
