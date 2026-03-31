@@ -3,6 +3,7 @@ package com.buyology.ecommerce.store.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.store.dto.CreateOperatingHoursRequest;
 import com.buyology.ecommerce.store.dto.CreateStoreLocationRequest;
+import com.buyology.ecommerce.store.dto.DeliveryInfoResponse;
 import com.buyology.ecommerce.store.dto.OperatingHoursResponse;
 import com.buyology.ecommerce.store.dto.StoreLocationResponse;
 import com.buyology.ecommerce.store.dto.UpdateOperatingHoursRequest;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -37,6 +39,18 @@ public class StoreLocationController {
                                    StoreOperatingHoursService hoursService) {
         this.locationService = locationService;
         this.hoursService = hoursService;
+    }
+
+    // ── Delivery info (public) ────────────────────────────────────────────────
+
+    @Operation(summary = "Get cities and stores with delivery time for a country",
+            description = "Pass the customer's lat/lng to see which stores offer ≤30 min express delivery.")
+    @GetMapping("/delivery-info")
+    public ResponseEntity<ApiResponse<DeliveryInfoResponse>> getDeliveryInfo(
+            @RequestParam String country,
+            @RequestParam double lat,
+            @RequestParam double lng) {
+        return locationService.getDeliveryInfo(country, lat, lng);
     }
 
     // ── Location endpoints ────────────────────────────────────────────────────

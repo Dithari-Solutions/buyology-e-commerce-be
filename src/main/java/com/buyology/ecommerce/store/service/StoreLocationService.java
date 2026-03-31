@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.dto.CreateStoreLocationRequest;
+import com.buyology.ecommerce.store.dto.DeliveryInfoResponse;
 import com.buyology.ecommerce.store.dto.StoreLocationResponse;
 import com.buyology.ecommerce.store.dto.UpdateStoreLocationRequest;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
@@ -124,6 +125,39 @@ public class StoreLocationService {
         location.setIsActive(false);
         locationRepository.save(location);
         return ApiResponse.success(null, "Location deactivated successfully");
+    }
+
+    private static final double EXPRESS_RADIUS_KM = 12.5;
+
+    public ResponseEntity<ApiResponse<DeliveryInfoResponse>> getDeliveryInfo(
+            String country, double lat, double lng) {
+
+        List<String> cities = locationRepository.findActiveCitiesByCountry(country);
+
+        // Native query columns: id(0), store_id(1), branch_name(2), address(3), city(4),
+        // state(5), country(6), postal_code(7), latitude(8), longitude(9),
+        // is_primary(10), is_active(11), created_at(12), updated_at(13), distance_km(14)
+        List<Object[]> rows = locationRepository.findLocationsWithDistanceByCountry(country, lat, lng);
+        List<DeliveryInfoResponse.StoreDeliveryInfo> stores = rows.stream().map(row -> {
+            DeliveryInfoResponse.StoreDeliveryInfo info = new DeliveryInfoResponse.StoreDeliveryInfo();
+            info.setLocationId(UUID.fromString(row[0].toString()));
+            info.setStoreId(UUID.fromString(row[1].toString()));
+            info.setBranchName(row[2] != null ? row[2].toString() : null);
+            info.setAddress(row[3] != null ? row[3].toString() : null);
+            info.setCity(row[4] != null ? row[4].toString() : null);
+            info.setLatitude(row[8] != null ? Double.parseDouble(row[8].toString()) : null);
+            info.setLongitude(row[9] != null ? Double.parseDouble(row[9].toString()) : null);
+            double distanceKm = row[14] != null
+                    ? Double.parseDouble(row[14].toString()) : Double.MAX_VALUE;
+            info.setDistanceKm(Math.round(distanceKm * 10.0) / 10.0);
+            info.setExpressDelivery(distanceKm <= EXPRESS_RADIUS_KM);
+            return info;
+        }).toList();
+
+        DeliveryInfoResponse response = new DeliveryInfoResponse();
+        response.setCities(cities);
+        response.setStores(stores);
+        return ApiResponse.success(response, "Delivery info fetched successfully");
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

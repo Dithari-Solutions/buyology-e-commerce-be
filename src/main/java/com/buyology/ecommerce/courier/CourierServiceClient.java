@@ -116,6 +116,27 @@ public class CourierServiceClient {
         );
     }
 
+    /**
+     * Sends a new LOCAL_EXPRESS order to the courier backend.
+     * Called automatically after a successful payment.
+     */
+    public void pushOrder(CourierOrderRequest req) {
+        try {
+            String token = tokenProvider.generateToken("SYSTEM");
+            log.info("[COURIER-CLIENT] pushing order {} to courier backend", req.getOrderId());
+            execute(
+                webClient.post()
+                    .uri("/api/orders")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(req)
+            );
+        } catch (Exception e) {
+            log.error("[COURIER-CLIENT] failed to push order {} to courier backend: {}",
+                    req.getOrderId(), e.getMessage());
+        }
+    }
+
     // ── shared execute ────────────────────────────────────────────────────────
 
     private ResponseEntity<String> execute(WebClient.RequestHeadersSpec<?> spec) {

@@ -2,6 +2,8 @@ package com.buyology.ecommerce.order.service;
 
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
+import com.buyology.ecommerce.courier.CourierOrderRequest;
+import com.buyology.ecommerce.courier.CourierServiceClient;
 import com.buyology.ecommerce.cart.repository.CartItemRepository;
 import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
@@ -53,6 +55,7 @@ public class OrderService {
     private final PaymentTransactionRepository paymentTransactionRepo;
     private final StoreLocationRepository storeLocationRepo;
     private final ObjectMapper objectMapper;
+    private final CourierServiceClient courierServiceClient;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -62,7 +65,8 @@ public class OrderService {
                         UserAddressRepository addressRepo,
                         PaymentTransactionRepository paymentTransactionRepo,
                         StoreLocationRepository storeLocationRepo,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        CourierServiceClient courierServiceClient) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -72,6 +76,7 @@ public class OrderService {
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.storeLocationRepo = storeLocationRepo;
         this.objectMapper = objectMapper;
+        this.courierServiceClient = courierServiceClient;
     }
 
     // =========================================================================
@@ -263,6 +268,25 @@ public class OrderService {
             // Back-fill the transaction so future queries can find the order
             tx.setAppOrderId(orderResponse.getId());
             paymentTransactionRepo.save(tx);
+
+            // Push LOCAL_EXPRESS orders to courier backend automatically
+            if (order != null && order.getDeliveryMethod() == DeliveryMethod.LOCAL_EXPRESS) {
+                CourierOrderRequest courierReq = new CourierOrderRequest();
+                courierReq.setOrderId(order.getId());
+                courierReq.setCustomerId(order.getUserId());
+                courierReq.setRecipientFirstName(order.getRecipientFirstName());
+                courierReq.setRecipientLastName(order.getRecipientLastName());
+                courierReq.setRecipientPhone(order.getRecipientPhone());
+                courierReq.setAddressLine1(order.getAddressLine1());
+                courierReq.setAddressLine2(order.getAddressLine2());
+                courierReq.setCity(order.getCity());
+                courierReq.setCountry(order.getCountry());
+                courierReq.setDeliveryLatitude(order.getDeliveryLatitude());
+                courierReq.setDeliveryLongitude(order.getDeliveryLongitude());
+                courierReq.setTotalAmount(order.getTotalAmount());
+                courierReq.setCurrency(order.getCurrency());
+                courierServiceClient.pushOrder(courierReq);
+            }
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
             for (CartItem item : cartItems) {

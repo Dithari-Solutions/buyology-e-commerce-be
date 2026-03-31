@@ -39,4 +39,27 @@ public interface StoreLocationRepository extends JpaRepository<StoreLocation, UU
             @Param("lat") double lat,
             @Param("lng") double lng,
             @Param("radiusKm") double radiusKm);
+
+    @Query(value = """
+            SELECT DISTINCT sl.city FROM store_locations sl
+            WHERE sl.is_active = true AND sl.country = :country
+            ORDER BY sl.city
+            """, nativeQuery = true)
+    List<String> findActiveCitiesByCountry(@Param("country") String country);
+
+    @Query(value = """
+            SELECT sl.*,
+                   (6371 * acos(LEAST(1.0,
+                       cos(radians(:lat)) * cos(radians(sl.latitude))
+                       * cos(radians(sl.longitude) - radians(:lng))
+                       + sin(radians(:lat)) * sin(radians(sl.latitude))
+                   ))) AS distance_km
+            FROM store_locations sl
+            WHERE sl.is_active = true AND sl.country = :country
+            ORDER BY distance_km
+            """, nativeQuery = true)
+    List<Object[]> findLocationsWithDistanceByCountry(
+            @Param("country") String country,
+            @Param("lat") double lat,
+            @Param("lng") double lng);
 }
