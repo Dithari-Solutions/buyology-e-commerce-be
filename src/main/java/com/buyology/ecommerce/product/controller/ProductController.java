@@ -39,8 +39,12 @@ public class ProductController {
             @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
             @Parameter(description = "ISO 4217 display currency (e.g. AZN, AED). Defaults to country's currency.")
-            @RequestParam(required = false) String currency) {
-        return productService.getAllProductsPublic(lang, countryCode, currency);
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Customer latitude for express delivery badge")
+            @RequestParam(required = false) Double lat,
+            @Parameter(description = "Customer longitude for express delivery badge")
+            @RequestParam(required = false) Double lng) {
+        return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng);
     }
 
     @Operation(summary = "Get active product by ID with all related details")
@@ -51,8 +55,12 @@ public class ProductController {
             @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
             @Parameter(description = "ISO 4217 display currency (e.g. AZN, AED). Defaults to country's currency.")
-            @RequestParam(required = false) String currency) {
-        return productService.getProductByIdPublic(productId, lang, countryCode, currency);
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Customer latitude for express delivery badge")
+            @RequestParam(required = false) Double lat,
+            @Parameter(description = "Customer longitude for express delivery badge")
+            @RequestParam(required = false) Double lng) {
+        return productService.getProductByIdPublic(productId, lang, countryCode, currency, lat, lng);
     }
 
     @Operation(summary = "Get active products by category")
@@ -63,8 +71,12 @@ public class ProductController {
             @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
             @Parameter(description = "ISO 4217 display currency (e.g. AZN, AED). Defaults to country's currency.")
-            @RequestParam(required = false) String currency) {
-        return productService.getProductsByCategoryPublic(categoryId, lang, countryCode, currency);
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Customer latitude for express delivery badge")
+            @RequestParam(required = false) Double lat,
+            @Parameter(description = "Customer longitude for express delivery badge")
+            @RequestParam(required = false) Double lng) {
+        return productService.getProductsByCategoryPublic(categoryId, lang, countryCode, currency, lat, lng);
     }
 
     @Operation(summary = "Search and filter active products",
@@ -80,7 +92,11 @@ public class ProductController {
             @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
             @Parameter(description = "ISO 4217 display currency (e.g. AZN, AED). Defaults to country's currency.")
-            @RequestParam(required = false) String currency) {
-        return productService.searchProducts(filter, lang, countryCode, currency);
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Customer latitude for express delivery badge")
+            @RequestParam(required = false) Double lat,
+            @Parameter(description = "Customer longitude for express delivery badge")
+            @RequestParam(required = false) Double lng) {
+        return productService.searchProducts(filter, lang, countryCode, currency, lat, lng);
     }
 }

@@ -50,6 +50,7 @@ import com.buyology.ecommerce.product.repository.ProductVariantOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;
+import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -99,6 +100,7 @@ public class ProductService {
     private final StoreProductRepository storeProductRepository;
     private final CountryRepository countryRepository;
     private final CurrencyExchangeService currencyExchangeService;
+    private final StoreLocationRepository storeLocationRepository;
 
     public ProductService(
             ProductRepository productRepository,
@@ -120,7 +122,8 @@ public class ProductService {
             ProductAccessoryRepository accessoryRepository,
             StoreProductRepository storeProductRepository,
             CountryRepository countryRepository,
-            CurrencyExchangeService currencyExchangeService) {
+            CurrencyExchangeService currencyExchangeService,
+            StoreLocationRepository storeLocationRepository) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
@@ -141,6 +144,7 @@ public class ProductService {
         this.storeProductRepository = storeProductRepository;
         this.countryRepository = countryRepository;
         this.currencyExchangeService = currencyExchangeService;
+        this.storeLocationRepository = storeLocationRepository;
     }
 
     /**
@@ -356,19 +360,19 @@ public class ProductService {
     }
 
     public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdPublic(
-            UUID id, String lang, String countryCode, String currency) {
+            UUID id, String lang, String countryCode, String currency, Double lat, Double lng) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
         if (!"ACTIVE".equals(product.getStatus())) {
             throw new ProductNotFoundException(id);
         }
         ProductResponse response = toResponse(product, lang, false);
-        applyCountryPricing(response, product.getId(), countryCode, currency);
+        applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
         return ApiResponse.success(response, "Product fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
-            String lang, String countryCode, String currency) {
+            String lang, String countryCode, String currency, Double lat, Double lng) {
         List<Product> products = (countryCode != null && !countryCode.isBlank())
                 ? storeProductRepository.findActiveProductsByCountryCode(countryCode.toUpperCase())
                 : productRepository.findByStatus("ACTIVE");
@@ -376,12 +380,12 @@ public class ProductService {
         List<ProductResponse> responses = products.stream()
                 .map(p -> toResponse(p, lang, false))
                 .toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
-            ProductFilterRequest filter, String lang, String countryCode, String currency) {
+            ProductFilterRequest filter, String lang, String countryCode, String currency, Double lat, Double lng) {
         List<Product> products = productRepository.findAll(ProductSpecification.from(filter)).stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
                 .toList();
@@ -399,12 +403,12 @@ public class ProductService {
         List<ProductResponse> responses = products.stream()
                 .map(p -> toResponse(p, lang, false))
                 .toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(
-            UUID categoryId, String lang, String countryCode, String currency) {
+            UUID categoryId, String lang, String countryCode, String currency, Double lat, Double lng) {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
 
@@ -424,7 +428,7 @@ public class ProductService {
         List<ProductResponse> responses = products.stream()
                 .map(p -> toResponse(p, lang, false))
                 .toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
@@ -438,7 +442,7 @@ public class ProductService {
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
         }
         List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Super deal products fetched successfully");
     }
 
@@ -452,7 +456,7 @@ public class ProductService {
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
         }
         List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Limited stock products fetched successfully");
     }
 
@@ -469,7 +473,7 @@ public class ProductService {
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
                 .toList();
         List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
-        applyBatchCountryPricing(responses, products, countryCode, currency);
+        applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Quick delivery products fetched successfully");
     }
 
@@ -958,8 +962,11 @@ public class ProductService {
      * live currency conversion to the requested display currency.
      * No-ops when countryCode is null/blank.
      */
+    private static final double EXPRESS_RADIUS_KM = 12.5;
+
     private void applyCountryPricing(ProductResponse response, UUID productId,
-                                     String countryCode, String displayCurrency) {
+                                     String countryCode, String displayCurrency,
+                                     Double lat, Double lng) {
         if (countryCode == null || countryCode.isBlank()) return;
 
         String code = countryCode.toUpperCase();
@@ -980,6 +987,12 @@ public class ProductService {
             response.setStoreId(cheapestStoreId);
             response.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
             response.setCurrency(target);
+
+            if (lat != null && lng != null) {
+                List<UUID> expressStoreIds = storeLocationRepository
+                        .findStoreIdsWithinRadius(lat, lng, EXPRESS_RADIUS_KM);
+                response.setExpressDelivery(expressStoreIds.contains(cheapestStoreId));
+            }
         }
     }
 
@@ -988,7 +1001,8 @@ public class ProductService {
      * them to the corresponding ProductResponse objects by product ID.
      */
     private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
-                                          String countryCode, String displayCurrency) {
+                                          String countryCode, String displayCurrency,
+                                          Double lat, Double lng) {
         if (countryCode == null || countryCode.isBlank() || products.isEmpty()) return;
 
         String code = countryCode.toUpperCase();
@@ -1014,15 +1028,23 @@ public class ProductService {
             }
         }
 
+        Set<UUID> expressStoreIds = (lat != null && lng != null)
+                ? new HashSet<>(storeLocationRepository.findStoreIdsWithinRadius(lat, lng, EXPRESS_RADIUS_KM))
+                : null;
+
         for (int i = 0; i < responses.size(); i++) {
             ProductResponse resp = responses.get(i);
             UUID pid = products.get(i).getId();
             BigDecimal rawPrice = priceMap.get(pid);
             resp.setAvailableInSelectedCountry(rawPrice != null);
             if (rawPrice != null) {
-                resp.setStoreId(storeMap.get(pid));
+                UUID storeId = storeMap.get(pid);
+                resp.setStoreId(storeId);
                 resp.setStorePrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
                 resp.setCurrency(target);
+                if (expressStoreIds != null) {
+                    resp.setExpressDelivery(expressStoreIds.contains(storeId));
+                }
             }
         }
     }

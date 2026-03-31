@@ -64,6 +64,14 @@ public class ProductResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean availableInSelectedCountry;
 
+    /**
+     * True = the cheapest store for this product is within ≤12.5 km of the customer's location
+     * (express delivery, ≤30 min). False = standard/international shipping.
+     * Null when no lat/lng was supplied.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean expressDelivery;
+
     private List<MediaDto> media;
     private List<SpecGroupDto> specs;
     private List<ColorOptionDto> colors;
@@ -269,6 +277,8 @@ public class ProductResponse {
     public void setCurrency(String currency) { this.currency = currency; }
     public Boolean getAvailableInSelectedCountry() { return availableInSelectedCountry; }
     public void setAvailableInSelectedCountry(Boolean availableInSelectedCountry) { this.availableInSelectedCountry = availableInSelectedCountry; }
+    public Boolean getExpressDelivery() { return expressDelivery; }
+    public void setExpressDelivery(Boolean expressDelivery) { this.expressDelivery = expressDelivery; }
     public List<MediaDto> getMedia() { return media; }
     public void setMedia(List<MediaDto> media) { this.media = media; }
     public List<SpecGroupDto> getSpecs() { return specs; }
