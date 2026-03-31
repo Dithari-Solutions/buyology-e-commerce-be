@@ -229,15 +229,23 @@ public class OrderService {
                 return;
             }
 
-            // Parse address and shipping fee from transaction metadata
+            // Parse address, shipping fee, and delivery method from transaction metadata
             UUID addressId = null;
             BigDecimal shippingFee = BigDecimal.ZERO;
+            DeliveryMethod metaDeliveryMethod = null;
             try {
                 if (tx.getMetadata() != null) {
                     log.info("[ORDER] Transaction metadata: {}", tx.getMetadata());
                     JsonNode meta = objectMapper.readTree(tx.getMetadata());
                     if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
                     if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
+                    if (meta.has("deliveryMethod")) {
+                        try {
+                            metaDeliveryMethod = DeliveryMethod.valueOf(meta.get("deliveryMethod").asText());
+                        } catch (IllegalArgumentException ignored) {
+                            log.warn("[ORDER] Unknown deliveryMethod in metadata: {}", meta.get("deliveryMethod").asText());
+                        }
+                    }
                 } else {
                     log.warn("[ORDER] Transaction metadata is null: txId={}", tx.getId());
                 }
@@ -273,9 +281,11 @@ public class OrderService {
                 cartRepo.save(cart);
             }
 
-            // Delivery method is auto-determined: LOCAL_EXPRESS if all items' stores are
-            // within the 30-min radius of the delivery address, otherwise INTERNATIONAL.
-            DeliveryMethod deliveryMethod = resolveDeliveryMethod(cartItems, address);
+            // Use delivery method from metadata if the frontend sent it (most reliable),
+            // otherwise fall back to the address-proximity check.
+            DeliveryMethod deliveryMethod = (metaDeliveryMethod != null)
+                    ? metaDeliveryMethod
+                    : resolveDeliveryMethod(cartItems, address);
 
             CreateOrderRequest req = new CreateOrderRequest();
             req.setCartId(tx.getCartId());
