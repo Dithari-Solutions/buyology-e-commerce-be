@@ -351,6 +351,7 @@ public class PaymentService {
             ObjectNode meta = objectMapper.createObjectNode();
             if (req.getAddressId() != null) meta.put("addressId", req.getAddressId().toString());
             if (req.getShippingFee() != null) meta.put("shippingFee", req.getShippingFee().toPlainString());
+            if (req.getDeliveryMethod() != null) meta.put("deliveryMethod", req.getDeliveryMethod());
             return objectMapper.writeValueAsString(meta);
         } catch (Exception e) {
             return null;
