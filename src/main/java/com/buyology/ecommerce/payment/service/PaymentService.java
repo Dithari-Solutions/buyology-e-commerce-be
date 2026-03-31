@@ -25,6 +25,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -432,7 +433,18 @@ public class PaymentService {
             }
 
             Mac mac = Mac.getInstance("HmacSHA512");
-            mac.init(new SecretKeySpec(hmacSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512"));
+            // Paymob HMAC secret is a hex string — decode to raw bytes before use
+            byte[] secretBytes;
+            if (hmacSecret.matches("[0-9a-fA-F]+") && hmacSecret.length() % 2 == 0) {
+                secretBytes = new java.math.BigInteger(hmacSecret, 16).toByteArray();
+                // BigInteger may prepend a sign byte — strip it
+                if (secretBytes.length == hmacSecret.length() / 2 + 1 && secretBytes[0] == 0) {
+                    secretBytes = Arrays.copyOfRange(secretBytes, 1, secretBytes.length);
+                }
+            } else {
+                secretBytes = hmacSecret.getBytes(StandardCharsets.UTF_8);
+            }
+            mac.init(new SecretKeySpec(secretBytes, "HmacSHA512"));
             byte[] hash = mac.doFinal(concat.toString().getBytes(StandardCharsets.UTF_8));
 
             StringBuilder hex = new StringBuilder();
