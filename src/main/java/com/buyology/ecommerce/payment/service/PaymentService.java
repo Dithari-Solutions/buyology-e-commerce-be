@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,8 @@ import java.util.UUID;
 
 @Service
 public class PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
 
     private final PaymentProviderRepository providerRepo;
@@ -434,7 +438,10 @@ public class PaymentService {
             StringBuilder hex = new StringBuilder();
             for (byte b : hash) hex.append(String.format("%02x", b));
 
-            return hex.toString().equals(receivedHmac);
+            String computed = hex.toString();
+            log.warn("[HMAC] received={} computed={} match={} concat='{}'",
+                    receivedHmac, computed, computed.equals(receivedHmac), concat);
+            return computed.equals(receivedHmac);
         } catch (Exception e) {
             return false;
         }
