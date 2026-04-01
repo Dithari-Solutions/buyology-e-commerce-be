@@ -325,7 +325,13 @@ public class OrderService {
                 courierReq.setDeliveryLatitude(order.getDeliveryLatitude());
                 courierReq.setDeliveryLongitude(order.getDeliveryLongitude());
                 courierReq.setTotalAmount(order.getTotalAmount());
+                courierReq.setShippingFee(order.getShippingFee());
                 courierReq.setCurrency(order.getCurrency());
+                // Use the first item's storeId — LOCAL_EXPRESS orders come from one store
+                cartItems.stream()
+                        .filter(i -> i.getStoreId() != null)
+                        .findFirst()
+                        .ifPresent(i -> courierReq.setStoreId(i.getStoreId()));
                 courierServiceClient.pushOrder(courierReq);
             }
 

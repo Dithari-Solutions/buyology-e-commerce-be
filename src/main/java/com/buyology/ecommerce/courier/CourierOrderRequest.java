@@ -20,7 +20,9 @@ public class CourierOrderRequest {
     private Double deliveryLatitude;
     private Double deliveryLongitude;
     private BigDecimal totalAmount;
+    private BigDecimal shippingFee;
     private String currency;
+    private UUID storeId;
 
     public UUID getOrderId() { return orderId; }
     public void setOrderId(UUID orderId) { this.orderId = orderId; }
@@ -60,4 +62,10 @@ public class CourierOrderRequest {
 
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+
+    public BigDecimal getShippingFee() { return shippingFee; }
+    public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }
+
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
 }

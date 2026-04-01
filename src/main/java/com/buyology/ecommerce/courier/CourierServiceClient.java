@@ -1,7 +1,9 @@
 package com.buyology.ecommerce.courier;
 
+import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -21,16 +23,22 @@ public class CourierServiceClient {
 
     private final WebClient webClient;
     private final CourierServiceTokenProvider tokenProvider;
+    private final RabbitTemplate rabbitTemplate;
+    private final StoreLocationRepository storeLocationRepository;
 
     @Value("${courier.service.timeout-ms:10000}")
     private long timeoutMs;
 
     public CourierServiceClient(
             @Value("${courier.service.url:http://localhost:8081}") String baseUrl,
-            CourierServiceTokenProvider tokenProvider
+            CourierServiceTokenProvider tokenProvider,
+            RabbitTemplate rabbitTemplate,
+            StoreLocationRepository storeLocationRepository
     ) {
-        this.webClient     = WebClient.builder().baseUrl(baseUrl).build();
-        this.tokenProvider = tokenProvider;
+        this.webClient             = WebClient.builder().baseUrl(baseUrl).build();
+        this.tokenProvider         = tokenProvider;
+        this.rabbitTemplate        = rabbitTemplate;
+        this.storeLocationRepository = storeLocationRepository;
     }
 
     /** Forward a multipart POST request (e.g. courier creation). */
@@ -117,22 +125,62 @@ public class CourierServiceClient {
     }
 
     /**
-     * Sends a new LOCAL_EXPRESS order to the courier backend.
-     * Called automatically after a successful payment.
+     * Publishes a LOCAL_EXPRESS order to the courier service via RabbitMQ.
+     * The courier service consumes from {@code delivery.order.received.queue}
+     * bound to {@code buyology.ecommerce.exchange} with routing key
+     * {@code order.delivery.requested}.
      */
     public void pushOrder(CourierOrderRequest req) {
         try {
-            String token = tokenProvider.generateToken("SYSTEM");
-            log.info("[COURIER-CLIENT] pushing order {} to courier backend", req.getOrderId());
-            execute(
-                webClient.post()
-                    .uri("/api/orders")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(req)
+            // Look up the store's primary location for pickup coordinates
+            com.buyology.ecommerce.store.domain.StoreLocation pickup = null;
+            if (req.getStoreId() != null) {
+                pickup = storeLocationRepository
+                        .findByStoreIdAndIsPrimary(req.getStoreId(), true)
+                        .orElseGet(() -> storeLocationRepository
+                                .findAllByStoreIdAndIsActive(req.getStoreId(), true)
+                                .stream().findFirst().orElse(null));
+            }
+
+            String pickupAddress = pickup != null
+                    ? pickup.getAddress() + ", " + pickup.getCity()
+                    : "Store location unavailable";
+            java.math.BigDecimal pickupLat = pickup != null ? java.math.BigDecimal.valueOf(pickup.getLatitude()) : null;
+            java.math.BigDecimal pickupLng = pickup != null ? java.math.BigDecimal.valueOf(pickup.getLongitude()) : null;
+
+            String dropoffAddress = String.join(", ",
+                    req.getAddressLine1() != null ? req.getAddressLine1() : "",
+                    req.getAddressLine2() != null ? req.getAddressLine2() : "",
+                    req.getCity() != null ? req.getCity() : "",
+                    req.getCountry() != null ? req.getCountry() : "")
+                    .replaceAll(", ,", ",").replaceAll("^, |, $", "");
+
+            DeliveryOrderEvent event = new DeliveryOrderEvent(
+                    req.getOrderId(),
+                    req.getStoreId(),
+                    req.getRecipientFirstName() + " " + req.getRecipientLastName(),
+                    req.getRecipientPhone(),
+                    pickupAddress,
+                    pickupLat,
+                    pickupLng,
+                    dropoffAddress,
+                    req.getDeliveryLatitude() != null ? java.math.BigDecimal.valueOf(req.getDeliveryLatitude()) : null,
+                    req.getDeliveryLongitude() != null ? java.math.BigDecimal.valueOf(req.getDeliveryLongitude()) : null,
+                    "SMALL",
+                    null,
+                    req.getShippingFee(),
+                    "EXPRESS",
+                    java.time.Instant.now()
             );
+
+            rabbitTemplate.convertAndSend(
+                    DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE,
+                    DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY,
+                    event
+            );
+            log.info("[COURIER-CLIENT] published order {} to courier exchange", req.getOrderId());
         } catch (Exception e) {
-            log.error("[COURIER-CLIENT] failed to push order {} to courier backend: {}",
+            log.error("[COURIER-CLIENT] failed to publish order {} to courier exchange: {}",
                     req.getOrderId(), e.getMessage());
         }
     }
