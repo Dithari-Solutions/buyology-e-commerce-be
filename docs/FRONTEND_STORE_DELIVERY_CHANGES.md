@@ -47,18 +47,18 @@ Each product now includes `expressDelivery`:
 
 | Value | Meaning |
 |---|---|
-| `true` | The store for this product is within ≤12.5 km — express delivery (≤30 min) |
-| `false` | The store is further away — standard/international shipping |
+| `true` | The store for this product is within ≤12.5 km — express delivery |
+| `false` | The store is further away — regular delivery |
 | `null` | No `lat`/`lng` was passed — badge not applicable |
 
 ### What to display
 
 ```jsx
 {product.expressDelivery === true && (
-  <Badge color="green">⚡ Express — under 30 min</Badge>
+  <Badge color="green">⚡ Express delivery</Badge>
 )}
 {product.expressDelivery === false && (
-  <Badge color="grey">🚢 Standard shipping</Badge>
+  <Badge color="grey">🚚 Regular delivery</Badge>
 )}
 ```
 
@@ -118,12 +118,12 @@ Authorization: Bearer <user_token>
 | Field | What to show |
 |---|---|
 | `status` | `PAID` → "Payment confirmed" |
-| `deliveryMethod` | `LOCAL_EXPRESS` → "Express delivery (under 30 min)" / `INTERNATIONAL` → "Standard shipping" |
+| `deliveryMethod` | `EXPRESS_DELIVERY` → "Express delivery" / `REGULAR_ORDER` → "Regular delivery" |
 | `totalAmount` + `currency` | Order total |
 | `recipientFirstName` + `recipientLastName` | Delivery recipient |
 | `addressLine1`, `city`, `country` | Delivery address |
 | `paidAt` | Payment timestamp |
-| `trackingCode` | Show only when not null (set by admin for international orders) |
+| `trackingCode` | Show only when not null (set by admin for regular orders) |
 | `carrierName` | Show only when not null |
 | `trackingHistory` | Optional — list of status updates with timestamps |
 
@@ -133,10 +133,10 @@ Authorization: Bearer <user_token>
 ✅ Order confirmed!
 
 Order ID: 2abc94fa-...
-Delivery: Express delivery (under 30 min)
+Delivery: Express delivery
 Total: 25.00 AED
 Paid at: 31 Mar 2026, 15:20
-
+```
 Delivering to:
 Firdovsi Rzaev
 Sulh 189, Apt 272, Sumgait
@@ -158,7 +158,7 @@ Poll or display `GET /api/orders/{orderId}` to show real-time status.
 | `COURIER_ASSIGNED` | A courier has been assigned |
 | `PICKED_UP` | Courier has picked up your order |
 | `IN_TRANSIT` | Your order is on the way |
-| `SHIPPED` | Order has been shipped (international) |
+| `SHIPPED` | Order has been shipped |
 | `DELIVERED` | Delivered |
 | `CANCELLED` | Order cancelled |
 | `FAILED` | Delivery failed — contact support |
@@ -215,4 +215,4 @@ Returns paginated `OrderSummaryResponse` items. Fields available:
 | Cart after payment | Remained in state | Backend clears it — clear local state on payment success |
 | Transaction status | Could stay PENDING | Now correctly becomes `SUCCESS` |
 | Order creation | Manual or pre-created | Automatic on payment success |
-| LOCAL_EXPRESS dispatch | Manual admin action | Automatic — sent to courier backend immediately |
+| EXPRESS_DELIVERY dispatch | Manual admin action | Automatic — sent to courier backend immediately |

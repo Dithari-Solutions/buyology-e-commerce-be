@@ -66,7 +66,7 @@ public class ProductResponse {
 
     /**
      * True = the primary store for this product is within ≤12.5 km of the customer's location
-     * (express delivery, ≤30 min). False = standard/international shipping.
+     * (express delivery, ≤30 min). False = regular shipping.
      * Null when no lat/lng was supplied.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -17,7 +17,7 @@ import java.util.UUID;
  * - userId / cartId / paymentTransactionId are stored as plain UUIDs (cross-service boundary — no DB-level FK).
  * - Delivery address fields are snapshot copies taken from UserAddress at order creation time
  *   so the address can be changed later without affecting historical orders.
- * - trackingCode / carrierName are set by admin when marking an INTERNATIONAL order as SHIPPED.
+ * - trackingCode / carrierName are set by admin when marking an order as SHIPPED.
  */
 @Entity
 @Table(name = "orders", indexes = {
@@ -49,7 +49,7 @@ public class Order {
     @Column(name = "payment_transaction_id")
     private UUID paymentTransactionId;
 
-    /** Assigned courier for LOCAL_EXPRESS orders. */
+    /** Assigned courier for EXPRESS_DELIVERY orders. */
     @Column(name = "courier_user_id")
     private UUID courierUserId;
 
@@ -62,6 +62,10 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private OrderStatus status = OrderStatus.PENDING_PAYMENT;
+
+    /** Estimated delivery time description (e.g. "30-45 mins", "Tomorrow by 6 PM"). */
+    @Column(name = "estimated_delivery_time", length = 100)
+    private String estimatedDeliveryTime;
 
     // ── Delivery address snapshot ─────────────────────────────────────────────
 
@@ -125,7 +129,7 @@ public class Order {
     @Column(name = "coupon_code", length = 50)
     private String couponCode;
 
-    // ── International carrier info (admin-set on SHIPPED) ─────────────────────
+    // ── Carrier info (admin-set on SHIPPED) ──────────────────────────────────
 
     @Column(name = "tracking_code", length = 100)
     private String trackingCode;
@@ -204,6 +208,9 @@ public class Order {
 
     public OrderStatus getStatus() { return status; }
     public void setStatus(OrderStatus status) { this.status = status; }
+
+    public String getEstimatedDeliveryTime() { return estimatedDeliveryTime; }
+    public void setEstimatedDeliveryTime(String estimatedDeliveryTime) { this.estimatedDeliveryTime = estimatedDeliveryTime; }
 
     public UUID getDeliveryAddressId() { return deliveryAddressId; }
     public void setDeliveryAddressId(UUID deliveryAddressId) { this.deliveryAddressId = deliveryAddressId; }

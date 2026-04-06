@@ -125,7 +125,7 @@ public class CourierServiceClient {
     }
 
     /**
-     * Publishes a LOCAL_EXPRESS order to the courier service via RabbitMQ.
+     * Publishes an EXPRESS_DELIVERY order to the courier service via RabbitMQ.
      * The courier service consumes from {@code delivery.order.received.queue}
      * bound to {@code buyology.ecommerce.exchange} with routing key
      * {@code order.delivery.requested}.

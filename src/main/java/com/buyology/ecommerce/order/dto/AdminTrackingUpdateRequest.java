@@ -14,7 +14,7 @@ public class AdminTrackingUpdateRequest {
 
     /**
      * Carrier tracking number — required when setting status to SHIPPED on
-     * an INTERNATIONAL order.
+     * a REGULAR_ORDER order.
      */
     private String trackingCode;
 

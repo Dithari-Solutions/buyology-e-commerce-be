@@ -7,7 +7,11 @@ import com.buyology.ecommerce.courier.CourierServiceClient;
 import com.buyology.ecommerce.cart.repository.CartItemRepository;
 import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
+import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
+import com.buyology.ecommerce.user.domain.UserProfiles;
+import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
+import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.OrderTrackingEvent;
@@ -49,6 +53,12 @@ public class OrderService {
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
+    // Delivery Fee Constants (in AED)
+    private static final String BASE_CURRENCY = "AED";
+    private static final BigDecimal EXPRESS_FEE_LOW_CART = new BigDecimal("15.00");
+    private static final BigDecimal EXPRESS_FEE_HIGH_CART = new BigDecimal("10.00");
+    private static final BigDecimal CART_TOTAL_THRESHOLD = new BigDecimal("150.00");
+
     private final OrderRepository orderRepo;
     private final OrderTrackingEventRepository trackingRepo;
     private final CartRepository cartRepo;
@@ -57,6 +67,9 @@ public class OrderService {
     private final UserAddressRepository addressRepo;
     private final PaymentTransactionRepository paymentTransactionRepo;
     private final StoreLocationRepository storeLocationRepo;
+    private final StoreProductRepository storeProductRepo;
+    private final UserProfilesRepository userProfileRepo;
+    private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
     private final CourierServiceClient courierServiceClient;
 
@@ -68,6 +81,9 @@ public class OrderService {
                         UserAddressRepository addressRepo,
                         PaymentTransactionRepository paymentTransactionRepo,
                         StoreLocationRepository storeLocationRepo,
+                        StoreProductRepository storeProductRepo,
+                        UserProfilesRepository userProfileRepo,
+                        CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
                         CourierServiceClient courierServiceClient) {
         this.orderRepo = orderRepo;
@@ -78,6 +94,9 @@ public class OrderService {
         this.addressRepo = addressRepo;
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.storeLocationRepo = storeLocationRepo;
+        this.storeProductRepo = storeProductRepo;
+        this.userProfileRepo = userProfileRepo;
+        this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
         this.courierServiceClient = courierServiceClient;
     }
@@ -118,12 +137,28 @@ public class OrderService {
             throw new IllegalArgumentException("Address does not belong to the authenticated user");
         }
 
+        // Validate customer country
+        UserProfiles profile = userProfileRepo.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+        if (!address.getCountry().equalsIgnoreCase(profile.getSelectedCountryCode())) {
+            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country (" + 
+                    profile.getSelectedCountryCode() + ").");
+        }
+
         // Build order
         Order order = new Order();
         order.setUserId(userId);
         order.setAuthCredentialId(authCredentialId);
         order.setCartId(cart.getId());
-        order.setDeliveryMethod(req.getDeliveryMethod());
+
+        // Resolve delivery method and fees if not explicitly provided (or even if provided, re-calculate for security)
+        DeliveryMethod method = req.getDeliveryMethod() != null ? req.getDeliveryMethod() : resolveDeliveryMethod(cartItems, address);
+        BigDecimal shippingFee = calculateShippingFee(method, cart.getTotalPrice(), cart.getCurrency());
+        String estimatedDeliveryTime = estimateDeliveryTime(method);
+
+        order.setDeliveryMethod(method);
+        order.setShippingFee(shippingFee);
+        order.setEstimatedDeliveryTime(estimatedDeliveryTime);
         order.setStatus(OrderStatus.PENDING_PAYMENT);
 
         // Address snapshot
@@ -142,10 +177,8 @@ public class OrderService {
 
         // Pricing
         BigDecimal subtotal = cart.getTotalPrice();
-        BigDecimal shippingFee = req.getShippingFee() != null ? req.getShippingFee() : BigDecimal.ZERO;
         BigDecimal discount = BigDecimal.ZERO;
         order.setSubtotal(subtotal);
-        order.setShippingFee(shippingFee);
         order.setDiscount(discount);
         order.setTotalAmount(subtotal.add(shippingFee).subtract(discount));
         order.setCurrency(cart.getCurrency());
@@ -310,8 +343,8 @@ public class OrderService {
             tx.setAppOrderId(orderResponse.getId());
             paymentTransactionRepo.save(tx);
 
-            // Push LOCAL_EXPRESS orders to courier backend automatically
-            if (order != null && order.getDeliveryMethod() == DeliveryMethod.LOCAL_EXPRESS) {
+            // Push EXPRESS_DELIVERY orders to courier backend automatically
+            if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS_DELIVERY) {
                 CourierOrderRequest courierReq = new CourierOrderRequest();
                 courierReq.setOrderId(order.getId());
                 courierReq.setCustomerId(order.getUserId());
@@ -327,7 +360,7 @@ public class OrderService {
                 courierReq.setTotalAmount(order.getTotalAmount());
                 courierReq.setShippingFee(order.getShippingFee());
                 courierReq.setCurrency(order.getCurrency());
-                // Use the first item's storeId — LOCAL_EXPRESS orders come from one store
+                // Use the first item's storeId — EXPRESS_DELIVERY orders come from one store
                 cartItems.stream()
                         .filter(i -> i.getStoreId() != null)
                         .findFirst()
@@ -347,19 +380,55 @@ public class OrderService {
     }
 
     /**
-     * Returns LOCAL_EXPRESS if every cart item's store has an active location within
-     * the 30-minute delivery radius of the given address, otherwise INTERNATIONAL.
+     * Returns EXPRESS_DELIVERY if every cart item's store has an active location within
+     * the 30-minute delivery radius of the given address, otherwise REGULAR_ORDER.
+     * Also validates that all items are in the same country as the delivery address.
      */
     private DeliveryMethod resolveDeliveryMethod(List<CartItem> cartItems, UserAddress address) {
         if (address.getLatitude() == null || address.getLongitude() == null) {
-            return DeliveryMethod.INTERNATIONAL;
+            return DeliveryMethod.REGULAR_ORDER;
         }
+
+        String deliveryCountry = address.getCountry();
+        boolean allMatchCountry = cartItems.stream()
+                .allMatch(item -> storeProductRepo.findByStore_IdAndProduct_IdAndIsActiveTrue(item.getStoreId(), item.getProduct().getId())
+                        .map(sp -> sp.getStore().getCountry().getCode().equalsIgnoreCase(deliveryCountry))
+                        .orElse(false));
+
+        if (!allMatchCountry) {
+            throw new IllegalArgumentException("All products must be from the same country as the delivery address.");
+        }
+
         List<UUID> expressStoreIds = storeLocationRepo.findStoreIdsWithinRadius(
                 address.getLatitude(), address.getLongitude(), THIRTY_MIN_RADIUS_KM);
         Set<UUID> expressSet = new HashSet<>(expressStoreIds);
         boolean allLocal = !cartItems.isEmpty() && cartItems.stream()
                 .allMatch(item -> item.getStoreId() != null && expressSet.contains(item.getStoreId()));
-        return allLocal ? DeliveryMethod.LOCAL_EXPRESS : DeliveryMethod.INTERNATIONAL;
+        return allLocal ? DeliveryMethod.EXPRESS_DELIVERY : DeliveryMethod.REGULAR_ORDER;
+    }
+
+    private BigDecimal calculateShippingFee(DeliveryMethod method, BigDecimal subtotal, String currency) {
+        if (method == DeliveryMethod.REGULAR_ORDER) {
+            return BigDecimal.ZERO;
+        }
+
+        // Convert threshold to cart currency
+        BigDecimal threshold = currencyExchangeService.convert(CART_TOTAL_THRESHOLD, BASE_CURRENCY, currency);
+        BigDecimal fee;
+        if (subtotal.compareTo(threshold) < 0) {
+            fee = currencyExchangeService.convert(EXPRESS_FEE_LOW_CART, BASE_CURRENCY, currency);
+        } else {
+            fee = currencyExchangeService.convert(EXPRESS_FEE_HIGH_CART, BASE_CURRENCY, currency);
+        }
+        return fee;
+    }
+
+    private String estimateDeliveryTime(DeliveryMethod method) {
+        if (method == DeliveryMethod.EXPRESS_DELIVERY) {
+            return "Within 30 minutes";
+        } else {
+            return "2-3 business days"; // Placeholder for regular order estimate
+        }
     }
 
     // =========================================================================
@@ -427,7 +496,7 @@ public class OrderService {
     }
 
     /**
-     * Admin tracking update — sets carrier details for international shipments
+     * Admin tracking update — sets carrier details for regular shipments
      * and adds a tracking history entry.
      */
     @Transactional
@@ -437,12 +506,12 @@ public class OrderService {
 
         validateTransition(order.getStatus(), req.getStatus());
 
-        // Require tracking code when shipping internationally
+        // Require tracking code when shipping
         if (req.getStatus() == OrderStatus.SHIPPED
-                && order.getDeliveryMethod() == DeliveryMethod.INTERNATIONAL
+                && order.getDeliveryMethod() == DeliveryMethod.REGULAR_ORDER
                 && (req.getTrackingCode() == null || req.getTrackingCode().isBlank())) {
             throw new IllegalArgumentException(
-                    "trackingCode is required when marking an INTERNATIONAL order as SHIPPED");
+                    "trackingCode is required when marking a REGULAR_ORDER as SHIPPED");
         }
 
         if (req.getTrackingCode() != null) order.setTrackingCode(req.getTrackingCode());
@@ -462,12 +531,12 @@ public class OrderService {
     // =========================================================================
 
     public List<OrderSummaryResponse> listCourierOrders(UUID courierUserId) {
-        return orderRepo.findAllByCourierUserIdAndDeliveryMethod(courierUserId, DeliveryMethod.LOCAL_EXPRESS)
+        return orderRepo.findAllByCourierUserIdAndDeliveryMethod(courierUserId, DeliveryMethod.EXPRESS_DELIVERY)
                 .stream().map(this::toSummaryResponse).toList();
     }
 
     /**
-     * Courier tracking update — only permitted for LOCAL_EXPRESS orders assigned to the caller.
+     * Courier tracking update — only permitted for EXPRESS_DELIVERY orders assigned to the caller.
      * Allowed target statuses: PICKED_UP, IN_TRANSIT, DELIVERED, FAILED.
      */
     @Transactional
@@ -476,8 +545,8 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        if (order.getDeliveryMethod() != DeliveryMethod.LOCAL_EXPRESS) {
-            throw new IllegalStateException("Courier tracking is only available for LOCAL_EXPRESS orders");
+        if (order.getDeliveryMethod() != DeliveryMethod.EXPRESS_DELIVERY) {
+            throw new IllegalStateException("Courier tracking is only available for EXPRESS_DELIVERY orders");
         }
 
         if (!courierUserId.equals(order.getCourierUserId())) {

@@ -155,7 +155,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         // 5 req/min — brute-force protection on signup/signin/OTP
         AUTH_SENSITIVE {
-            @Override
+            
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(5).refillGreedy(5, Duration.ofMinutes(1)).build())
@@ -165,7 +165,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         // 10 req/min — Google OAuth and other auth flows
         AUTH_GENERAL {
-            @Override
+            
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(10).refillGreedy(10, Duration.ofMinutes(1)).build())
@@ -175,7 +175,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         // 30 req/min — admin operations
         ADMIN {
-            @Override
+            
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(30).refillGreedy(30, Duration.ofMinutes(1)).build())
@@ -185,7 +185,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         // 100 req/min — public product/category/story browsing
         PUBLIC {
-            @Override
+            
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(100).refillGreedy(100, Duration.ofMinutes(1)).build())

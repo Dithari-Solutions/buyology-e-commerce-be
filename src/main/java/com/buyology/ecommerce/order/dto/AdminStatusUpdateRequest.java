@@ -12,7 +12,7 @@ public class AdminStatusUpdateRequest {
 
     private String notes;
 
-    /** For LOCAL_EXPRESS: assign a courier when moving to COURIER_ASSIGNED. */
+    /** For EXPRESS_DELIVERY: assign a courier when moving to COURIER_ASSIGNED. */
     private UUID courierUserId;
 
     // ── Getters & Setters ─────────────────────────────────────────────────────

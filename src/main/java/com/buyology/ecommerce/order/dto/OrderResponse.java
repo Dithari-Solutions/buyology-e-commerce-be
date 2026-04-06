@@ -41,7 +41,10 @@ public class OrderResponse {
     private String countryCode;
     private String couponCode;
 
-    // International carrier
+    /** Estimated delivery time description (e.g. "30-45 mins", "Tomorrow by 6 PM"). */
+    private String estimatedDeliveryTime;
+
+    // Carrier info (admin-set on SHIPPED)
     private String trackingCode;
     private String carrierName;
 
@@ -135,6 +138,9 @@ public class OrderResponse {
 
     public String getCouponCode() { return couponCode; }
     public void setCouponCode(String couponCode) { this.couponCode = couponCode; }
+
+    public String getEstimatedDeliveryTime() { return estimatedDeliveryTime; }
+    public void setEstimatedDeliveryTime(String estimatedDeliveryTime) { this.estimatedDeliveryTime = estimatedDeliveryTime; }
 
     public String getTrackingCode() { return trackingCode; }
     public void setTrackingCode(String trackingCode) { this.trackingCode = trackingCode; }

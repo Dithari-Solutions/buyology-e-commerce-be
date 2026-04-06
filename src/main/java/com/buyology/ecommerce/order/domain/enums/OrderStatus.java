@@ -1,12 +1,12 @@
 package com.buyology.ecommerce.order.domain.enums;
 
 /**
- * Unified order status that covers both local-express and international delivery flows.
+ * Unified order status that covers both express and regular delivery flows.
  *
- * Local Express flow:
+ * Express Delivery flow:
  *   PENDING_PAYMENT → PAID → COURIER_ASSIGNED → PICKED_UP → IN_TRANSIT → DELIVERED / FAILED
  *
- * International flow:
+ * Regular Order flow:
  *   PENDING_PAYMENT → PAID → PROCESSING → SHIPPED → IN_TRANSIT → DELIVERED / FAILED
  *
  * Both flows allow CANCELLED from PENDING_PAYMENT or PAID.
@@ -19,7 +19,7 @@ public enum OrderStatus {
     /** Payment confirmed (set automatically via PaymentSucceededEvent). */
     PAID,
 
-    /** Admin has acknowledged the international order and is preparing shipment. */
+    /** Admin has acknowledged the regular order and is preparing shipment. */
     PROCESSING,
 
     /** A local courier has been assigned to deliver the order. */
@@ -28,10 +28,10 @@ public enum OrderStatus {
     /** Local courier has picked up the order from the store. */
     PICKED_UP,
 
-    /** Admin has dispatched the international order and set the tracking code. */
+    /** Admin has dispatched the regular order and set the tracking code. */
     SHIPPED,
 
-    /** Order is on its way to the customer (local or international). */
+    /** Order is on its way to the customer (local or regular). */
     IN_TRANSIT,
 
     /** Order has been successfully delivered to the customer. */

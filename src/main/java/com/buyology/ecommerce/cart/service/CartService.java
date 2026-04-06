@@ -19,6 +19,8 @@ import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
 import com.buyology.ecommerce.store.domain.StoreProduct;
 import com.buyology.ecommerce.store.domain.StoreProductVariant;
+import com.buyology.ecommerce.user.domain.UserProfiles;
+import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
@@ -49,6 +51,7 @@ public class CartService {
     private final StoreProductRepository storeProductRepository;
     private final StoreProductVariantRepository storeProductVariantRepository;
     private final StoreLocationRepository storeLocationRepository;
+    private final UserProfilesRepository userProfileRepo;
     private final CurrencyExchangeService currencyExchangeService;
 
     public CartService(
@@ -62,6 +65,7 @@ public class CartService {
             StoreProductRepository storeProductRepository,
             StoreProductVariantRepository storeProductVariantRepository,
             StoreLocationRepository storeLocationRepository,
+            UserProfilesRepository userProfileRepo,
             CurrencyExchangeService currencyExchangeService) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
@@ -73,6 +77,7 @@ public class CartService {
         this.storeProductRepository = storeProductRepository;
         this.storeProductVariantRepository = storeProductVariantRepository;
         this.storeLocationRepository = storeLocationRepository;
+        this.userProfileRepo = userProfileRepo;
         this.currencyExchangeService = currencyExchangeService;
     }
 
@@ -168,6 +173,18 @@ public class CartService {
         String itemCurrency = storeProduct.getStore().getCountry().getCurrency();
         log.debug("addItem — resolved storeId={} countryCode={} currency={}",
                 request.getStoreId(), itemCountryCode, itemCurrency);
+
+        // Fetch user profile to check home country
+        UserProfiles userProfile = userProfileRepo.findByUserId(authCredential.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+
+        if (!itemCountryCode.equalsIgnoreCase(userProfile.getSelectedCountryCode())) {
+            log.warn("addItem rejected — country mismatch storeCountry={} homeCountry={} [authCredentialId={}]",
+                    itemCountryCode, userProfile.getSelectedCountryCode(), authCredentialId);
+            return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                    "You can only purchase products from stores in your current country (" + 
+                    userProfile.getSelectedCountryCode() + "). Browsing other countries is allowed, but purchase is restricted.");
+        }
 
         Cart cart = findOrCreateActiveCart(authCredential);
 

@@ -23,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -398,21 +397,14 @@ public class PaymentService {
         return res;
     }
 
-    /**
-     * Validates the Paymob HMAC-SHA512 signature sent as a query parameter.
-     * The HMAC is computed over a concatenation of specific transaction fields.
-     * See Paymob docs for the exact field ordering.
-     */
     private boolean validateHmac(String rawPayload, String receivedHmac, String hmacSecret) {
-        // TODO: Paymob UAE Intention API uses a different HMAC input format than the Egyptian legacy API.
-        // The key (4A10E5CB...BCEACC0B3BBE39) is confirmed correct but field-concat and hex-decoded
-        // approaches both fail. Contact Paymob UAE support to confirm the exact signing input for
-        // Intention API webhooks, then restore the real check below.
-        return true;
+        return PaymobHmacValidator.validate(rawPayload, receivedHmac, hmacSecret);
     }
 
     private String extractProviderTxnId(JsonNode payload) {
-        JsonNode obj = payload.has("transaction") ? payload.get("transaction") : payload;
+        JsonNode obj = payload.has("obj") ? payload.get("obj")
+                     : payload.has("transaction") ? payload.get("transaction")
+                     : payload;
         JsonNode idNode = obj.get("id");
         return idNode != null && !idNode.isNull() ? idNode.asText() : null;
     }

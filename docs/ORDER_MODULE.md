@@ -48,7 +48,7 @@ PENDING_PAYMENT
       ├──── (admin) ──────────────► PROCESSING
       |                                  |
       |                           ┌──────┴──────┐
-      |                     LOCAL_EXPRESS    INTERNATIONAL
+      |                     EXPRESS_DELIVERY    REGULAR_ORDER
       |                           |                |
       |                   COURIER_ASSIGNED      SHIPPED
       |                           |                |
@@ -102,7 +102,7 @@ PENDING_PAYMENT
     {
       "id": "uuid",
       "userId": "uuid",
-      "deliveryMethod": "LOCAL_EXPRESS",
+      "deliveryMethod": "EXPRESS_DELIVERY",
       "status": "IN_TRANSIT",
       "totalAmount": 265.00,
       "currency": "AED",
@@ -139,7 +139,7 @@ PENDING_PAYMENT
   "authCredentialId": "uuid",
   "cartId": "uuid",
   "paymentTransactionId": "uuid",
-  "deliveryMethod": "LOCAL_EXPRESS",
+  "deliveryMethod": "EXPRESS_DELIVERY",
   "status": "IN_TRANSIT",
   "recipientFirstName": "John",
   "recipientLastName": "Doe",
@@ -247,7 +247,7 @@ PENDING_PAYMENT
 interface OrderFilters {
   statusGroup: 'all' | 'active' | 'past';    // tabs
   status: OrderStatus | null;                 // specific status dropdown
-  deliveryMethod: 'LOCAL_EXPRESS' | 'INTERNATIONAL' | null;
+  deliveryMethod: 'EXPRESS_DELIVERY' | 'REGULAR_ORDER' | null;
   dateFrom: string | null;                    // ISO date string
   dateTo: string | null;
   page: number;
@@ -324,7 +324,7 @@ Status: [Any ▼]   Delivery: [Any ▼]   Date: [From] → [To]   [Clear Filters
 |---------|---------|
 | Status tab | All, Active, Past |
 | Status dropdown | All, Pending Payment, Paid, Processing, Courier Assigned, Picked Up, Shipped, In Transit, Delivered, Cancelled, Failed |
-| Delivery dropdown | All, Local Express, International |
+| Delivery dropdown | All, Express Delivery, Regular Order |
 | Date range | Date picker (createdAt range) |
 
 ---
