@@ -171,12 +171,14 @@ public class PaymentService {
                                                      BigDecimal amount,
                                                      long amountCents,
                                                      String currency) {
-        // Create an initial provider order record without the providerOrderId (will be updated later)
+        // Create an initial provider order record with a placeholder ID
+        // The column is NOT NULL and UNIQUE, so we use a UUID-based placeholder.
         PaymentProviderOrder providerOrder = new PaymentProviderOrder();
         providerOrder.setAppOrderId(req.getAppOrderId());
         providerOrder.setProvider(provider);
         providerOrder.setAmountCents(amountCents);
         providerOrder.setCurrency(currency);
+        providerOrder.setProviderOrderId("PENDING-" + UUID.randomUUID().toString());
         providerOrder = providerOrderRepo.save(providerOrder);
 
         PaymentTransaction tx = new PaymentTransaction();
@@ -196,7 +198,8 @@ public class PaymentService {
         tx.setMetadata(buildOrderMetadata(req));
         
         tx = transactionRepo.save(tx);
-        log.info("[PAYMENT] Committed PENDING transaction state: id={}, cartId={}", tx.getId(), tx.getCartId());
+        log.info("[PAYMENT] Committed PENDING transaction state: id={}, cartId={}, tempProviderId={}", 
+                 tx.getId(), tx.getCartId(), providerOrder.getProviderOrderId());
         return tx;
     }
 
