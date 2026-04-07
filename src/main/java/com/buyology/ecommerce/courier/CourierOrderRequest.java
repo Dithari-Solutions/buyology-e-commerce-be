@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
- * Payload sent to the courier backend when an EXPRESS_DELIVERY order is paid.
+ * Payload sent to the courier backend when an EXPRESS order is paid.
  */
 public class CourierOrderRequest {
 

@@ -215,8 +215,8 @@ The backend computes delivery method and fee based on store-to-customer distance
 
 | Distance | `deliveryMethod` | Estimated Time |
 |---|---|---|
-| ≤ 12.5 km | `EXPRESS_DELIVERY` | "Within 30 minutes" |
-| > 12.5 km | `REGULAR_ORDER` | "2–3 business days" |
+| ≤ 12.5 km | `EXPRESS` | "Within 30 minutes" |
+| > 12.5 km | `REGULAR` | "2–3 business days" |
 
 **Express delivery fee (AED-based, converted to cart currency):**
 
@@ -243,7 +243,7 @@ The backend computes delivery method and fee based on store-to-customer distance
 {
   "cartId": "<UUID>",
   "addressId": "<UUID>",
-  "deliveryMethod": "EXPRESS_DELIVERY",
+  "deliveryMethod": "EXPRESS",
   "shippingFee": 15.00,
   "couponCode": "SAVE10",
   "notes": "Leave at door"
@@ -254,7 +254,7 @@ The backend computes delivery method and fee based on store-to-customer distance
 |---|---|---|
 | `cartId` | yes | From `CartResponse.id` after checkout |
 | `addressId` | yes | From user's saved addresses |
-| `deliveryMethod` | yes | `EXPRESS_DELIVERY` or `REGULAR_ORDER` |
+| `deliveryMethod` | yes | `EXPRESS` or `REGULAR` |
 | `shippingFee` | no | Pass the fee shown to the user (from cart summary) |
 | `couponCode` | no | |
 | `notes` | no | Delivery notes |
@@ -263,8 +263,8 @@ The backend computes delivery method and fee based on store-to-customer distance
 
 | Value | When to use |
 |---|---|
-| `EXPRESS_DELIVERY` | Store is within ≤12.5 km (`expressDelivery: true`) |
-| `REGULAR_ORDER` | Store is > 12.5 km away |
+| `EXPRESS` | Store is within ≤12.5 km (`expressDelivery: true`) |
+| `REGULAR` | Store is > 12.5 km away |
 
 ---
 
@@ -274,7 +274,7 @@ The backend computes delivery method and fee based on store-to-customer distance
 |---|---|---|
 | `id` | UUID | Order ID |
 | `status` | `OrderStatus` | Current order status (see below) |
-| `deliveryMethod` | `DeliveryMethod` | `EXPRESS_DELIVERY` or `REGULAR_ORDER` |
+| `deliveryMethod` | `DeliveryMethod` | `EXPRESS` or `REGULAR` |
 | `subtotal` | BigDecimal | Items total before shipping |
 | `shippingFee` | BigDecimal | Delivery fee |
 | `discount` | BigDecimal | Coupon/discount applied |
@@ -329,7 +329,7 @@ Call after creating the order. Pass the order ID, cart, address, and billing det
   "appOrderId": "<UUID>",
   "cartId": "<UUID>",
   "addressId": "<UUID>",
-  "deliveryMethod": "EXPRESS_DELIVERY",
+  "deliveryMethod": "EXPRESS",
   "shippingFee": 15.00,
   "methodType": "CARD",
   "amount": 115.00,
@@ -421,7 +421,7 @@ Get all payment attempts for an order.
    POST /api/orders
    Headers: Authorization + X-Auth-Credential-Id
    Body: { cartId, addressId, deliveryMethod, shippingFee, couponCode?, notes? }
-   → deliveryMethod = EXPRESS_DELIVERY if any item has quickDelivery:true, else REGULAR_ORDER
+   → deliveryMethod = EXPRESS if any item has quickDelivery:true, else REGULAR
 
 7. Initiate payment:
    POST /api/payments/initiate

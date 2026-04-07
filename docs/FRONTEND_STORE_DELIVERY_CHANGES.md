@@ -118,7 +118,7 @@ Authorization: Bearer <user_token>
 | Field | What to show |
 |---|---|
 | `status` | `PAID` → "Payment confirmed" |
-| `deliveryMethod` | `EXPRESS_DELIVERY` → "Express delivery" / `REGULAR_ORDER` → "Regular delivery" |
+| `deliveryMethod` | `EXPRESS` → "Express delivery" / `REGULAR` → "Regular delivery" |
 | `totalAmount` + `currency` | Order total |
 | `recipientFirstName` + `recipientLastName` | Delivery recipient |
 | `addressLine1`, `city`, `country` | Delivery address |
@@ -215,4 +215,4 @@ Returns paginated `OrderSummaryResponse` items. Fields available:
 | Cart after payment | Remained in state | Backend clears it — clear local state on payment success |
 | Transaction status | Could stay PENDING | Now correctly becomes `SUCCESS` |
 | Order creation | Manual or pre-created | Automatic on payment success |
-| EXPRESS_DELIVERY dispatch | Manual admin action | Automatic — sent to courier backend immediately |
+| EXPRESS dispatch | Manual admin action | Automatic — sent to courier backend immediately |

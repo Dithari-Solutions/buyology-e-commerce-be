@@ -59,7 +59,7 @@ public class AdminOrderController {
     }
 
     /**
-     * Update order status. For EXPRESS_DELIVERY orders, optionally assigns a courier
+     * Update order status. For EXPRESS orders, optionally assigns a courier
      * when moving to COURIER_ASSIGNED (pass courierUserId in the request body).
      * Validates the status transition — invalid transitions return HTTP 409.
      */
@@ -76,7 +76,7 @@ public class AdminOrderController {
 
     /**
      * Add a tracking event and optionally set carrier tracking code.
-     * For REGULAR_ORDER orders being marked as SHIPPED, trackingCode is required.
+     * For REGULAR orders being marked as SHIPPED, trackingCode is required.
      */
     @PostMapping("/{orderId}/tracking")
     @PreAuthorize("hasRole('ADMIN')")

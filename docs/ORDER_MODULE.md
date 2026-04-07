@@ -48,7 +48,7 @@ PENDING_PAYMENT
       ├──── (admin) ──────────────► PROCESSING
       |                                  |
       |                           ┌──────┴──────┐
-      |                     EXPRESS_DELIVERY    REGULAR_ORDER
+      |                     EXPRESS    REGULAR
       |                           |                |
       |                   COURIER_ASSIGNED      SHIPPED
       |                           |                |
@@ -102,7 +102,7 @@ PENDING_PAYMENT
     {
       "id": "uuid",
       "userId": "uuid",
-      "deliveryMethod": "EXPRESS_DELIVERY",
+      "deliveryMethod": "EXPRESS",
       "status": "IN_TRANSIT",
       "totalAmount": 265.00,
       "currency": "AED",
@@ -139,7 +139,7 @@ PENDING_PAYMENT
   "authCredentialId": "uuid",
   "cartId": "uuid",
   "paymentTransactionId": "uuid",
-  "deliveryMethod": "EXPRESS_DELIVERY",
+  "deliveryMethod": "EXPRESS",
   "status": "IN_TRANSIT",
   "recipientFirstName": "John",
   "recipientLastName": "Doe",
@@ -247,7 +247,7 @@ PENDING_PAYMENT
 interface OrderFilters {
   statusGroup: 'all' | 'active' | 'past';    // tabs
   status: OrderStatus | null;                 // specific status dropdown
-  deliveryMethod: 'EXPRESS_DELIVERY' | 'REGULAR_ORDER' | null;
+  deliveryMethod: 'EXPRESS' | 'REGULAR' | null;
   dateFrom: string | null;                    // ISO date string
   dateTo: string | null;
   page: number;

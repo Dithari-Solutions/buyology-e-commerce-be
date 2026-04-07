@@ -49,7 +49,7 @@ public class Order {
     @Column(name = "payment_transaction_id")
     private UUID paymentTransactionId;
 
-    /** Assigned courier for EXPRESS_DELIVERY orders. */
+    /** Assigned courier for EXPRESS orders. */
     @Column(name = "courier_user_id")
     private UUID courierUserId;
 

@@ -12,8 +12,8 @@ import java.util.UUID;
  * Each status transition — whether triggered by a courier, admin, or the system —
  * produces a new row. Rows are never updated or deleted.
  *
- * For EXPRESS_DELIVERY orders, latitude/longitude give real-time position of the courier.
- * For REGULAR_ORDER orders, locationDescription holds the carrier checkpoint note.
+ * For EXPRESS orders, latitude/longitude give real-time position of the courier.
+ * For REGULAR orders, locationDescription holds the carrier checkpoint note.
  * Both fields support future real-time tracking use cases.
  */
 @Entity
@@ -40,11 +40,11 @@ public class OrderTrackingEvent {
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
 
-    /** GPS latitude — provided by courier for EXPRESS_DELIVERY deliveries. */
+    /** GPS latitude — provided by courier for EXPRESS deliveries. */
     @Column(name = "latitude")
     private Double latitude;
 
-    /** GPS longitude — provided by courier for EXPRESS_DELIVERY deliveries. */
+    /** GPS longitude — provided by courier for EXPRESS deliveries. */
     @Column(name = "longitude")
     private Double longitude;
 

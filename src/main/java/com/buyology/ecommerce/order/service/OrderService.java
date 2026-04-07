@@ -358,8 +358,8 @@ public class OrderService {
             tx.setAppOrderId(orderResponse.getId());
             paymentTransactionRepo.save(tx);
 
-            // Push EXPRESS_DELIVERY orders to courier backend automatically
-            if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS_DELIVERY) {
+            // Push EXPRESS orders to courier backend automatically
+            if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
                 CourierOrderRequest courierReq = new CourierOrderRequest();
                 courierReq.setOrderId(order.getId());
                 courierReq.setCustomerId(order.getUserId());
@@ -375,7 +375,7 @@ public class OrderService {
                 courierReq.setTotalAmount(order.getTotalAmount());
                 courierReq.setShippingFee(order.getShippingFee());
                 courierReq.setCurrency(order.getCurrency());
-                // Use the first item's storeId — EXPRESS_DELIVERY orders come from one store
+                // Use the first item's storeId — EXPRESS orders come from one store
                 cartItems.stream()
                         .filter(i -> i.getStoreId() != null)
                         .findFirst()
@@ -395,13 +395,13 @@ public class OrderService {
     }
 
     /**
-     * Returns EXPRESS_DELIVERY if every cart item's store has an active location within
-     * the 30-minute delivery radius of the given address, otherwise REGULAR_ORDER.
+     * Returns EXPRESS if every cart item's store has an active location within
+     * the 30-minute delivery radius of the given address, otherwise REGULAR.
      * Also validates that all items are in the same country as the delivery address.
      */
     private DeliveryMethod resolveDeliveryMethod(List<CartItem> cartItems, UserAddress address) {
         if (address.getLatitude() == null || address.getLongitude() == null) {
-            return DeliveryMethod.REGULAR_ORDER;
+            return DeliveryMethod.REGULAR;
         }
 
         String deliveryCountry = address.getCountry();
@@ -419,11 +419,11 @@ public class OrderService {
         Set<UUID> expressSet = new HashSet<>(expressStoreIds);
         boolean allLocal = !cartItems.isEmpty() && cartItems.stream()
                 .allMatch(item -> item.getStoreId() != null && expressSet.contains(item.getStoreId()));
-        return allLocal ? DeliveryMethod.EXPRESS_DELIVERY : DeliveryMethod.REGULAR_ORDER;
+        return allLocal ? DeliveryMethod.EXPRESS : DeliveryMethod.REGULAR;
     }
 
     private BigDecimal calculateShippingFee(DeliveryMethod method, BigDecimal subtotal, String currency) {
-        if (method == DeliveryMethod.REGULAR_ORDER) {
+        if (method == DeliveryMethod.REGULAR) {
             return BigDecimal.ZERO;
         }
 
@@ -439,7 +439,7 @@ public class OrderService {
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {
-        if (method == DeliveryMethod.EXPRESS_DELIVERY) {
+        if (method == DeliveryMethod.EXPRESS) {
             return "Within 30 minutes";
         } else {
             return "2-3 business days"; // Placeholder for regular order estimate
@@ -523,10 +523,10 @@ public class OrderService {
 
         // Require tracking code when shipping
         if (req.getStatus() == OrderStatus.SHIPPED
-                && order.getDeliveryMethod() == DeliveryMethod.REGULAR_ORDER
+                && order.getDeliveryMethod() == DeliveryMethod.REGULAR
                 && (req.getTrackingCode() == null || req.getTrackingCode().isBlank())) {
             throw new IllegalArgumentException(
-                    "trackingCode is required when marking a REGULAR_ORDER as SHIPPED");
+                    "trackingCode is required when marking a REGULAR as SHIPPED");
         }
 
         if (req.getTrackingCode() != null) order.setTrackingCode(req.getTrackingCode());
@@ -546,12 +546,12 @@ public class OrderService {
     // =========================================================================
 
     public List<OrderSummaryResponse> listCourierOrders(UUID courierUserId) {
-        return orderRepo.findAllByCourierUserIdAndDeliveryMethod(courierUserId, DeliveryMethod.EXPRESS_DELIVERY)
+        return orderRepo.findAllByCourierUserIdAndDeliveryMethod(courierUserId, DeliveryMethod.EXPRESS)
                 .stream().map(this::toSummaryResponse).toList();
     }
 
     /**
-     * Courier tracking update — only permitted for EXPRESS_DELIVERY orders assigned to the caller.
+     * Courier tracking update — only permitted for EXPRESS orders assigned to the caller.
      * Allowed target statuses: PICKED_UP, IN_TRANSIT, DELIVERED, FAILED.
      */
     @Transactional
@@ -560,8 +560,8 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        if (order.getDeliveryMethod() != DeliveryMethod.EXPRESS_DELIVERY) {
-            throw new IllegalStateException("Courier tracking is only available for EXPRESS_DELIVERY orders");
+        if (order.getDeliveryMethod() != DeliveryMethod.EXPRESS) {
+            throw new IllegalStateException("Courier tracking is only available for EXPRESS orders");
         }
 
         if (!courierUserId.equals(order.getCourierUserId())) {

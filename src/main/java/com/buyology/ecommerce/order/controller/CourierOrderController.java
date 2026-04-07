@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Courier-facing endpoints for EXPRESS_DELIVERY delivery management.
+ * Courier-facing endpoints for EXPRESS delivery management.
  * Requires the caller to have the 'courier:update' permission
  * (assigned via the role/permission system in the role module).
  */
@@ -30,7 +30,7 @@ public class CourierOrderController {
     }
 
     /**
-     * List all EXPRESS_DELIVERY orders assigned to the authenticated courier.
+     * List all EXPRESS orders assigned to the authenticated courier.
      */
     @GetMapping
     @PreAuthorize("hasAuthority('courier:update')")
@@ -42,7 +42,7 @@ public class CourierOrderController {
     }
 
     /**
-     * Update tracking for an assigned EXPRESS_DELIVERY order.
+     * Update tracking for an assigned EXPRESS order.
      * Allowed statuses: PICKED_UP, IN_TRANSIT, DELIVERED, FAILED.
      * Latitude/longitude are captured for real-time map tracking support.
      */

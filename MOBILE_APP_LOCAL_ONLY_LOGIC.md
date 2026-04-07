@@ -12,23 +12,23 @@ This document outlines the updated logic for product browsing, purchasing restri
 ## 2. Delivery Method Classification
 The delivery method is automatically determined based on the distance between the store and the customer's delivery address:
 
-*   **EXPRESS_DELIVERY:**
+*   **EXPRESS:**
     *   Triggered when the distance is **≤ 12.5 km** (approximately 30 minutes delivery radius).
     *   Fulfillment: Handled by a local courier with real-time GPS tracking.
-*   **REGULAR_ORDER:**
+*   **REGULAR:**
     *   Triggered when the distance is **> 12.5 km** but within the same country.
     *   Fulfillment: Handled by standard shipping or store-managed delivery.
     *   Estimate: "2-3 business days" (can be customized per order).
 
 ## 3. Delivery Fees (Express Delivery Only)
-Delivery fees for `EXPRESS_DELIVERY` are calculated based on the cart's total price. The thresholds are defined in AED and automatically converted to the cart's currency.
+Delivery fees for `EXPRESS` are calculated based on the cart's total price. The thresholds are defined in AED and automatically converted to the cart's currency.
 
 | Cart Total (Base AED) | Express Delivery Fee (Base AED) |
 |-----------------------|---------------------------------|
 | < 150 AED             | 15 AED                          |
 | ≥ 150 AED             | 10 AED                          |
 
-*   **Note:** `REGULAR_ORDER` delivery is currently free (0.00) unless otherwise specified.
+*   **Note:** `REGULAR` delivery is currently free (0.00) unless otherwise specified.
 
 ## 4. UI/UX Recommendations
 *   **Express Badge:** Show an "Express" badge only for products where `expressDelivery: true` in the API response (based on user's current lat/lng).

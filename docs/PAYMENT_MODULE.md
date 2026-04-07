@@ -121,7 +121,7 @@ Initiates a full or partial refund through Paymob.
 {
   "cartId": "uuid",
   "addressId": "uuid",
-  "deliveryMethod": "EXPRESS_DELIVERY | REGULAR_ORDER",
+  "deliveryMethod": "EXPRESS | REGULAR",
   "shippingFee": 15.00,
   "methodType": "CARD | TABBY | TAMARA",
   "amount": 250.00,
