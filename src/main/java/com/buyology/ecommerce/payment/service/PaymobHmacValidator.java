@@ -41,23 +41,37 @@ class PaymobHmacValidator {
 
             String concat = buildConcatString(txn);
 
-            Mac mac = Mac.getInstance("HmacSHA512");
-            mac.init(new SecretKeySpec(hmacSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512"));
-            byte[] raw = mac.doFinal(concat.getBytes(StandardCharsets.UTF_8));
-
-            StringBuilder hex = new StringBuilder();
-            for (byte b : raw) hex.append(String.format("%02x", b));
-            String computed = hex.toString();
-
-            boolean valid = computed.equalsIgnoreCase(receivedHmac);
-            if (!valid) {
-                log.warn("[HMAC] Mismatch — computed: {}, received: {}", computed, receivedHmac);
+            // Attempt SHA-512 first (standard for modern Paymob UAE Transaction Callbacks)
+            String computed512 = computeHmac(concat, hmacSecret, "HmacSHA512");
+            if (computed512.equalsIgnoreCase(receivedHmac)) {
+                return true;
             }
-            return valid;
+
+            // Fallback to SHA-256 (used by some older merchant accounts or specific intention callbacks)
+            String computed256 = computeHmac(concat, hmacSecret, "HmacSHA256");
+            if (computed256.equalsIgnoreCase(receivedHmac)) {
+                log.info("[HMAC] Validated using SHA-256 fallback");
+                return true;
+            }
+
+            log.warn("[HMAC] Mismatch — received: {}, computed512: {}, computed256: {}", 
+                     receivedHmac, computed512, computed256);
+            log.debug("[HMAC] Concatenated string used: {}", concat);
+            
+            return false;
         } catch (Exception e) {
             log.error("[HMAC] Validation error: {}", e.getMessage());
             return false;
         }
+    }
+
+    private static String computeHmac(String data, String key, String algorithm) throws Exception {
+        Mac mac = Mac.getInstance(algorithm);
+        mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), algorithm));
+        byte[] raw = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+        StringBuilder hex = new StringBuilder();
+        for (byte b : raw) hex.append(String.format("%02x", b));
+        return hex.toString();
     }
 
     static String buildConcatString(JsonNode txn) {

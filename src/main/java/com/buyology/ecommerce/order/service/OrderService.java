@@ -246,6 +246,11 @@ public class OrderService {
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
 
+                    // Push EXPRESS orders to courier backend automatically
+                    if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
+                        pushToCourier(order);
+                    }
+
                     // Clear the cart so the customer can start fresh
                     if (order.getCartId() != null) {
                         cartRepo.findById(order.getCartId()).ifPresent(cart -> {
@@ -356,27 +361,7 @@ public class OrderService {
 
             // Push EXPRESS orders to courier backend automatically
             if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
-                CourierOrderRequest courierReq = new CourierOrderRequest();
-                courierReq.setOrderId(order.getId());
-                courierReq.setCustomerId(order.getUserId());
-                courierReq.setRecipientFirstName(order.getRecipientFirstName());
-                courierReq.setRecipientLastName(order.getRecipientLastName());
-                courierReq.setRecipientPhone(order.getRecipientPhone());
-                courierReq.setAddressLine1(order.getAddressLine1());
-                courierReq.setAddressLine2(order.getAddressLine2());
-                courierReq.setCity(order.getCity());
-                courierReq.setCountry(order.getCountry());
-                courierReq.setDeliveryLatitude(order.getDeliveryLatitude());
-                courierReq.setDeliveryLongitude(order.getDeliveryLongitude());
-                courierReq.setTotalAmount(order.getTotalAmount());
-                courierReq.setShippingFee(order.getShippingFee());
-                courierReq.setCurrency(order.getCurrency());
-                // Use the first item's storeId — EXPRESS orders come from one store
-                cartItems.stream()
-                        .filter(i -> i.getStoreId() != null)
-                        .findFirst()
-                        .ifPresent(i -> courierReq.setStoreId(i.getStoreId()));
-                courierServiceClient.pushOrder(courierReq);
+                pushToCourier(order);
             }
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
@@ -388,6 +373,35 @@ public class OrderService {
             cart.setTotalPrice(BigDecimal.ZERO);
             cartRepo.save(cart);
         }
+    }
+
+    private void pushToCourier(Order order) {
+        if (order == null) return;
+        
+        CourierOrderRequest courierReq = new CourierOrderRequest();
+        courierReq.setOrderId(order.getId());
+        courierReq.setCustomerId(order.getUserId());
+        courierReq.setRecipientFirstName(order.getRecipientFirstName());
+        courierReq.setRecipientLastName(order.getRecipientLastName());
+        courierReq.setRecipientPhone(order.getRecipientPhone());
+        courierReq.setAddressLine1(order.getAddressLine1());
+        courierReq.setAddressLine2(order.getAddressLine2());
+        courierReq.setCity(order.getCity());
+        courierReq.setCountry(order.getCountry());
+        courierReq.setDeliveryLatitude(order.getDeliveryLatitude());
+        courierReq.setDeliveryLongitude(order.getDeliveryLongitude());
+        courierReq.setTotalAmount(order.getTotalAmount());
+        courierReq.setShippingFee(order.getShippingFee());
+        courierReq.setCurrency(order.getCurrency());
+        
+        // Use the first item's storeId — EXPRESS orders come from one store
+        order.getItems().stream()
+                .filter(i -> i.getStoreId() != null)
+                .findFirst()
+                .ifPresent(i -> courierReq.setStoreId(i.getStoreId()));
+        
+        log.info("[ORDER] Pushing order {} to courier backend.", order.getId());
+        courierServiceClient.pushOrder(courierReq);
     }
 
     /**
