@@ -272,7 +272,7 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
-        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             log.warn("updateItemQuantity rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
@@ -299,7 +299,7 @@ public class CartService {
     public ResponseEntity<ApiResponse<CartResponse>> removeItem(UUID authCredentialId, UUID cartItemId) {
         log.debug("removeItem called — authCredentialId={} cartItemId={}", authCredentialId, cartItemId);
 
-        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             log.warn("removeItem rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
@@ -324,8 +324,8 @@ public class CartService {
     @Transactional
     public ResponseEntity<ApiResponse<Void>> clearCart(UUID authCredentialId) {
         // Accept both ACTIVE and CHECKED_OUT carts so this endpoint works after checkout
-        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
-                .or(() -> cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.CHECKED_OUT))
+        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .or(() -> cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT))
                 .orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
@@ -351,7 +351,7 @@ public class CartService {
     public ResponseEntity<ApiResponse<CartResponse>> checkout(UUID authCredentialId) {
         log.debug("checkout called — authCredentialId={}", authCredentialId);
 
-        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             log.warn("checkout rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");

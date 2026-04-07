@@ -115,7 +115,7 @@ public class AdminUserService {
 
         // Active cart
         Cart activeCart = cartRepository
-                .findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
                 .orElse(null);
         CartResponse cartResponse = activeCart != null ? buildCartResponse(activeCart) : null;
 
