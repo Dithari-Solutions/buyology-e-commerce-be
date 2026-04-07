@@ -515,7 +515,7 @@ public class AuthService {
 
     // ── Shared token issuance ─────────────────────────────────────────────────
 
-    private ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
+    public ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
             AuthCredentials credentials, HttpServletRequest httpRequest) {
 
         userRepository.findById(credentials.getUserId()).ifPresent(user -> {
@@ -534,7 +534,7 @@ public class AuthService {
                 .body(new ApiResponse<>(200, "Signin successful", body));
     }
 
-    private String extractDeviceInfo(HttpServletRequest request) {
+    public String extractDeviceInfo(HttpServletRequest request) {
         String ua = request.getHeader("User-Agent");
         if (ua == null) return null;
         return ua.length() > 500 ? ua.substring(0, 500) : ua;

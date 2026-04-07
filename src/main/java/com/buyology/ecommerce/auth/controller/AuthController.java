@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.buyology.ecommerce.auth.dto.AppleOAuthRequest;
 import com.buyology.ecommerce.auth.dto.ForgotPasswordRequest;
 import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
@@ -14,9 +15,11 @@ import com.buyology.ecommerce.auth.dto.ResetPasswordRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
+import com.buyology.ecommerce.auth.service.AppleOAuthService;
 import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.auth.service.GoogleOAuthService;
 import com.buyology.ecommerce.auth.service.TokenService;
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.service.TokenService.RotateTokensResult;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.user.domain.Users;
@@ -34,12 +37,16 @@ public class AuthController {
 
     private final AuthService authService;
     private final GoogleOAuthService googleOAuthService;
+    private final AppleOAuthService appleOAuthService;
     private final TokenService tokenService;
 
-    public AuthController(AuthService authService, GoogleOAuthService googleOAuthService,
+    public AuthController(AuthService authService,
+            GoogleOAuthService googleOAuthService,
+            AppleOAuthService appleOAuthService,
             TokenService tokenService) {
         this.authService = authService;
         this.googleOAuthService = googleOAuthService;
+        this.appleOAuthService = appleOAuthService;
         this.tokenService = tokenService;
     }
 
@@ -151,19 +158,45 @@ public class AuthController {
 
     // ── Google OAuth ──────────────────────────────────────────────────────────
 
+    @Operation(summary = "Google OAuth login",
+            description = "Handles Google OAuth2 callback. Returns access and refresh tokens.")
     @PostMapping("/google/callback")
-    public ResponseEntity<ApiResponse<Users>> googleCallback(@RequestBody GoogleOAuthRequest request) {
+    public ResponseEntity<ApiResponse<SignInResponse>> googleCallback(
+            @RequestBody GoogleOAuthRequest request,
+            HttpServletRequest httpRequest) {
         String code = request.getCode();
         if (code == null || code.isEmpty()) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Authorization code is required");
         }
         try {
-            Users user = googleOAuthService.processGoogleOAuth(code);
-            return ApiResponse.success(user, "Logged in successfully.");
+            AuthCredentials creds = googleOAuthService.processGoogleOAuth(code);
+            return authService.buildSigninResponse(creds, httpRequest);
         } catch (IllegalArgumentException e) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
             log.error("Google OAuth callback failed: {}", e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
+        }
+    }
+
+    // ── Apple OAuth ───────────────────────────────────────────────────────────
+
+    @Operation(summary = "Apple OAuth login",
+            description = "Handles Apple OAuth2 callback. Returns access and refresh tokens.")
+    @PostMapping("/apple/callback")
+    public ResponseEntity<ApiResponse<SignInResponse>> appleCallback(
+            @RequestBody AppleOAuthRequest request,
+            HttpServletRequest httpRequest) {
+        if (request.getCode() == null || request.getCode().isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Authorization code is required");
+        }
+        try {
+            AuthCredentials creds = appleOAuthService.processAppleOAuth(request);
+            return authService.buildSigninResponse(creds, httpRequest);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            log.error("Apple OAuth callback failed: {}", e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
         }
     }

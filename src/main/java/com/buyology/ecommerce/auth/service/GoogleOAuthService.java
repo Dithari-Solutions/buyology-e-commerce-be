@@ -41,7 +41,7 @@ public class GoogleOAuthService {
     }
 
     @Transactional
-    public Users processGoogleOAuth(String code) {
+    public AuthCredentials processGoogleOAuth(String code) {
         if (code == null || code.isEmpty()) {
             throw new IllegalArgumentException("Authorization code cannot be null or empty");
         }
@@ -116,15 +116,14 @@ public class GoogleOAuthService {
             // Update tokens in case they changed
             cred.setAccessToken(accessToken);
             cred.setRefreshToken(refreshToken);
-            authCredentialRepository.save(cred);
-
-            return existingUser;
+            return authCredentialRepository.save(cred);
         }
 
         // 4️⃣ If not exists, create new Users entity
         Users user = new Users();
         user.setFirstName(firstName);
         user.setLastName(lastName);
+        user.setUserType(Users.UserType.CUSTOMER);
         user = userRepository.save(user);
 
         // 5️⃣ Create AuthCredentials linked to Users
@@ -135,9 +134,7 @@ public class GoogleOAuthService {
         cred.setEmail(email);
         cred.setAccessToken(accessToken);
         cred.setRefreshToken(refreshToken);
-        authCredentialRepository.save(cred);
-
-        return user;
+        return authCredentialRepository.save(cred);
     }
 
 }

@@ -86,6 +86,31 @@
       "description": "OAuth2 redirect URI registered in Google Cloud Console."
     },
     {
+      "name": "apple.team-id",
+      "type": "java.lang.String",
+      "description": "Apple Team ID from Apple Developer account."
+    },
+    {
+      "name": "apple.client-id",
+      "type": "java.lang.String",
+      "description": "Apple Client ID (Service ID) from Apple Developer account."
+    },
+    {
+      "name": "apple.key-id",
+      "type": "java.lang.String",
+      "description": "Apple Key ID (Private Key identifier) from Apple Developer account."
+    },
+    {
+      "name": "apple.private-key",
+      "type": "java.lang.String",
+      "description": "Apple Private Key (.p8 file content) used to sign Apple Client Secret."
+    },
+    {
+      "name": "apple.redirect-uri",
+      "type": "java.lang.String",
+      "description": "OAuth2 redirect URI registered in Apple Developer account."
+    },
+    {
       "name": "twilio.sendgrid.api-key",
       "type": "java.lang.String",
       "description": "Twilio SendGrid API key used to send transactional emails."
