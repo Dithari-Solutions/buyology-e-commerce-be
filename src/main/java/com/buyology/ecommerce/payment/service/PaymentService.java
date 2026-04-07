@@ -482,25 +482,36 @@ public class PaymentService {
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode payload) {
         try {
-            // 1. Try root intention_id (Paymob Intention API v2 often puts it at root)
+            // 1. Collect all possible candidates for Intention/Order ID
             String intentionId = null;
             if (payload.has("intention_id") && !payload.get("intention_id").isNull()) {
                 intentionId = payload.get("intention_id").asText();
-                log.info("[WEBHOOK] Found intentionId at root: {}", intentionId);
+                log.info("[WEBHOOK] Found intention_id at root: {}", intentionId);
             }
 
-            // 2. Try obj.order.id or obj.intention.id
-            JsonNode data = payload.has("obj") ? payload.get("obj") : payload;
-            if (intentionId == null) {
-                if (data.has("order") && data.get("order").has("id")) {
-                    intentionId = data.get("order").get("id").asText();
+            JsonNode obj = payload.has("obj") ? payload.get("obj") : null;
+            if (intentionId == null && obj != null) {
+                if (obj.has("order") && obj.get("order").has("id") && !obj.get("order").get("id").isNull()) {
+                    intentionId = obj.get("order").get("id").asText();
                     log.info("[WEBHOOK] Found intentionId in obj.order.id: {}", intentionId);
-                } else if (data.has("intention") && data.get("intention").has("id")) {
-                    intentionId = data.get("intention").get("id").asText();
+                } else if (obj.has("intention") && obj.get("intention").has("id") && !obj.get("intention").get("id").isNull()) {
+                    intentionId = obj.get("intention").get("id").asText();
                     log.info("[WEBHOOK] Found intentionId in obj.intention.id: {}", intentionId);
                 }
             }
+            
+            // If still null, try some alternative root/nested paths
+            if (intentionId == null) {
+                if (payload.has("order_id") && !payload.get("order_id").isNull()) {
+                    intentionId = payload.get("order_id").asText();
+                    log.info("[WEBHOOK] Found order_id at root: {}", intentionId);
+                } else if (payload.has("order") && payload.get("order").has("id")) {
+                    intentionId = payload.get("order").get("id").asText();
+                    log.info("[WEBHOOK] Found order.id at root: {}", intentionId);
+                }
+            }
 
+            // 2. Resolve via collected intentionId
             if (intentionId != null) {
                 final String finalId = intentionId;
                 log.info("[WEBHOOK] Searching for PaymentProviderOrder with providerOrderId: {}", finalId);
@@ -512,16 +523,26 @@ public class PaymentService {
                         })
                         .orElse(null);
                 if (tx != null) {
-                    log.info("[WEBHOOK] Matched via intentionId {} to transaction: id={}", intentionId, tx.getId());
+                    log.info("[WEBHOOK] Matched via ID {} to transaction: id={}", intentionId, tx.getId());
                     return tx;
                 }
-                log.warn("[WEBHOOK] intentionId {} found but no PENDING transaction matched", intentionId);
+                log.warn("[WEBHOOK] ID {} found in payload but no PENDING transaction matched in DB", intentionId);
             }
 
-            // 3. Last resort: special_reference (mapped to cartId or appOrderId)
-            // specialReference format: <uuid>-<short_id>
-            if (data.has("special_reference") && !data.get("special_reference").isNull()) {
-                String specRef = data.get("special_reference").asText();
+            // 3. Last resort fallback: special_reference (mapped to cartId or appOrderId)
+            // Checked in multiple locations (root, obj, obj.order)
+            String specRef = null;
+            if (payload.has("special_reference") && !payload.get("special_reference").isNull()) {
+                specRef = payload.get("special_reference").asText();
+            } else if (obj != null) {
+                if (obj.has("special_reference") && !obj.get("special_reference").isNull()) {
+                    specRef = obj.get("special_reference").asText();
+                } else if (obj.has("order") && obj.get("order").has("special_reference") && !obj.get("order").get("special_reference").isNull()) {
+                    specRef = obj.get("order").get("special_reference").asText();
+                }
+            }
+
+            if (specRef != null) {
                 log.info("[WEBHOOK] Attempting resolution via special_reference: {}", specRef);
                 try {
                     String uuidPart = specRef.contains("-") ? specRef.substring(0, specRef.lastIndexOf("-")) : specRef;
@@ -534,14 +555,17 @@ public class PaymentService {
                         log.info("[WEBHOOK] Matched via special_reference {} to transaction: id={}", specRef, tx.getId());
                         return tx;
                     }
+                    log.warn("[WEBHOOK] special_reference {} parsed but no transaction matched", specRef);
                 } catch (Exception e) {
                     log.warn("[WEBHOOK] Failed to parse UUID from special_reference: {}", specRef);
                 }
             }
 
+            log.error("[WEBHOOK] All resolution paths failed for payload. Keys: {}", 
+                      payload.has("obj") ? "obj exists" : "obj missing");
             return null;
         } catch (Exception e) {
-            log.error("[WEBHOOK] Error resolving transaction from payload", e);
+            log.error("[WEBHOOK] Critical error resolving transaction from payload", e);
             return null;
         }
     }
