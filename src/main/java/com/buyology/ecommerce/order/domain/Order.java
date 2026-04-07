@@ -56,7 +56,7 @@ public class Order {
     // ── Delivery classification ───────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "delivery_method", nullable = false, length = 50)
+    @Column(name = "delivery_method", nullable = false, columnDefinition = "TEXT")
     private DeliveryMethod deliveryMethod;
 
     @Enumerated(EnumType.STRING)

@@ -6,12 +6,20 @@ import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface OrderRepository extends JpaRepository<Order, UUID> {
+
+    @Modifying
+    @Transactional
+    @Query(value = "ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_delivery_method_check", nativeQuery = true)
+    void dropDeliveryMethodCheckConstraint();
 
     Page<Order> findAllByUserId(UUID userId, Pageable pageable);
 
