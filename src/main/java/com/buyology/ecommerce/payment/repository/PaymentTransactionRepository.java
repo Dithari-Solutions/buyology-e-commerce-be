@@ -15,12 +15,15 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
 
     List<PaymentTransaction> findAllByAppOrderId(UUID appOrderId);
 
-    Optional<PaymentTransaction> findByProviderTransactionId(String providerTransactionId);
+    Optional<PaymentTransaction> findByMerchantOrderId(String merchantOrderId);
+
+    Optional<PaymentTransaction> findByPaymobOrderId(Long paymobOrderId);
+
+    Optional<PaymentTransaction> findByPaymobTransactionId(Long paymobTransactionId);
+
+    Optional<PaymentTransaction> findByIntentionId(String intentionId);
 
     List<PaymentTransaction> findAllByStatus(PaymentStatus status);
-
-    Optional<PaymentTransaction> findFirstByProviderOrderAndStatusIn(
-            PaymentProviderOrder providerOrder, List<PaymentStatus> statuses);
 
     Optional<PaymentTransaction> findFirstByCartIdAndStatusIn(
             UUID cartId, List<PaymentStatus> statuses);

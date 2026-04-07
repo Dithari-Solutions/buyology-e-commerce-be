@@ -384,11 +384,10 @@ public class CartService {
                     if (stale != null) {
                         log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
                                 stale.getId(), authCredentialId);
-                        List<CartItem> items = cartItemRepository.findByCartId(stale.getId());
-                        for (CartItem item : items) {
-                            specSelectionRepository.deleteByCartItemId(item.getId());
-                        }
+                        
+                        specSelectionRepository.deleteByCartId(stale.getId());
                         cartItemRepository.deleteByCartId(stale.getId());
+                        
                         stale.setStatus(Cart.CartStatus.ACTIVE);
                         stale.setTotalPrice(BigDecimal.ZERO);
                         stale.setCountryCode(null);
@@ -409,11 +408,10 @@ public class CartService {
                     if (stale != null) {
                         log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
                                 stale.getId(), authCredential.getId());
-                        List<CartItem> items = cartItemRepository.findByCartId(stale.getId());
-                        for (CartItem item : items) {
-                            specSelectionRepository.deleteByCartItemId(item.getId());
-                        }
+                        
+                        specSelectionRepository.deleteByCartId(stale.getId());
                         cartItemRepository.deleteByCartId(stale.getId());
+                        
                         stale.setStatus(Cart.CartStatus.ACTIVE);
                         stale.setTotalPrice(BigDecimal.ZERO);
                         stale.setCountryCode(null);

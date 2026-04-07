@@ -251,28 +251,20 @@ public class OrderService {
                         pushToCourier(order);
                     }
 
-                    // Clear the cart so the customer can start fresh
+                    // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
-                        cartRepo.findById(order.getCartId()).ifPresent(cart -> {
-                            List<CartItem> items = cartItemRepo.findByCartId(cart.getId());
-                            for (CartItem item : items) {
-                                cartItemSpecSelectionRepo.deleteByCartItemId(item.getId());
-                            }
-                            cartItemRepo.deleteByCartId(cart.getId());
-                            cart.setStatus(Cart.CartStatus.ABANDONED);
-                            cart.setTotalPrice(BigDecimal.ZERO);
-                            cartRepo.save(cart);
-                            log.info("[ORDER] Cart cleared after Path-1 payment: cartId={}", cart.getId());
-                        });
+                        clearCartItemsSafely(order.getCartId());
                     }
                 }
             });
         } else if (tx.getCartId() != null) {
-            // Path 2 — cart-first flow: create order from cart, mark PAID right away
+            // Path 2 — cart-first flow
             log.info("[ORDER] Cart-first flow: cartId={}", tx.getCartId());
             Cart cart = cartRepo.findById(tx.getCartId()).orElse(null);
-            if (cart == null) {
-                log.warn("[ORDER] Cart not found: cartId={}", tx.getCartId());
+            
+            // If already cleared, the cart items list will be empty
+            if (cart == null || cart.getStatus() == Cart.CartStatus.ABANDONED) {
+                log.info("[ORDER] Cart {} already processed or ABANDONED.", tx.getCartId());
                 return;
             }
 
@@ -365,14 +357,36 @@ public class OrderService {
             }
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
-            for (CartItem item : cartItems) {
-                cartItemSpecSelectionRepo.deleteByCartItemId(item.getId());
+            clearCartItemsSafely(cart.getId());
+        }
+    }
+
+    /**
+     * Safely clears cart items and their specs, then marks the cart as ABANDONED.
+     * Uses robust JPQL queries and check-then-delete to avoid StaleStateException.
+     */
+    private void clearCartItemsSafely(UUID cartId) {
+        cartRepo.findById(cartId).ifPresent(cart -> {
+            if (cart.getStatus() == Cart.CartStatus.ABANDONED) {
+                log.debug("[ORDER] Cart {} already abandoned. Skipping deletion.", cartId);
+                return;
             }
-            cartItemRepo.deleteByCartId(cart.getId());
+
+            log.info("[ORDER] Safely clearing cart items for cartId={}", cartId);
+            
+            // Delete specs first (child rows) using robust JPQL
+            cartItemSpecSelectionRepo.deleteByCartId(cartId);
+            
+            // Delete items using robust JPQL (bypasses entity lifecycle check)
+            cartItemRepo.deleteByCartId(cartId);
+            
+            // Update cart status and total
             cart.setStatus(Cart.CartStatus.ABANDONED);
             cart.setTotalPrice(BigDecimal.ZERO);
-            cartRepo.save(cart);
-        }
+            cartRepo.saveAndFlush(cart);
+            
+            log.info("[ORDER] Cart {} cleared successfully.", cartId);
+        });
     }
 
     private void pushToCourier(Order order) {

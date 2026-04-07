@@ -36,71 +36,74 @@ public class PaymobClient {
 
     /**
      * Result of a successful intention creation.
-     *
-     * @param intentionId  Paymob intention ID — store as the provider order reference
-     * @param clientSecret Single-use token passed to the frontend checkout UI
      */
-    public record IntentionResult(String intentionId, String clientSecret) {}
+    public record IntentionResult(String intentionId, String clientSecret, Long paymobOrderId) {}
 
     /**
-     * Create a payment intention — single API call that replaces the old 3-step flow.
+     * Create a payment intention — single API call for Paymob UAE Intention API.
      *
-     * @param secretKey      Paymob Secret Key (from dashboard Settings)
-     * @param baseUrl        Regional base URL, e.g. https://uae.paymob.com
-     * @param amountCents    Total amount in smallest currency unit (e.g. 10000 = 100.00 AED)
-     * @param currency       ISO 4217 code — "AED", "EGP", "SAR" …
-     * @param integrationId  Paymob integration ID for the chosen payment method
-     * @param specialReference  Your internal order/reference ID
+     * @param secretKey      Paymob Secret Key
+     * @param baseUrl        Regional base URL (e.g. https://uae.paymob.com)
+     * @param amountCents    Total amount in cents
+     * @param currency       ISO 4217 code (e.g. "AED")
+     * @param integrationId  Paymob integration ID
+     * @param merchantOrderId OUR internal transaction UUID (mapped to Paymob's merchant_order_id)
      * @param billingData    Customer billing details node
      * @param customer       Customer identity node
      * @param items          Line items array
      */
     public IntentionResult createIntention(String secretKey, String baseUrl,
                                            long amountCents, String currency,
-                                           int integrationId, String specialReference,
+                                           int integrationId, String merchantOrderId,
                                            ObjectNode billingData, ObjectNode customer,
                                            ArrayNode items, String notificationUrl,
                                            String redirectionUrl) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("amount", amountCents);
         body.put("currency", currency);
-        body.put("special_reference", specialReference);
-
+        
         ArrayNode paymentMethods = objectMapper.createArrayNode();
         paymentMethods.add(integrationId);
         body.set("payment_methods", paymentMethods);
 
-        body.set("items", items);
+        // Nested 'order' object is required for merchant_order_id to be returned in webhooks
+        ObjectNode orderNode = objectMapper.createObjectNode();
+        orderNode.put("amount", amountCents);
+        orderNode.put("currency", currency);
+        orderNode.put("merchant_order_id", merchantOrderId); 
+        orderNode.set("items", items);
+        if (notificationUrl != null && !notificationUrl.isBlank()) {
+            orderNode.put("notification_url", notificationUrl);
+        }
+        body.set("order", orderNode);
+
         body.set("billing_data", billingData);
         body.set("customer", customer);
 
-        if (notificationUrl != null && !notificationUrl.isBlank()) {
-            body.put("notification_url", notificationUrl);
-        }
+        // Extras for redirection
+        ObjectNode extras = objectMapper.createObjectNode();
         if (redirectionUrl != null && !redirectionUrl.isBlank()) {
-            body.put("redirection_url", redirectionUrl);
+            extras.put("redirection_url", redirectionUrl);
         }
+        body.set("extras", extras);
 
-        JsonNode response = post(baseUrl + "/v1/intention/", body, "Token " + secretKey);
+        log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", baseUrl + "/api/v2/intentions/", merchantOrderId);
+        JsonNode response = post(baseUrl + "/api/v2/intentions/", body, "Token " + secretKey);
         log.info("[PAYMOB] Intention response: {}", response.toString());
         
         String intentionId = response.get("id").asText();
-        String providerOrderId = intentionId;
-        
-        // Paymob UAE Intention API: the webhook obj.order.id matches response.order.id (numeric)
-        // We prioritize the numeric ID if available.
+        String clientSecret = response.get("client_secret").asText();
+        Long paymobOrderId = null;
+
         if (response.has("order") && !response.get("order").isNull()) {
-            JsonNode orderNode = response.get("order");
-            if (orderNode.isObject() && orderNode.has("id")) {
-                providerOrderId = orderNode.get("id").asText();
-                log.info("[PAYMOB] Extracted numeric order ID: {}", providerOrderId);
-            } else if (orderNode.isValueNode()) {
-                providerOrderId = orderNode.asText();
-                log.info("[PAYMOB] Extracted order ID from value node: {}", providerOrderId);
+            JsonNode respOrder = response.get("order");
+            if (respOrder.has("id")) {
+                paymobOrderId = respOrder.get("id").asLong();
+                log.info("[PAYMOB] Extracted numeric paymobOrderId: {}", paymobOrderId);
             }
         }
 
-        return new IntentionResult(providerOrderId, response.get("client_secret").asText());
+        return new IntentionResult(intentionId, clientSecret, paymobOrderId);
     }
 
     /**

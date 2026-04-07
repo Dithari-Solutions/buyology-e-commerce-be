@@ -18,9 +18,11 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "payment_transactions", indexes = {
-        @Index(name = "idx_payment_transactions_app_order", columnList = "app_order_id"),
+        @Index(name = "idx_payment_transactions_merchant_order", columnList = "merchant_order_id"),
         @Index(name = "idx_payment_transactions_status", columnList = "status"),
-        @Index(name = "idx_payment_transactions_provider_txn", columnList = "provider_transaction_id")
+        @Index(name = "idx_payment_transactions_paymob_order", columnList = "paymob_order_id"),
+        @Index(name = "idx_payment_transactions_paymob_txn", columnList = "paymob_transaction_id"),
+        @Index(name = "idx_payment_transactions_intention", columnList = "intention_id")
 })
 public class PaymentTransaction {
 
@@ -29,19 +31,33 @@ public class PaymentTransaction {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    // --- Identification IDs for Paymob UAE (Accept API) ---
+
+    // Internal UUID passed as merchant_order_id to Paymob (e.g. "3cd8e346-...")
+    @Column(name = "merchant_order_id", unique = true, length = 100)
+    private String merchantOrderId;
+
+    // Numeric Paymob Order ID (e.g. 13345827)
+    @Column(name = "paymob_order_id", unique = true)
+    private Long paymobOrderId;
+
+    // Numeric Paymob Transaction ID from webhook (e.g. 12345678)
+    @Column(name = "paymob_transaction_id", unique = true)
+    private Long paymobTransactionId;
+
+    // Paymob Intention ID (e.g. "pi_live_...")
+    @Column(name = "intention_id", unique = true, length = 100)
+    private String intentionId;
+
+    // --------------------------------------------------------
+
     // FK to orders service — stored as plain UUID (cross-service boundary).
-    // Null until the order is created (cart-first flow: payment initiates before order exists).
     @Column(name = "app_order_id")
     private UUID appOrderId;
 
     // Cart that this payment covers — used to create the order on payment success.
     @Column(name = "cart_id")
     private UUID cartId;
-
-    // Nullable: set once the Paymob order is created
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "provider_order_id")
-    private PaymentProviderOrder providerOrder;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "method_config_id", nullable = false)
@@ -51,7 +67,6 @@ public class PaymentTransaction {
     @Column(name = "method_type", nullable = false, length = 20)
     private PaymentMethodType methodType;
 
-    // Human display / accounting; use amountCents for all Paymob communication
     @Column(name = "amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
@@ -65,19 +80,15 @@ public class PaymentTransaction {
     @Column(name = "status", nullable = false, length = 30)
     private PaymentStatus status = PaymentStatus.PENDING;
 
-    // Set when Paymob webhook arrives; UNIQUE ensures no double-processing
-    @Column(name = "provider_transaction_id", unique = true, length = 100)
-    private String providerTransactionId;
-
     // Paymob payment key (~1 hour TTL); do not expose beyond initial redirect
     @Column(name = "payment_key_token", columnDefinition = "TEXT")
     private String paymentKeyToken;
 
-    // Tabby / Tamara redirect URL — stored for session-recovery without re-hitting Paymob
+    // Tabby / Tamara redirect URL
     @Column(name = "redirect_url", columnDefinition = "TEXT")
     private String redirectUrl;
 
-    // Customer snapshot at time of payment — immutable audit anchor
+    // Customer snapshot
     @Column(name = "customer_id")
     private UUID customerId;
 
@@ -112,6 +123,9 @@ public class PaymentTransaction {
         this.createdAt = now;
         this.updatedAt = now;
         if (this.status == null) this.status = PaymentStatus.PENDING;
+        if (this.merchantOrderId == null && this.id != null) {
+            this.merchantOrderId = this.id.toString();
+        }
     }
 
     @PreUpdate
@@ -119,17 +133,27 @@ public class PaymentTransaction {
         this.updatedAt = Instant.now();
     }
 
+    // Getters & Setters
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
+
+    public String getMerchantOrderId() { return merchantOrderId; }
+    public void setMerchantOrderId(String merchantOrderId) { this.merchantOrderId = merchantOrderId; }
+
+    public Long getPaymobOrderId() { return paymobOrderId; }
+    public void setPaymobOrderId(Long paymobOrderId) { this.paymobOrderId = paymobOrderId; }
+
+    public Long getPaymobTransactionId() { return paymobTransactionId; }
+    public void setPaymobTransactionId(Long paymobTransactionId) { this.paymobTransactionId = paymobTransactionId; }
+
+    public String getIntentionId() { return intentionId; }
+    public void setIntentionId(String intentionId) { this.intentionId = intentionId; }
 
     public UUID getAppOrderId() { return appOrderId; }
     public void setAppOrderId(UUID appOrderId) { this.appOrderId = appOrderId; }
 
     public UUID getCartId() { return cartId; }
     public void setCartId(UUID cartId) { this.cartId = cartId; }
-
-    public PaymentProviderOrder getProviderOrder() { return providerOrder; }
-    public void setProviderOrder(PaymentProviderOrder providerOrder) { this.providerOrder = providerOrder; }
 
     public PaymentMethodConfig getMethodConfig() { return methodConfig; }
     public void setMethodConfig(PaymentMethodConfig methodConfig) { this.methodConfig = methodConfig; }
@@ -148,9 +172,6 @@ public class PaymentTransaction {
 
     public PaymentStatus getStatus() { return status; }
     public void setStatus(PaymentStatus status) { this.status = status; }
-
-    public String getProviderTransactionId() { return providerTransactionId; }
-    public void setProviderTransactionId(String providerTransactionId) { this.providerTransactionId = providerTransactionId; }
 
     public String getPaymentKeyToken() { return paymentKeyToken; }
     public void setPaymentKeyToken(String paymentKeyToken) { this.paymentKeyToken = paymentKeyToken; }
@@ -180,8 +201,5 @@ public class PaymentTransaction {
     public void setMetadata(String metadata) { this.metadata = metadata; }
 
     public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
-
     public Instant getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

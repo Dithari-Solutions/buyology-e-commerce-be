@@ -19,9 +19,10 @@ public interface CartItemRepository extends JpaRepository<CartItem, UUID> {
 
     Optional<CartItem> findByCartIdAndProductIdAndVariantIdIsNull(UUID cartId, UUID productId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
-    void deleteByCartId(UUID cartId);
+    @Query("DELETE FROM CartItem ci WHERE ci.cart.id = :cartId")
+    void deleteByCartId(@Param("cartId") UUID cartId);
 
     @Query(value = """
             SELECT COUNT(*) > 0

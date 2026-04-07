@@ -16,7 +16,7 @@ public class TransactionResponse {
     private Long amountCents;
     private String currency;
     private PaymentStatus status;
-    private String providerTransactionId;
+    private String paymobTransactionId;
     private String failureReason;
     private String failureCode;
     private Instant createdAt;
@@ -43,8 +43,8 @@ public class TransactionResponse {
     public PaymentStatus getStatus() { return status; }
     public void setStatus(PaymentStatus status) { this.status = status; }
 
-    public String getProviderTransactionId() { return providerTransactionId; }
-    public void setProviderTransactionId(String providerTransactionId) { this.providerTransactionId = providerTransactionId; }
+    public String getPaymobTransactionId() { return paymobTransactionId; }
+    public void setPaymobTransactionId(String paymobTransactionId) { this.paymobTransactionId = paymobTransactionId; }
 
     public String getFailureReason() { return failureReason; }
     public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
