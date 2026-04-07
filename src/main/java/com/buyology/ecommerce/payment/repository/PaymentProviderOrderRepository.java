@@ -12,5 +12,7 @@ public interface PaymentProviderOrderRepository extends JpaRepository<PaymentPro
 
     Optional<PaymentProviderOrder> findByAppOrderId(UUID appOrderId);
 
+    Optional<PaymentProviderOrder> findByProviderOrderId(String providerOrderId);
+
     boolean existsByProviderOrderId(String providerOrderId);
 }

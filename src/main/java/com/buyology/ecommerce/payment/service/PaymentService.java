@@ -435,21 +435,25 @@ public class PaymentService {
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode payload) {
         try {
-            // Intention API: intention ID is at payload.intention.id or payload.obj.intention.id
-            JsonNode root = payload;
-            JsonNode data = root.has("obj") ? root.get("obj") : root;
+            // Intention API: intention ID is usually in obj.order.id or obj.intention.id
+            JsonNode data = payload.has("obj") ? payload.get("obj") : payload;
             
-            JsonNode intentionNode = data.get("intention");
-            if (intentionNode == null) return null;
-            String intentionId = intentionNode.get("id").asText();
+            String intentionId = null;
+            if (data.has("order") && data.get("order").has("id")) {
+                intentionId = data.get("order").get("id").asText();
+            } else if (data.has("intention") && data.get("intention").has("id")) {
+                intentionId = data.get("intention").get("id").asText();
+            }
 
-            return providerOrderRepo.findAll().stream()
-                    .filter(po -> po.getProviderOrderId().equals(intentionId))
-                    .findFirst()
+            if (intentionId == null) return null;
+
+            final String finalId = intentionId;
+            return providerOrderRepo.findByProviderOrderId(finalId)
                     .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
                             po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
                     .orElse(null);
         } catch (Exception e) {
+            log.error("[WEBHOOK] Error resolving transaction from payload", e);
             return null;
         }
     }
