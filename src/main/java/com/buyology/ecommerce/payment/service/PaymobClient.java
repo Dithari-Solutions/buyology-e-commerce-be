@@ -78,14 +78,22 @@ public class PaymobClient {
         }
 
         JsonNode response = post(baseUrl + "/v1/intention/", body, "Token " + secretKey);
+        log.info("[PAYMOB] Intention response: {}", response.toString());
         
         String intentionId = response.get("id").asText();
         String providerOrderId = intentionId;
         
         // Paymob UAE Intention API: the webhook obj.order.id matches response.order.id (numeric)
-        // rather than response.id (pi_...). We prioritize the numeric ID for better matching.
-        if (response.has("order") && response.get("order").has("id")) {
-            providerOrderId = response.get("order").get("id").asText();
+        // We prioritize the numeric ID if available.
+        if (response.has("order") && !response.get("order").isNull()) {
+            JsonNode orderNode = response.get("order");
+            if (orderNode.isObject() && orderNode.has("id")) {
+                providerOrderId = orderNode.get("id").asText();
+                log.info("[PAYMOB] Extracted numeric order ID: {}", providerOrderId);
+            } else if (orderNode.isValueNode()) {
+                providerOrderId = orderNode.asText();
+                log.info("[PAYMOB] Extracted order ID from value node: {}", providerOrderId);
+            }
         }
 
         return new IntentionResult(providerOrderId, response.get("client_secret").asText());

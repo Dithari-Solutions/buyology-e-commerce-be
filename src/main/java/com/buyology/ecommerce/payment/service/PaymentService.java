@@ -235,6 +235,7 @@ public class PaymentService {
 
     @Transactional
     public void handleWebhook(String rawPayload, String receivedHmac) {
+        log.info("[WEBHOOK] Raw payload: {}", rawPayload);
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider"));
 
