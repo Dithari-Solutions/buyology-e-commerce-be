@@ -435,23 +435,53 @@ public class PaymentService {
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode payload) {
         try {
-            // Intention API: intention ID is usually in obj.order.id or obj.intention.id
-            JsonNode data = payload.has("obj") ? payload.get("obj") : payload;
-            
+            // 1. Try root intention_id (Paymob Intention API v2 often puts it at root)
             String intentionId = null;
-            if (data.has("order") && data.get("order").has("id")) {
-                intentionId = data.get("order").get("id").asText();
-            } else if (data.has("intention") && data.get("intention").has("id")) {
-                intentionId = data.get("intention").get("id").asText();
+            if (payload.has("intention_id") && !payload.get("intention_id").isNull()) {
+                intentionId = payload.get("intention_id").asText();
+                log.info("[WEBHOOK] Found intentionId at root: {}", intentionId);
             }
 
-            if (intentionId == null) return null;
+            // 2. Try obj.order.id or obj.intention.id
+            JsonNode data = payload.has("obj") ? payload.get("obj") : payload;
+            if (intentionId == null) {
+                if (data.has("order") && data.get("order").has("id")) {
+                    intentionId = data.get("order").get("id").asText();
+                    log.info("[WEBHOOK] Found intentionId in obj.order.id: {}", intentionId);
+                } else if (data.has("intention") && data.get("intention").has("id")) {
+                    intentionId = data.get("intention").get("id").asText();
+                    log.info("[WEBHOOK] Found intentionId in obj.intention.id: {}", intentionId);
+                }
+            }
 
-            final String finalId = intentionId;
-            return providerOrderRepo.findByProviderOrderId(finalId)
-                    .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
-                            po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
-                    .orElse(null);
+            if (intentionId != null) {
+                final String finalId = intentionId;
+                PaymentTransaction tx = providerOrderRepo.findByProviderOrderId(finalId)
+                        .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
+                                po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
+                        .orElse(null);
+                if (tx != null) return tx;
+                log.warn("[WEBHOOK] intentionId {} found but no PENDING transaction matched", intentionId);
+            }
+
+            // 3. Last resort: special_reference (mapped to cartId or appOrderId)
+            // specialReference format: <uuid>-<short_id>
+            if (data.has("special_reference") && !data.get("special_reference").isNull()) {
+                String specRef = data.get("special_reference").asText();
+                log.info("[WEBHOOK] Attempting resolution via special_reference: {}", specRef);
+                try {
+                    String uuidPart = specRef.contains("-") ? specRef.substring(0, specRef.lastIndexOf("-")) : specRef;
+                    UUID refId = UUID.fromString(uuidPart);
+                    // Could be cartId or appOrderId
+                    return transactionRepo.findFirstByCartIdAndStatusIn(refId, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
+                            .or(() -> transactionRepo.findFirstByAppOrderIdAndStatusIn(refId, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
+                            .orElse(null);
+                } catch (Exception e) {
+                    log.warn("[WEBHOOK] Failed to parse UUID from special_reference: {}", specRef);
+                }
+            }
+
+            return null;
         } catch (Exception e) {
             log.error("[WEBHOOK] Error resolving transaction from payload", e);
             return null;

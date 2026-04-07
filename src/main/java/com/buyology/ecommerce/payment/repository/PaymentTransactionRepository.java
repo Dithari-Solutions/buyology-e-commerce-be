@@ -21,4 +21,10 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
 
     Optional<PaymentTransaction> findFirstByProviderOrderAndStatusIn(
             PaymentProviderOrder providerOrder, List<PaymentStatus> statuses);
+
+    Optional<PaymentTransaction> findFirstByCartIdAndStatusIn(
+            UUID cartId, List<PaymentStatus> statuses);
+
+    Optional<PaymentTransaction> findFirstByAppOrderIdAndStatusIn(
+            UUID appOrderId, List<PaymentStatus> statuses);
 }
