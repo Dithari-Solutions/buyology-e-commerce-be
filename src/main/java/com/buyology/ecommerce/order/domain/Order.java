@@ -56,11 +56,11 @@ public class Order {
     // ── Delivery classification ───────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "delivery_method", nullable = false, length = 20)
+    @Column(name = "delivery_method", nullable = false, length = 50)
     private DeliveryMethod deliveryMethod;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 30)
+    @Column(name = "status", nullable = false, length = 50)
     private OrderStatus status = OrderStatus.PENDING_PAYMENT;
 
     /** Estimated delivery time description (e.g. "30-45 mins", "Tomorrow by 6 PM"). */
