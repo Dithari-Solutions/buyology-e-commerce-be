@@ -7,6 +7,7 @@ import com.buyology.ecommerce.payment.enums.PaymentMethodType;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.repository.*;
+import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.service.UserProfileService;
@@ -43,6 +44,7 @@ public class PaymentService {
     private final UserProfileService userProfileService;
     private final UserAddressRepository addressRepo;
     private final ApplicationEventPublisher eventPublisher;
+    private final CurrencyExchangeService currencyExchangeService;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -55,7 +57,8 @@ public class PaymentService {
             ObjectMapper objectMapper,
             UserProfileService userProfileService,
             UserAddressRepository addressRepo,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            CurrencyExchangeService currencyExchangeService) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.providerOrderRepo = providerOrderRepo;
@@ -67,6 +70,7 @@ public class PaymentService {
         this.userProfileService = userProfileService;
         this.addressRepo = addressRepo;
         this.eventPublisher = eventPublisher;
+        this.currencyExchangeService = currencyExchangeService;
     }
 
     // =========================================================================
@@ -86,7 +90,12 @@ public class PaymentService {
                 .orElseThrow(() -> new IllegalStateException(
                         "No active config for method: " + req.getMethodType()));
 
-        long amountCents = req.getAmount()
+        // Paymob UAE Integration IDs usually ONLY support AED.
+        // We convert the amount to AED if the incoming currency is different.
+        String targetCurrency = "AED";
+        BigDecimal convertedAmount = currencyExchangeService.convert(req.getAmount(), req.getCurrency(), targetCurrency);
+
+        long amountCents = convertedAmount
                 .multiply(BigDecimal.valueOf(100))
                 .longValue();
 
@@ -126,7 +135,7 @@ public class PaymentService {
         // Single API call — replaces the old authenticate → createOrder → generatePaymentKey chain
         PaymobClient.IntentionResult intention = paymobClient.createIntention(
                 provider.getSecretKey(), provider.getBaseUrl(),
-                amountCents, req.getCurrency(),
+                amountCents, targetCurrency,
                 integrationId, specialReference,
                 billingData, customer, items,
                 provider.getNotificationUrl());
@@ -137,7 +146,7 @@ public class PaymentService {
         providerOrder.setProvider(provider);
         providerOrder.setProviderOrderId(intention.intentionId());
         providerOrder.setAmountCents(amountCents);
-        providerOrder.setCurrency(req.getCurrency());
+        providerOrder.setCurrency(targetCurrency);
         providerOrder = providerOrderRepo.save(providerOrder);
 
         // Build metadata JSON to store address/delivery details needed for order creation
@@ -151,9 +160,9 @@ public class PaymentService {
         tx.setProviderOrder(providerOrder);
         tx.setMethodConfig(config);
         tx.setMethodType(req.getMethodType());
-        tx.setAmount(req.getAmount());
+        tx.setAmount(convertedAmount);
         tx.setAmountCents(amountCents);
-        tx.setCurrency(req.getCurrency());
+        tx.setCurrency(targetCurrency);
         tx.setStatus(PaymentStatus.PENDING);
         tx.setPaymentKeyToken(intention.clientSecret());
         tx.setCustomerId(req.getCustomerId());
