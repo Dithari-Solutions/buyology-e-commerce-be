@@ -47,6 +47,8 @@ public class InitiatePaymentRequest {
     @NotNull
     private String billingName;
 
+    private String redirectionUrl;
+
     // Billing address — passed to Paymob but not stored in this service
     private String billingApartment;
     private String billingFloor;
@@ -92,6 +94,9 @@ public class InitiatePaymentRequest {
 
     public String getBillingName() { return billingName; }
     public void setBillingName(String billingName) { this.billingName = billingName; }
+
+    public String getRedirectionUrl() { return redirectionUrl; }
+    public void setRedirectionUrl(String redirectionUrl) { this.redirectionUrl = redirectionUrl; }
 
     public String getBillingApartment() { return billingApartment; }
     public void setBillingApartment(String billingApartment) { this.billingApartment = billingApartment; }

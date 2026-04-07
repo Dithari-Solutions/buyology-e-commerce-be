@@ -13,6 +13,7 @@ public class PaymobProperties {
     private String hmacSecret;
     private String baseUrl;
     private String notificationUrl;  // Paymob will POST transaction webhooks to this URL
+    private String redirectionUrl;   // Paymob will redirect the user browser to this URL
     private Card card = new Card();
     private Method tabby = new Method();
     private Method tamara = new Method();
@@ -52,6 +53,9 @@ public class PaymobProperties {
 
     public String getNotificationUrl() { return notificationUrl; }
     public void setNotificationUrl(String notificationUrl) { this.notificationUrl = notificationUrl; }
+
+    public String getRedirectionUrl() { return redirectionUrl; }
+    public void setRedirectionUrl(String redirectionUrl) { this.redirectionUrl = redirectionUrl; }
 
     public Card getCard() { return card; }
     public void setCard(Card card) { this.card = card; }

@@ -167,6 +167,16 @@
       "description": "Base URL for Paymob API calls. Set via PAYMOB_BASE_URL env var."
     },
     {
+      "name": "paymob.notification-url",
+      "type": "java.lang.String",
+      "description": "Paymob will POST transaction webhooks to this URL. Set via PAYMOB_NOTIFICATION_URL env var."
+    },
+    {
+      "name": "paymob.redirection-url",
+      "type": "java.lang.String",
+      "description": "Paymob will redirect the user browser to this URL after payment attempt. Set via PAYMOB_REDIRECTION_URL env var."
+    },
+    {
       "name": "paymob.card.integration-id",
       "type": "java.lang.String",
       "description": "Paymob integration ID for card payments. Set via PAYMOB_CARD_INTEGRATION_ID env var."

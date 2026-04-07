@@ -45,6 +45,7 @@ public class PaymentService {
     private final UserAddressRepository addressRepo;
     private final ApplicationEventPublisher eventPublisher;
     private final CurrencyExchangeService currencyExchangeService;
+    private final com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -58,7 +59,8 @@ public class PaymentService {
             UserProfileService userProfileService,
             UserAddressRepository addressRepo,
             ApplicationEventPublisher eventPublisher,
-            CurrencyExchangeService currencyExchangeService) {
+            CurrencyExchangeService currencyExchangeService,
+            com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.providerOrderRepo = providerOrderRepo;
@@ -71,6 +73,7 @@ public class PaymentService {
         this.addressRepo = addressRepo;
         this.eventPublisher = eventPublisher;
         this.currencyExchangeService = currencyExchangeService;
+        this.paymobProperties = paymobProperties;
     }
 
     // =========================================================================
@@ -133,12 +136,17 @@ public class PaymentService {
         String specialReference = referenceId + "-" + UUID.randomUUID().toString().substring(0, 8);
 
         // Single API call — replaces the old authenticate → createOrder → generatePaymentKey chain
+        String redirectionUrl = req.getRedirectionUrl() != null && !req.getRedirectionUrl().isBlank()
+                ? req.getRedirectionUrl()
+                : paymobProperties.getRedirectionUrl();
+
         PaymobClient.IntentionResult intention = paymobClient.createIntention(
                 provider.getSecretKey(), provider.getBaseUrl(),
                 amountCents, targetCurrency,
                 integrationId, specialReference,
                 billingData, customer, items,
-                provider.getNotificationUrl());
+                provider.getNotificationUrl(),
+                redirectionUrl);
 
         // Each intention creates a new provider order row (one per attempt)
         PaymentProviderOrder providerOrder = new PaymentProviderOrder();
@@ -191,32 +199,40 @@ public class PaymentService {
 
         boolean hmacValid = validateHmac(rawPayload, receivedHmac, provider.getHmacSecret());
 
-        JsonNode payload;
+        JsonNode root;
         try {
-            payload = objectMapper.readTree(rawPayload);
+            root = objectMapper.readTree(rawPayload);
         } catch (Exception e) {
+            log.error("[WEBHOOK] Failed to parse payload JSON", e);
             throw new RuntimeException("Invalid webhook payload JSON", e);
         }
 
-        String providerTxnId = extractProviderTxnId(payload);
+        // Paymob UAE wraps the transaction in "obj"
+        JsonNode dataNode = root.has("obj") ? root.get("obj") 
+                         : root.has("transaction") ? root.get("transaction") 
+                         : root;
+
+        String providerTxnId = extractProviderTxnId(root);
+        log.info("[WEBHOOK] Received notification. providerTxnId={}, hmacValid={}", providerTxnId, hmacValid);
 
         // Idempotency: if already processed successfully, return immediately
         if (providerTxnId != null &&
                 webhookEventRepo.findFirstByProviderTxnIdAndProcessedTrue(providerTxnId).isPresent()) {
+            log.info("[WEBHOOK] Transaction {} already processed. Skipping.", providerTxnId);
             return;
         }
 
-        // Look up the matching transaction (may be NULL if not found yet)
+        // Look up the matching transaction
         PaymentTransaction transaction = null;
         if (providerTxnId != null) {
             transaction = transactionRepo.findByProviderTransactionId(providerTxnId).orElse(null);
-            if (transaction == null) {
-                // Try matching by Paymob order + pending status
-                transaction = resolveTransactionFromPayload(payload);
-            }
+        }
+        
+        if (transaction == null) {
+            transaction = resolveTransactionFromPayload(root);
         }
 
-        // --- Store raw event before any processing ---
+        // --- Store raw event ---
         PaymentWebhookEvent event = new PaymentWebhookEvent();
         event.setProvider(provider);
         event.setTransaction(transaction);
@@ -227,38 +243,36 @@ public class PaymentService {
         event = webhookEventRepo.save(event);
 
         if (!hmacValid) {
-            log.warn("[HMAC] Signature validation failed — webhook rejected");
+            log.warn("[HMAC] Signature validation failed for txn {} — webhook rejected", providerTxnId);
             event.setError("HMAC validation failed");
             webhookEventRepo.save(event);
             return;
         }
 
-        // If no matching transaction: cannot process yet
         if (transaction == null) {
-            event.setError("No matching transaction found for provider_txn_id: " + providerTxnId);
+            log.warn("[WEBHOOK] Could not match notification to any local transaction. txnId={}", providerTxnId);
+            event.setError("No matching transaction found");
             webhookEventRepo.save(event);
             return;
         }
 
-        // If transaction is already in a terminal state: log and stop
-        PaymentStatus currentStatus = transaction.getStatus();
-        if (isTerminal(currentStatus)) {
+        if (isTerminal(transaction.getStatus())) {
+            log.info("[WEBHOOK] Transaction {} already in terminal state {}. Stopping.", providerTxnId, transaction.getStatus());
             event.setProcessed(true);
             event.setProcessedAt(Instant.now());
-            event.setError("Transaction already in terminal state: " + currentStatus);
             webhookEventRepo.save(event);
             return;
         }
 
-        // Process the webhook
+        // Process
         try {
-            applyWebhookToTransaction(transaction, payload, providerTxnId);
+            applyWebhookToTransaction(transaction, dataNode, providerTxnId);
             transactionRepo.save(transaction);
 
-            // Notify the order module: either transition an existing order to PAID,
-            // or create a new order from the cart (cart-first flow).
-            if (transaction.getStatus() == PaymentStatus.SUCCESS
-                    && (transaction.getAppOrderId() != null || transaction.getCartId() != null)) {
+            log.info("[WEBHOOK] Transaction {} updated to status {}.", providerTxnId, transaction.getStatus());
+
+            if (transaction.getStatus() == PaymentStatus.SUCCESS) {
+                log.info("[WEBHOOK] Payment successful. Publishing PaymentSucceededEvent for order/cart.");
                 eventPublisher.publishEvent(
                         new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
             }
@@ -267,6 +281,7 @@ public class PaymentService {
             event.setProcessedAt(Instant.now());
             event.setTransaction(transaction);
         } catch (Exception e) {
+            log.error("[WEBHOOK] Error processing transaction {}", providerTxnId, e);
             event.setError(e.getMessage());
         }
 
@@ -420,8 +435,11 @@ public class PaymentService {
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode payload) {
         try {
-            // Intention API: intention ID is at payload.intention.id (e.g. pi_live_...)
-            JsonNode intentionNode = payload.get("intention");
+            // Intention API: intention ID is at payload.intention.id or payload.obj.intention.id
+            JsonNode root = payload;
+            JsonNode data = root.has("obj") ? root.get("obj") : root;
+            
+            JsonNode intentionNode = data.get("intention");
             if (intentionNode == null) return null;
             String intentionId = intentionNode.get("id").asText();
 
@@ -436,21 +454,19 @@ public class PaymentService {
         }
     }
 
-    private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode payload, String providerTxnId) {
-        JsonNode obj = payload.has("transaction") ? payload.get("transaction") : payload;
-
+    private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode dataNode, String providerTxnId) {
         tx.setProviderTransactionId(providerTxnId);
         tx.setStatus(PaymentStatus.PROCESSING);
 
-        boolean success = obj.has("success") && obj.get("success").asBoolean();
-        boolean pending = obj.has("pending") && obj.get("pending").asBoolean();
+        boolean success = dataNode.has("success") && dataNode.get("success").asBoolean();
+        boolean pending = dataNode.has("pending") && dataNode.get("pending").asBoolean();
 
         if (success) {
             tx.setStatus(PaymentStatus.SUCCESS);
         } else if (!pending) {
             tx.setStatus(PaymentStatus.FAILED);
-            if (obj.has("data") && obj.get("data").has("message")) {
-                tx.setFailureReason(obj.get("data").get("message").asText());
+            if (dataNode.has("data") && dataNode.get("data").has("message")) {
+                tx.setFailureReason(dataNode.get("data").get("message").asText());
             }
         }
     }
