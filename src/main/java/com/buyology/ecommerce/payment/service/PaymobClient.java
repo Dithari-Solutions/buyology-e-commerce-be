@@ -87,8 +87,8 @@ public class PaymobClient {
         }
         body.set("extras", extras);
 
-        log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", baseUrl + "/api/v2/intentions", merchantOrderId);
-        JsonNode response = post(baseUrl + "/api/v2/intentions", body, "Token " + secretKey);
+        log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", baseUrl + "/api/acceptance/v2/intentions", merchantOrderId);
+        JsonNode response = post(baseUrl + "/api/acceptance/v2/intentions", body, "Token " + secretKey);
         log.info("[PAYMOB] Intention response: {}", response.toString());
         
         String intentionId = response.get("id").asText();
