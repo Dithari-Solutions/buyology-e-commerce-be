@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -140,6 +141,12 @@ public class PaymentService {
                 ? req.getRedirectionUrl()
                 : paymobProperties.getRedirectionUrl();
 
+        // 1. Create and commit the pending transaction state FIRST
+        // This ensures the record exists in the DB before the Paymob API is called,
+        // so if the webhook arrives instantly, it can be matched.
+        PaymentTransaction tx = savePendingTransaction(req, provider, config, convertedAmount, amountCents, targetCurrency);
+
+        // 2. Call Paymob API
         PaymobClient.IntentionResult intention = paymobClient.createIntention(
                 provider.getSecretKey(), provider.getBaseUrl(),
                 amountCents, targetCurrency,
@@ -148,41 +155,72 @@ public class PaymentService {
                 provider.getNotificationUrl(),
                 redirectionUrl);
 
-        // Each intention creates a new provider order row (one per attempt)
+        log.info("[PAYMENT] Created Paymob Intention: id={}, clientSecret={}", intention.intentionId(), intention.clientSecret());
+
+        // 3. Update the transaction with the provider IDs in a second transaction
+        return finalizeTransactionWithProvider(tx.getId(), intention);
+    }
+
+    /**
+     * Creates a pending transaction record and commits it immediately.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentTransaction savePendingTransaction(InitiatePaymentRequest req, 
+                                                     PaymentProvider provider, 
+                                                     PaymentMethodConfig config,
+                                                     BigDecimal amount,
+                                                     long amountCents,
+                                                     String currency) {
+        // Create an initial provider order record without the providerOrderId (will be updated later)
         PaymentProviderOrder providerOrder = new PaymentProviderOrder();
         providerOrder.setAppOrderId(req.getAppOrderId());
         providerOrder.setProvider(provider);
-        providerOrder.setProviderOrderId(intention.intentionId());
         providerOrder.setAmountCents(amountCents);
-        providerOrder.setCurrency(targetCurrency);
+        providerOrder.setCurrency(currency);
         providerOrder = providerOrderRepo.save(providerOrder);
 
-        // Build metadata JSON to store address/delivery details needed for order creation
-        String metadata = buildOrderMetadata(req);
-
-        // Persist the transaction in PENDING state
-        // paymentKeyToken is repurposed to store the clientSecret
         PaymentTransaction tx = new PaymentTransaction();
         tx.setAppOrderId(req.getAppOrderId());
         tx.setCartId(req.getCartId());
         tx.setProviderOrder(providerOrder);
         tx.setMethodConfig(config);
         tx.setMethodType(req.getMethodType());
-        tx.setAmount(convertedAmount);
+        tx.setAmount(amount);
         tx.setAmountCents(amountCents);
-        tx.setCurrency(targetCurrency);
+        tx.setCurrency(currency);
         tx.setStatus(PaymentStatus.PENDING);
-        tx.setPaymentKeyToken(intention.clientSecret());
         tx.setCustomerId(req.getCustomerId());
         tx.setCustomerEmail(req.getCustomerEmail());
         tx.setCustomerPhone(req.getCustomerPhone());
         tx.setBillingName(req.getBillingName());
-        tx.setMetadata(metadata);
+        tx.setMetadata(buildOrderMetadata(req));
+        
         tx = transactionRepo.save(tx);
+        log.info("[PAYMENT] Committed PENDING transaction state: id={}, cartId={}", tx.getId(), tx.getCartId());
+        return tx;
+    }
 
-        // Unified Checkout URL — works for card, Tabby, and Tamara
-        String checkoutUrl = provider.getBaseUrl()
-                + "/unifiedcheckout/?publicKey=" + provider.getPublicKey()
+    /**
+     * Updates the transaction with Paymob intention IDs and commits.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentInitiatedResponse finalizeTransactionWithProvider(UUID transactionId, 
+                                                                   PaymobClient.IntentionResult intention) {
+        PaymentTransaction tx = transactionRepo.findById(transactionId)
+                .orElseThrow(() -> new NoSuchElementException("Transaction not found during finalization: " + transactionId));
+        
+        PaymentProviderOrder po = tx.getProviderOrder();
+        po.setProviderOrderId(intention.intentionId());
+        providerOrderRepo.save(po);
+
+        tx.setPaymentKeyToken(intention.clientSecret());
+        transactionRepo.save(tx);
+
+        log.info("[PAYMENT] Finalized transaction with provider IDs: id={}, providerOrderId={}", 
+                 tx.getId(), intention.intentionId());
+
+        String checkoutUrl = po.getProvider().getBaseUrl()
+                + "/unifiedcheckout/?publicKey=" + po.getProvider().getPublicKey()
                 + "&clientSecret=" + intention.clientSecret();
 
         return buildInitiatedResponse(tx, intention.clientSecret(), checkoutUrl);
@@ -229,7 +267,13 @@ public class PaymentService {
         }
         
         if (transaction == null) {
+            log.info("[WEBHOOK] Could not match via providerTxnId {}, attempting to resolve from payload...", providerTxnId);
             transaction = resolveTransactionFromPayload(root);
+        }
+
+        if (transaction != null) {
+            log.info("[WEBHOOK] Matched notification to PaymentTransaction: id={}, appOrderId={}", 
+                     transaction.getId(), transaction.getAppOrderId());
         }
 
         // --- Store raw event ---
@@ -456,11 +500,18 @@ public class PaymentService {
 
             if (intentionId != null) {
                 final String finalId = intentionId;
+                log.info("[WEBHOOK] Searching for PaymentProviderOrder with providerOrderId: {}", finalId);
                 PaymentTransaction tx = providerOrderRepo.findByProviderOrderId(finalId)
-                        .flatMap(po -> transactionRepo.findFirstByProviderOrderAndStatusIn(
-                                po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
+                        .flatMap(po -> {
+                            log.info("[WEBHOOK] Found PaymentProviderOrder: id={}, providerOrderId={}", po.getId(), po.getProviderOrderId());
+                            return transactionRepo.findFirstByProviderOrderAndStatusIn(
+                                po, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING));
+                        })
                         .orElse(null);
-                if (tx != null) return tx;
+                if (tx != null) {
+                    log.info("[WEBHOOK] Matched via intentionId {} to transaction: id={}", intentionId, tx.getId());
+                    return tx;
+                }
                 log.warn("[WEBHOOK] intentionId {} found but no PENDING transaction matched", intentionId);
             }
 
@@ -473,9 +524,13 @@ public class PaymentService {
                     String uuidPart = specRef.contains("-") ? specRef.substring(0, specRef.lastIndexOf("-")) : specRef;
                     UUID refId = UUID.fromString(uuidPart);
                     // Could be cartId or appOrderId
-                    return transactionRepo.findFirstByCartIdAndStatusIn(refId, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
+                    PaymentTransaction tx = transactionRepo.findFirstByCartIdAndStatusIn(refId, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
                             .or(() -> transactionRepo.findFirstByAppOrderIdAndStatusIn(refId, List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)))
                             .orElse(null);
+                    if (tx != null) {
+                        log.info("[WEBHOOK] Matched via special_reference {} to transaction: id={}", specRef, tx.getId());
+                        return tx;
+                    }
                 } catch (Exception e) {
                     log.warn("[WEBHOOK] Failed to parse UUID from special_reference: {}", specRef);
                 }
