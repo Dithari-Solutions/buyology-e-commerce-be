@@ -374,12 +374,12 @@ public class CartService {
     // ─── Private helpers ──────────────────────────────────────────────────────
 
     private Cart findOrCreateActiveCart(UUID authCredentialId) {
-        return cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
+        return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
                 .orElseGet(() -> {
                     // If a stale CHECKED_OUT cart exists, clear and reuse it rather than
                     // risking a unique-constraint violation by inserting a second cart row.
                     Cart stale = cartRepository
-                            .findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.CHECKED_OUT)
+                            .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT)
                             .orElse(null);
                     if (stale != null) {
                         log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
@@ -401,10 +401,10 @@ public class CartService {
     }
 
     private Cart findOrCreateActiveCart(AuthCredentials authCredential) {
-        return cartRepository.findByAuthCredentialIdAndStatus(authCredential.getId(), Cart.CartStatus.ACTIVE)
+        return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.ACTIVE)
                 .orElseGet(() -> {
                     Cart stale = cartRepository
-                            .findByAuthCredentialIdAndStatus(authCredential.getId(), Cart.CartStatus.CHECKED_OUT)
+                            .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.CHECKED_OUT)
                             .orElse(null);
                     if (stale != null) {
                         log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
