@@ -288,11 +288,7 @@ public class OrderService {
                     if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
                     if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
                     if (meta.has("deliveryMethod")) {
-                        try {
-                            metaDeliveryMethod = DeliveryMethod.valueOf(meta.get("deliveryMethod").asText());
-                        } catch (IllegalArgumentException ignored) {
-                            log.warn("[ORDER] Unknown deliveryMethod in metadata: {}", meta.get("deliveryMethod").asText());
-                        }
+                        metaDeliveryMethod = DeliveryMethod.fromValue(meta.get("deliveryMethod").asText());
                     }
                 } else {
                     log.warn("[ORDER] Transaction metadata is null: txId={}", tx.getId());

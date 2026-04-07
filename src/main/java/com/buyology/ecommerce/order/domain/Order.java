@@ -55,7 +55,7 @@ public class Order {
 
     // ── Delivery classification ───────────────────────────────────────────────
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = com.buyology.ecommerce.order.domain.converter.DeliveryMethodConverter.class)
     @Column(name = "delivery_method", nullable = false, length = 50)
     private DeliveryMethod deliveryMethod;
 

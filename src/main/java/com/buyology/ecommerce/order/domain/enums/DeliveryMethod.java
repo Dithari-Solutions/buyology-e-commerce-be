@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.order.domain.enums;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+
 /**
  * Determines the delivery flow and which actors can update the order.
  *
@@ -11,5 +13,27 @@ package com.buyology.ecommerce.order.domain.enums;
 public enum DeliveryMethod {
     EXPRESS,
     REGULAR,
-    INTERNATIONAL
+    INTERNATIONAL;
+
+    @JsonCreator
+    public static DeliveryMethod fromValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase();
+        
+        // Handle legacy names
+        if ("EXPRESS_DELIVERY".equals(normalized)) {
+            return EXPRESS;
+        }
+        if ("REGULAR_ORDER".equals(normalized)) {
+            return REGULAR;
+        }
+        
+        try {
+            return DeliveryMethod.valueOf(normalized);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
 }
