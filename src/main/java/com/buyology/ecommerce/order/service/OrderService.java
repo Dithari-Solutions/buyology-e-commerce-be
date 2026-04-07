@@ -245,6 +245,21 @@ public class OrderService {
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
+
+                    // Clear the cart so the customer can start fresh
+                    if (order.getCartId() != null) {
+                        cartRepo.findById(order.getCartId()).ifPresent(cart -> {
+                            List<CartItem> items = cartItemRepo.findByCartId(cart.getId());
+                            for (CartItem item : items) {
+                                cartItemSpecSelectionRepo.deleteByCartItemId(item.getId());
+                            }
+                            cartItemRepo.deleteByCartId(cart.getId());
+                            cart.setStatus(Cart.CartStatus.ABANDONED);
+                            cart.setTotalPrice(BigDecimal.ZERO);
+                            cartRepo.save(cart);
+                            log.info("[ORDER] Cart cleared after Path-1 payment: cartId={}", cart.getId());
+                        });
+                    }
                 }
             });
         } else if (tx.getCartId() != null) {

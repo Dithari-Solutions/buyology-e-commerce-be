@@ -323,7 +323,10 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<Void>> clearCart(UUID authCredentialId) {
-        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        // Accept both ACTIVE and CHECKED_OUT carts so this endpoint works after checkout
+        Cart cart = cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
+                .or(() -> cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.CHECKED_OUT))
+                .orElse(null);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -373,6 +376,25 @@ public class CartService {
     private Cart findOrCreateActiveCart(UUID authCredentialId) {
         return cartRepository.findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.ACTIVE)
                 .orElseGet(() -> {
+                    // If a stale CHECKED_OUT cart exists, clear and reuse it rather than
+                    // risking a unique-constraint violation by inserting a second cart row.
+                    Cart stale = cartRepository
+                            .findByAuthCredentialIdAndStatus(authCredentialId, Cart.CartStatus.CHECKED_OUT)
+                            .orElse(null);
+                    if (stale != null) {
+                        log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
+                                stale.getId(), authCredentialId);
+                        List<CartItem> items = cartItemRepository.findByCartId(stale.getId());
+                        for (CartItem item : items) {
+                            specSelectionRepository.deleteByCartItemId(item.getId());
+                        }
+                        cartItemRepository.deleteByCartId(stale.getId());
+                        stale.setStatus(Cart.CartStatus.ACTIVE);
+                        stale.setTotalPrice(BigDecimal.ZERO);
+                        stale.setCountryCode(null);
+                        stale.setCurrency(null);
+                        return cartRepository.save(stale);
+                    }
                     AuthCredentials cred = authCredentialRepository.findById(authCredentialId).orElseThrow();
                     return cartRepository.save(new Cart(cred));
                 });
@@ -380,7 +402,26 @@ public class CartService {
 
     private Cart findOrCreateActiveCart(AuthCredentials authCredential) {
         return cartRepository.findByAuthCredentialIdAndStatus(authCredential.getId(), Cart.CartStatus.ACTIVE)
-                .orElseGet(() -> cartRepository.save(new Cart(authCredential)));
+                .orElseGet(() -> {
+                    Cart stale = cartRepository
+                            .findByAuthCredentialIdAndStatus(authCredential.getId(), Cart.CartStatus.CHECKED_OUT)
+                            .orElse(null);
+                    if (stale != null) {
+                        log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
+                                stale.getId(), authCredential.getId());
+                        List<CartItem> items = cartItemRepository.findByCartId(stale.getId());
+                        for (CartItem item : items) {
+                            specSelectionRepository.deleteByCartItemId(item.getId());
+                        }
+                        cartItemRepository.deleteByCartId(stale.getId());
+                        stale.setStatus(Cart.CartStatus.ACTIVE);
+                        stale.setTotalPrice(BigDecimal.ZERO);
+                        stale.setCountryCode(null);
+                        stale.setCurrency(null);
+                        return cartRepository.save(stale);
+                    }
+                    return cartRepository.save(new Cart(authCredential));
+                });
     }
 
     private void recalculateCartTotal(Cart cart) {
