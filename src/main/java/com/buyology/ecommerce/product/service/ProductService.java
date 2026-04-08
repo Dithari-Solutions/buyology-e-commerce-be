@@ -52,6 +52,7 @@ import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -78,8 +79,6 @@ import java.util.UUID;
 @Service
 public class ProductService {
 
-    private static final String PRODUCT_UPLOAD_PATH = "/opt/uploads/product";
-
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
@@ -101,6 +100,7 @@ public class ProductService {
     private final CountryRepository countryRepository;
     private final CurrencyExchangeService currencyExchangeService;
     private final StoreLocationRepository storeLocationRepository;
+    private final ContaboObjectService contaboObjectService;
 
     public ProductService(
             ProductRepository productRepository,
@@ -123,7 +123,8 @@ public class ProductService {
             StoreProductRepository storeProductRepository,
             CountryRepository countryRepository,
             CurrencyExchangeService currencyExchangeService,
-            StoreLocationRepository storeLocationRepository) {
+            StoreLocationRepository storeLocationRepository,
+            ContaboObjectService contaboObjectService) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
@@ -145,6 +146,7 @@ public class ProductService {
         this.countryRepository = countryRepository;
         this.currencyExchangeService = currencyExchangeService;
         this.storeLocationRepository = storeLocationRepository;
+        this.contaboObjectService = contaboObjectService;
     }
 
     /**
@@ -340,17 +342,8 @@ public class ProductService {
         // 6. Product
         productRepository.delete(product);
 
-        // 7. Remove media files from disk
-        try {
-            Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, productId.toString());
-            if (Files.exists(productDir)) {
-                Files.walk(productDir)
-                        .sorted(java.util.Comparator.reverseOrder())
-                        .forEach(p -> {
-                            try { Files.delete(p); } catch (IOException ignored) {}
-                        });
-            }
-        } catch (IOException ignored) {}
+        // 7. Remove media files from Contabo S3
+        contaboObjectService.deleteFolder("products/" + productId);
     }
 
     public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdAdmin(UUID id, String lang) {
@@ -762,9 +755,6 @@ public class ProductService {
                 new ProductSpecGroupTranslation(colorGroup, "AR", "اللون")
         ));
 
-        Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, product.getId().toString());
-        ensureDirectory(productDir);
-
         List<ProductResponse.ColorOptionDto> colorDtos = new ArrayList<>();
 
         for (CreateColorRequest colorReq : colorRequests) {
@@ -802,7 +792,7 @@ public class ProductService {
                     claimedMediaIndices.add(fileIndex);
 
                     MultipartFile file = mediaFiles.get(fileIndex);
-                    String url = saveFile(productDir, file, "color_" + colorOption.getId() + "_" + i);
+                    String url = uploadToContabo(product.getId(), file, "color_" + colorOption.getId() + "_" + i);
                     boolean isPrimary = (i == 0);
                     ProductMedia media = mediaRepository.save(new ProductMedia(
                             product, colorOption, resolveMediaType(file.getContentType()), url, null, isPrimary, i));
@@ -829,9 +819,6 @@ public class ProductService {
             return List.of();
         }
 
-        Path productDir = Paths.get(PRODUCT_UPLOAD_PATH, product.getId().toString());
-        ensureDirectory(productDir);
-
         List<ProductMedia> mediaEntities = new ArrayList<>();
         int orderIndex = 0;
         for (int i = 0; i < mediaFiles.size(); i++) {
@@ -839,7 +826,7 @@ public class ProductService {
                 continue; // skip files already owned by a color
             }
             MultipartFile file = mediaFiles.get(i);
-            String url = saveFile(productDir, file, "product_" + orderIndex);
+            String url = uploadToContabo(product.getId(), file, "product_" + orderIndex);
             boolean isPrimary = (orderIndex == 0);
             mediaEntities.add(new ProductMedia(product, resolveMediaType(file.getContentType()), url, null, isPrimary, orderIndex));
             orderIndex++;
@@ -921,27 +908,15 @@ public class ProductService {
         return sku;
     }
 
-    private String saveFile(Path dir, MultipartFile file, String baseName) {
+    private String uploadToContabo(UUID productId, MultipartFile file, String baseName) {
         String originalFilename = file.getOriginalFilename();
         String extension = "";
         if (originalFilename != null && originalFilename.contains(".")) {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
         String fileName = baseName + extension;
-        try {
-            Files.write(dir.resolve(fileName), file.getBytes());
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to save media file: " + originalFilename, e);
-        }
-        return "/product/" + dir.getFileName() + "/" + fileName;
-    }
-
-    private void ensureDirectory(Path dir) {
-        try {
-            Files.createDirectories(dir);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create product media directory", e);
-        }
+        String key = "products/" + productId + "/" + fileName;
+        return contaboObjectService.uploadFile(key, file);
     }
 
     private ProductMedia.MediaType resolveMediaType(String contentType) {
