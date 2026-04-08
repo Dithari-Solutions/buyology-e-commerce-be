@@ -131,6 +131,8 @@ public class CourierServiceClient {
      * {@code order.delivery.requested}.
      */
     public void pushOrder(CourierOrderRequest req) {
+        log.info("[COURIER-CLIENT] pushOrder start — orderId={} storeId={} deliveryLat={} deliveryLng={}",
+                req.getOrderId(), req.getStoreId(), req.getDeliveryLatitude(), req.getDeliveryLongitude());
         try {
             // Look up the store's primary location for pickup coordinates
             com.buyology.ecommerce.store.domain.StoreLocation pickup = null;
@@ -140,6 +142,14 @@ public class CourierServiceClient {
                         .orElseGet(() -> storeLocationRepository
                                 .findAllByStoreIdAndIsActive(req.getStoreId(), true)
                                 .stream().findFirst().orElse(null));
+                log.info("[COURIER-CLIENT] store location lookup — storeId={} found={}",
+                        req.getStoreId(), pickup != null);
+                if (pickup != null) {
+                    log.info("[COURIER-CLIENT] pickup location — address='{}' city='{}' lat={} lng={}",
+                            pickup.getAddress(), pickup.getCity(), pickup.getLatitude(), pickup.getLongitude());
+                }
+            } else {
+                log.warn("[COURIER-CLIENT] storeId is null — pickup lat/lng will be null");
             }
 
             String pickupAddress = pickup != null
@@ -148,12 +158,31 @@ public class CourierServiceClient {
             java.math.BigDecimal pickupLat = pickup != null ? java.math.BigDecimal.valueOf(pickup.getLatitude()) : null;
             java.math.BigDecimal pickupLng = pickup != null ? java.math.BigDecimal.valueOf(pickup.getLongitude()) : null;
 
+            java.math.BigDecimal dropoffLat = req.getDeliveryLatitude() != null
+                    ? java.math.BigDecimal.valueOf(req.getDeliveryLatitude()) : null;
+            java.math.BigDecimal dropoffLng = req.getDeliveryLongitude() != null
+                    ? java.math.BigDecimal.valueOf(req.getDeliveryLongitude()) : null;
+
             String dropoffAddress = String.join(", ",
                     req.getAddressLine1() != null ? req.getAddressLine1() : "",
                     req.getAddressLine2() != null ? req.getAddressLine2() : "",
                     req.getCity() != null ? req.getCity() : "",
                     req.getCountry() != null ? req.getCountry() : "")
                     .replaceAll(", ,", ",").replaceAll("^, |, $", "");
+
+            log.info("[COURIER-CLIENT] event fields — pickupLat={} pickupLng={} dropoffLat={} dropoffLng={} shippingFee={}",
+                    pickupLat, pickupLng, dropoffLat, dropoffLng, req.getShippingFee());
+
+            if (pickupLat == null || pickupLng == null) {
+                log.error("[COURIER-CLIENT] ABORT — pickupLat or pickupLng is null for orderId={}. storeId={} pickup={}",
+                        req.getOrderId(), req.getStoreId(), pickup);
+                return;
+            }
+            if (dropoffLat == null || dropoffLng == null) {
+                log.error("[COURIER-CLIENT] ABORT — dropoffLat or dropoffLng is null for orderId={}. address lat/lng not set on UserAddress.",
+                        req.getOrderId());
+                return;
+            }
 
             DeliveryOrderEvent event = new DeliveryOrderEvent(
                     req.getOrderId(),
@@ -164,8 +193,8 @@ public class CourierServiceClient {
                     pickupLat,
                     pickupLng,
                     dropoffAddress,
-                    req.getDeliveryLatitude() != null ? java.math.BigDecimal.valueOf(req.getDeliveryLatitude()) : null,
-                    req.getDeliveryLongitude() != null ? java.math.BigDecimal.valueOf(req.getDeliveryLongitude()) : null,
+                    dropoffLat,
+                    dropoffLng,
                     "SMALL",
                     null,
                     req.getShippingFee(),
@@ -173,15 +202,20 @@ public class CourierServiceClient {
                     java.time.Instant.now()
             );
 
+            log.info("[COURIER-CLIENT] publishing event to exchange={} routingKey={} — {}",
+                    DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE,
+                    DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY,
+                    event);
+
             rabbitTemplate.convertAndSend(
                     DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE,
                     DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY,
                     event
             );
-            log.info("[COURIER-CLIENT] published order {} to courier exchange", req.getOrderId());
+            log.info("[COURIER-CLIENT] successfully published order {} to courier exchange", req.getOrderId());
         } catch (Exception e) {
             log.error("[COURIER-CLIENT] failed to publish order {} to courier exchange: {}",
-                    req.getOrderId(), e.getMessage());
+                    req.getOrderId(), e.getMessage(), e);
         }
     }
 
