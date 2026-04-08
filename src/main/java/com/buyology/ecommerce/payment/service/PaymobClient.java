@@ -88,7 +88,7 @@ public class PaymobClient {
         }
         body.set("extras", extras);
 
-        String url = baseUrl + "/api/v1/intention/";
+        String url = baseUrl + "/v1/intention/";
         log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", url, merchantOrderId);
         JsonNode response = post(url, body, "Token " + secretKey);
         log.info("[PAYMOB] Intention response: {}", response.toString());
