@@ -97,11 +97,15 @@ public class PaymobClient {
         String clientSecret = response.get("client_secret").asText();
         Long paymobOrderId = null;
 
-        if (response.has("order") && !response.get("order").isNull()) {
+        // Paymob Intention API returns the order ID as "intention_order_id" at the root level
+        if (response.has("intention_order_id") && !response.get("intention_order_id").isNull()) {
+            paymobOrderId = response.get("intention_order_id").asLong();
+            log.info("[PAYMOB] Extracted numeric paymobOrderId: {}", paymobOrderId);
+        } else if (response.has("order") && !response.get("order").isNull()) {
             JsonNode respOrder = response.get("order");
             if (respOrder.has("id")) {
                 paymobOrderId = respOrder.get("id").asLong();
-                log.info("[PAYMOB] Extracted numeric paymobOrderId: {}", paymobOrderId);
+                log.info("[PAYMOB] Extracted numeric paymobOrderId from order.id: {}", paymobOrderId);
             }
         }
 
