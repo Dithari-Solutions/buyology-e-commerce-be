@@ -147,6 +147,11 @@ jobs:
               -e "RABBITMQ_USERNAME=$RABBITMQ_USERNAME" \
               -e "RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
               -e "RABBITMQ_VHOST=/" \
+              -e "SPRING_RABBITMQ_HOST=buyology-rabbitmq" \
+              -e "SPRING_RABBITMQ_PORT=5672" \
+              -e "SPRING_RABBITMQ_USERNAME=$RABBITMQ_USERNAME" \
+              -e "SPRING_RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
+              -e "SPRING_RABBITMQ_VIRTUAL_HOST=/" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
 
             # Connect to courier's network so buyology-rabbitmq hostname resolves
