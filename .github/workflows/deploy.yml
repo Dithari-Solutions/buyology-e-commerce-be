@@ -102,7 +102,6 @@ jobs:
               -p 8080:8080 \
               --restart always \
               --network ecommerce-network \
-              --network buyology-e-commerce-courier-be_default \
               --dns 8.8.8.8 \
               --dns 1.1.1.1 \
               -e SPRING_PROFILES_ACTIVE=prod \
@@ -149,3 +148,6 @@ jobs:
               -e "RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
               -e "RABBITMQ_VHOST=/" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
+
+            # Connect to courier's network so buyology-rabbitmq hostname resolves
+            docker network connect buyology-e-commerce-courier-be_default ecommerce-app
