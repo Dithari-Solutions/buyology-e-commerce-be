@@ -61,16 +61,17 @@ public class PaymobClient {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("amount", amountCents);
         body.put("currency", currency);
+        body.put("merchant_order_id", merchantOrderId); // Root level for Intention API
         
         ArrayNode paymentMethods = objectMapper.createArrayNode();
         paymentMethods.add(integrationId);
         body.set("payment_methods", paymentMethods);
 
-        // Nested 'order' object is required for merchant_order_id to be returned in webhooks
+        // Intention API (v2) also supports an optional 'order' object for grouping items/billing
         ObjectNode orderNode = objectMapper.createObjectNode();
         orderNode.put("amount", amountCents);
         orderNode.put("currency", currency);
-        orderNode.put("merchant_order_id", merchantOrderId); 
+        orderNode.put("merchant_order_id", merchantOrderId); // Double-verify at order level
         orderNode.set("items", items);
         if (notificationUrl != null && !notificationUrl.isBlank()) {
             orderNode.put("notification_url", notificationUrl);
@@ -87,8 +88,9 @@ public class PaymobClient {
         }
         body.set("extras", extras);
 
-        log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", baseUrl + "/v2/intentions/", merchantOrderId);
-        JsonNode response = post(baseUrl + "/v2/intentions/", body, "Token " + secretKey);
+        String url = baseUrl + "/api/v1/intention/";
+        log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", url, merchantOrderId);
+        JsonNode response = post(url, body, "Token " + secretKey);
         log.info("[PAYMOB] Intention response: {}", response.toString());
         
         String intentionId = response.get("id").asText();
