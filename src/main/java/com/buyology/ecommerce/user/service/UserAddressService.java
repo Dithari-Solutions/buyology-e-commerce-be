@@ -106,10 +106,11 @@ public class UserAddressService {
         address.setState(req.getState());
         address.setCountry(req.getCountry());
         address.setPostalCode(req.getPostalCode());
-        // geocoding will be set once custom map service is integrated
+        // Use coordinates from the frontend map picker if provided;
+        // full geocoding (formatted address, verification) will be added when the map service is integrated.
+        address.setLatitude(req.getLatitude());
+        address.setLongitude(req.getLongitude());
         address.setFormattedAddress(null);
-        address.setLatitude(null);
-        address.setLongitude(null);
         address.setAddressVerified(false);
         address.setDefault(req.isDefault());
 

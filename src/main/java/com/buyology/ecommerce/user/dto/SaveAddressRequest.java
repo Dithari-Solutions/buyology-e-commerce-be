@@ -48,6 +48,11 @@ public class SaveAddressRequest {
 
     private boolean isDefault = false;
 
+    // Optional — supplied by the frontend map picker when the user pins their location.
+    // Stored as-is; no server-side geocoding required.
+    private Double latitude;
+    private Double longitude;
+
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
 
@@ -80,4 +85,10 @@ public class SaveAddressRequest {
 
     public boolean isDefault() { return isDefault; }
     public void setDefault(boolean aDefault) { isDefault = aDefault; }
+
+    public Double getLatitude() { return latitude; }
+    public void setLatitude(Double latitude) { this.latitude = latitude; }
+
+    public Double getLongitude() { return longitude; }
+    public void setLongitude(Double longitude) { this.longitude = longitude; }
 }

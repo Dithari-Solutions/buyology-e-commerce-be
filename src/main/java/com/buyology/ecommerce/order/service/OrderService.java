@@ -322,9 +322,11 @@ public class OrderService {
                 cartRepo.save(cart);
             }
 
-            // Use delivery method from metadata if the frontend sent it (most reliable),
-            // otherwise fall back to the address-proximity check.
-            DeliveryMethod deliveryMethod = (metaDeliveryMethod != null)
+            // Use delivery method from metadata if the frontend sent it, BUT only trust
+            // EXPRESS when the address has lat/lng — without coordinates we cannot route
+            // to the courier backend. Fall back to resolveDeliveryMethod otherwise.
+            boolean addressHasCoordinates = address.getLatitude() != null && address.getLongitude() != null;
+            DeliveryMethod deliveryMethod = (metaDeliveryMethod != null && (metaDeliveryMethod != DeliveryMethod.EXPRESS || addressHasCoordinates))
                     ? metaDeliveryMethod
                     : resolveDeliveryMethod(cartItems, address);
 
