@@ -5,7 +5,7 @@ import com.buyology.ecommerce.game.dto.*;
 import com.buyology.ecommerce.game.enums.GameType;
 import com.buyology.ecommerce.game.repository.*;
 import com.buyology.ecommerce.user.domain.Users;
-import com.buyology.ecommerce.user.repository.UsersRepository;
+import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,13 +25,13 @@ public class GameService {
     private final QuizQuestionRepository quizQuestionRepository;
     private final GameResultRepository gameResultRepository;
     private final UserStreakRepository userStreakRepository;
-    private final com.buyology.ecommerce.user.repository.UserRepository userRepository;
+    private final UserRepository userRepository;
 
     public GameService(DailyGameConfigRepository dailyGameConfigRepository,
                        QuizQuestionRepository quizQuestionRepository,
                        GameResultRepository gameResultRepository,
                        UserStreakRepository userStreakRepository,
-                       com.buyology.ecommerce.user.repository.UserRepository userRepository) {
+                       UserRepository userRepository) {
         this.dailyGameConfigRepository = dailyGameConfigRepository;
         this.quizQuestionRepository = quizQuestionRepository;
         this.gameResultRepository = gameResultRepository;

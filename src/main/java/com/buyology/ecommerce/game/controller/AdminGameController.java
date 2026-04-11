@@ -29,20 +29,20 @@ public class AdminGameController {
     @PostMapping("/config")
     public ResponseEntity<ApiResponse<DailyGameConfig>> configureDailyGame(@Valid @RequestBody DailyGameConfigDto dto) {
         DailyGameConfig config = gameService.configureDailyGame(dto);
-        return ResponseEntity.ok(ApiResponse.success("Daily game configured successfully", config));
+        return ApiResponse.success(config, "Daily game configured successfully");
     }
 
     @Operation(summary = "Create a new quiz question")
     @PostMapping("/quiz")
     public ResponseEntity<ApiResponse<QuizQuestionResponse>> createQuizQuestion(@Valid @RequestBody QuizQuestionRequest request) {
         QuizQuestionResponse response = gameService.createQuizQuestion(request);
-        return ResponseEntity.ok(ApiResponse.success("Quiz question created successfully", response));
+        return ApiResponse.success(response, "Quiz question created successfully");
     }
 
     @Operation(summary = "Get all quiz questions")
     @GetMapping("/quiz")
     public ResponseEntity<ApiResponse<List<QuizQuestionResponse>>> getAllQuizQuestions() {
         List<QuizQuestionResponse> questions = gameService.getAllQuizQuestions();
-        return ResponseEntity.ok(ApiResponse.success("Quiz questions retrieved successfully", questions));
+        return ApiResponse.success(questions, "Quiz questions retrieved successfully");
     }
 }
