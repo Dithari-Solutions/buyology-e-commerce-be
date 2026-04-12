@@ -18,6 +18,9 @@ public class StoryResponse {
     private List<MediaItem> media;
     private LocalDateTime createdAt;
 
+    public StoryResponse() {
+    }
+
     public static StoryResponse from(Story story, Language language) {
         StoryResponse response = new StoryResponse();
         response.id = story.getId();
@@ -47,35 +50,63 @@ public class StoryResponse {
     }
 
     // ========================
-    // Getters
+    // Getters & Setters
     // ========================
 
     public UUID getId() {
         return id;
     }
 
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
     public String getTitle() {
         return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
     }
 
     public String getDescription() {
         return description;
     }
 
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
     public String getThumbnailUrl() {
         return thumbnailUrl;
+    }
+
+    public void setThumbnailUrl(String thumbnailUrl) {
+        this.thumbnailUrl = thumbnailUrl;
     }
 
     public String getStatus() {
         return status;
     }
 
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
     public List<MediaItem> getMedia() {
         return media;
     }
 
+    public void setMedia(List<MediaItem> media) {
+        this.media = media;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
     // ========================
@@ -87,6 +118,9 @@ public class StoryResponse {
         private String url;
         private String thumbnailUrl;
         private int orderIndex;
+
+        public MediaItem() {
+        }
 
         public static MediaItem from(StoryMedia m) {
             MediaItem item = new MediaItem();
@@ -101,16 +135,32 @@ public class StoryResponse {
             return mediaType;
         }
 
+        public void setMediaType(String mediaType) {
+            this.mediaType = mediaType;
+        }
+
         public String getUrl() {
             return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
         }
 
         public String getThumbnailUrl() {
             return thumbnailUrl;
         }
 
+        public void setThumbnailUrl(String thumbnailUrl) {
+            this.thumbnailUrl = thumbnailUrl;
+        }
+
         public int getOrderIndex() {
             return orderIndex;
+        }
+
+        public void setOrderIndex(int orderIndex) {
+            this.orderIndex = orderIndex;
         }
     }
 }

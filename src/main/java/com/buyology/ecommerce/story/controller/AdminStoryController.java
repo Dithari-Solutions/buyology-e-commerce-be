@@ -100,4 +100,13 @@ public class AdminStoryController {
         storyService.deleteStory(storyId);
         return ApiResponse.success(null, "Story deleted successfully.");
     }
+
+    @Operation(summary = "Delete a specific media file from a story")
+    @DeleteMapping("/{storyId}/media/{mediaId}")
+    public ResponseEntity<ApiResponse<Void>> deleteMedia(
+            @PathVariable UUID storyId,
+            @PathVariable UUID mediaId) {
+        storyService.deleteMediaFromStory(storyId, mediaId);
+        return ApiResponse.success(null, "Media deleted from story successfully.");
+    }
 }

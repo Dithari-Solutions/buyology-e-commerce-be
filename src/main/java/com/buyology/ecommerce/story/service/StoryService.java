@@ -2,10 +2,6 @@ package com.buyology.ecommerce.story.service;
 
 import java.util.List;
 import java.util.UUID;
-import java.nio.file.Path;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,16 +21,42 @@ import com.buyology.ecommerce.story.repository.StoryRepository;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
 import org.springframework.transaction.annotation.Transactional;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 
 @Service
 public class StoryService {
 
-    private static final String STATIC_STORY_PATH = "/opt/uploads/story";
-
     private final StoryRepository storyRepository;
+    private final com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository;
+    private final ContaboObjectService contaboObjectService;
 
-    public StoryService(StoryRepository storyRepository) {
+    public StoryService(StoryRepository storyRepository, 
+                        com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository,
+                        ContaboObjectService contaboObjectService) {
         this.storyRepository = storyRepository;
+        this.storyMediaRepository = storyMediaRepository;
+        this.contaboObjectService = contaboObjectService;
+    }
+
+    @Transactional
+    public void deleteMediaFromStory(UUID storyId, UUID mediaId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+
+        StoryMedia media = storyMediaRepository.findById(mediaId)
+                .orElseThrow(() -> new IllegalArgumentException("Media not found with id: " + mediaId));
+
+        if (!media.getStory().getId().equals(storyId)) {
+            throw new IllegalArgumentException("Media does not belong to the specified story");
+        }
+
+        // Delete from S3
+        contaboObjectService.deleteFile(media.getUrl());
+
+        // Remove from list and delete record
+        story.removeMedia(media);
+        storyMediaRepository.delete(media);
+        storyRepository.save(story);
     }
 
     @Transactional
@@ -50,56 +72,41 @@ public class StoryService {
         // Save story first to generate the ID
         Story savedStory = storyRepository.save(story);
 
-        // Create the folder: static/story/{storyId}
-        Path storyDir = Paths.get(STATIC_STORY_PATH, savedStory.getId().toString());
-        try {
-            Files.createDirectories(storyDir);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create story media directory", e);
-        }
-
-        // Save thumbnail separately
+        // Save thumbnail to Contabo S3
         if (thumbnail != null && !thumbnail.isEmpty()) {
             String thumbFilename = thumbnail.getOriginalFilename();
             String thumbExt = (thumbFilename != null && thumbFilename.contains("."))
                     ? thumbFilename.substring(thumbFilename.lastIndexOf("."))
                     : "";
             String savedThumbName = "thumbnail" + thumbExt;
-            Path thumbPath = storyDir.resolve(savedThumbName);
-            try {
-                Files.write(thumbPath, thumbnail.getBytes());
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to save thumbnail file", e);
-            }
-            savedStory.setThumbnailUrl("/story/" + savedStory.getId() + "/" + savedThumbName);
+            String key = "stories/" + savedStory.getId() + "/" + savedThumbName;
+            
+            String s3Key = contaboObjectService.uploadFile(key, thumbnail);
+            savedStory.setThumbnailUrl(s3Key);
         }
 
-        // Save each media file with its order
+        // Save each media file to Contabo S3
         List<StoryMedia> mediaList = new ArrayList<>();
 
-        for (int i = 0; i < mediaFiles.size(); i++) {
-            MultipartFile file = mediaFiles.get(i);
-            int orderIndex = i;
+        if (mediaFiles != null) {
+            for (int i = 0; i < mediaFiles.size(); i++) {
+                MultipartFile file = mediaFiles.get(i);
+                int orderIndex = i;
 
-            String originalFilename = file.getOriginalFilename();
-            String extension = "";
-            if (originalFilename != null && originalFilename.contains(".")) {
-                extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+                String originalFilename = file.getOriginalFilename();
+                String extension = "";
+                if (originalFilename != null && originalFilename.contains(".")) {
+                    extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+                }
+                String savedFileName = orderIndex + extension;
+                String key = "stories/" + savedStory.getId() + "/" + savedFileName;
+
+                String s3Key = contaboObjectService.uploadFile(key, file);
+
+                String mediaType = determineMediaType(file.getContentType());
+                StoryMedia storyMedia = new StoryMedia(savedStory, mediaType, s3Key, null, orderIndex);
+                mediaList.add(storyMedia);
             }
-            String savedFileName = orderIndex + extension;
-            Path filePath = storyDir.resolve(savedFileName);
-
-            try {
-                Files.write(filePath, file.getBytes());
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to save media file: " + originalFilename, e);
-            }
-
-            String mediaType = determineMediaType(file.getContentType());
-            String url = "/story/" + savedStory.getId() + "/" + savedFileName;
-
-            StoryMedia storyMedia = new StoryMedia(savedStory, mediaType, url, null, orderIndex);
-            mediaList.add(storyMedia);
         }
 
         for (StoryMedia media : mediaList) {
@@ -161,7 +168,7 @@ public class StoryService {
     public ResponseEntity<ApiResponse<StoryResponse>> getPublicStoryDetails(Language language, UUID storyId) {
         return storyRepository.findById(storyId)
                 .filter(story -> story.getStatus() == StoryStatus.ACTIVE)
-                .map(story -> ApiResponse.success(StoryResponse.from(story, language), "Story fetched successfully"))
+                .map(story -> ApiResponse.success(mapToResponse(story, language), "Story fetched successfully"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
     }
 
@@ -181,7 +188,7 @@ public class StoryService {
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<StoryResponse>> getAdminStoryDetails(Language language, UUID storyId) {
         return storyRepository.findById(storyId)
-                .map(story -> ApiResponse.success(StoryResponse.from(story, language), "Story fetched successfully"))
+                .map(story -> ApiResponse.success(mapToResponse(story, language), "Story fetched successfully"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
     }
 
@@ -202,15 +209,51 @@ public class StoryService {
                 .toList();
 
         List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
-                .map(StoryResponse.MediaItem::from)
+                .map(this::toMediaItemDto)
                 .toList();
 
         return new StorySummaryResponse(
                 story.getId(),
                 translation.getTitle(),
-                story.getThumbnailUrl(),
+                contaboObjectService.getPresignedUrl(story.getThumbnailUrl()),
                 story.getStatus().name(),
                 mediaItems);
+    }
+
+    private StoryResponse mapToResponse(Story story, Language language) {
+        StoryResponse response = new StoryResponse();
+        response.setId(story.getId());
+        response.setThumbnailUrl(contaboObjectService.getPresignedUrl(story.getThumbnailUrl()));
+        response.setStatus(story.getStatus().name());
+        response.setCreatedAt(story.getCreatedAt());
+
+        if (story.getTranslations() != null) {
+            story.getTranslations().stream()
+                    .filter(t -> t.getLanguage() == language)
+                    .findFirst()
+                    .ifPresent(t -> {
+                        response.setTitle(t.getTitle());
+                        response.setDescription(t.getDescription());
+                    });
+        }
+
+        if (story.getMedia() != null) {
+            response.setMedia(story.getMedia().stream()
+                    .sorted(Comparator.comparingInt(StoryMedia::getOrderIndex))
+                    .map(this::toMediaItemDto)
+                    .toList());
+        }
+
+        return response;
+    }
+
+    private StoryResponse.MediaItem toMediaItemDto(StoryMedia m) {
+        StoryResponse.MediaItem item = new StoryResponse.MediaItem();
+        item.setMediaType(m.getMediaType());
+        item.setUrl(contaboObjectService.getPresignedUrl(m.getUrl()));
+        item.setThumbnailUrl(contaboObjectService.getPresignedUrl(m.getThumbnailUrl()));
+        item.setOrderIndex(m.getOrderIndex());
+        return item;
     }
 
     @Transactional
@@ -244,22 +287,8 @@ public class StoryService {
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 
-        // Delete media files from disk
-        Path storyDir = Paths.get(STATIC_STORY_PATH, storyId.toString());
-        if (Files.exists(storyDir)) {
-            try (var files = Files.walk(storyDir)) {
-                files.sorted(java.util.Comparator.reverseOrder())
-                        .forEach(path -> {
-                            try {
-                                Files.delete(path);
-                            } catch (IOException e) {
-                                throw new RuntimeException("Failed to delete file: " + path, e);
-                            }
-                        });
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to delete story media directory", e);
-            }
-        }
+        // Delete media files from Contabo S3
+        contaboObjectService.deleteFolder("stories/" + storyId);
 
         storyRepository.delete(story);
     }
@@ -275,13 +304,6 @@ public class StoryService {
                 .max()
                 .orElse(-1) + 1;
 
-        Path storyDir = Paths.get(STATIC_STORY_PATH, storyId.toString());
-        try {
-            Files.createDirectories(storyDir);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create story media directory", e);
-        }
-
         for (int i = 0; i < mediaFiles.size(); i++) {
             MultipartFile file = mediaFiles.get(i);
             int orderIndex = nextOrderIndex + i;
@@ -292,18 +314,12 @@ public class StoryService {
                 extension = originalFilename.substring(originalFilename.lastIndexOf("."));
             }
             String savedFileName = orderIndex + extension;
-            Path filePath = storyDir.resolve(savedFileName);
+            String key = "stories/" + storyId + "/" + savedFileName;
 
-            try {
-                Files.write(filePath, file.getBytes());
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to save media file: " + originalFilename, e);
-            }
+            String s3Key = contaboObjectService.uploadFile(key, file);
 
             String mediaType = determineMediaType(file.getContentType());
-            String url = "/story/" + storyId + "/" + savedFileName;
-
-            StoryMedia storyMedia = new StoryMedia(story, mediaType, url, null, orderIndex);
+            StoryMedia storyMedia = new StoryMedia(story, mediaType, s3Key, null, orderIndex);
             story.addMedia(storyMedia);
         }
 
