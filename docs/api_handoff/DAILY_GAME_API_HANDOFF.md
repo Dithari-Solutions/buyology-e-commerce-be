@@ -45,6 +45,7 @@ Fetch the list of active quiz questions for today.
 
 ### Submit Game/Quiz Result
 Send the result of the play session. Only one submission per day is allowed.
+**Reward**: Successful games (`isSuccess: true`) automatically award **10 tokens** to the user's profile.
 - **URL**: `POST /api/game/submit`
 - **Request Body**:
 ```json

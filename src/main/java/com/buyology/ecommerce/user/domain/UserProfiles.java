@@ -54,6 +54,9 @@ public class UserProfiles {
     @Column(name = "preferred_language", length = 5)
     private String preferredLanguage;
 
+    @Column(name = "tokens", nullable = false)
+    private int tokens = 0;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -162,6 +165,14 @@ public class UserProfiles {
 
     public void setPreferredLanguage(String preferredLanguage) {
         this.preferredLanguage = preferredLanguage;
+    }
+
+    public int getTokens() {
+        return tokens;
+    }
+
+    public void setTokens(int tokens) {
+        this.tokens = tokens;
     }
 
     public Instant getCreatedAt() {

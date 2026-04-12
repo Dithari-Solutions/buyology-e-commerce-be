@@ -26,17 +26,20 @@ public class GameService {
     private final GameResultRepository gameResultRepository;
     private final UserStreakRepository userStreakRepository;
     private final UserRepository userRepository;
+    private final com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository;
 
     public GameService(DailyGameConfigRepository dailyGameConfigRepository,
                        QuizQuestionRepository quizQuestionRepository,
                        GameResultRepository gameResultRepository,
                        UserStreakRepository userStreakRepository,
-                       UserRepository userRepository) {
+                       UserRepository userRepository,
+                       com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository) {
         this.dailyGameConfigRepository = dailyGameConfigRepository;
         this.quizQuestionRepository = quizQuestionRepository;
         this.gameResultRepository = gameResultRepository;
         this.userStreakRepository = userStreakRepository;
         this.userRepository = userRepository;
+        this.userProfilesRepository = userProfilesRepository;
     }
 
     // Admin Methods
@@ -103,6 +106,13 @@ public class GameService {
 
         GameResult result = new GameResult(user, request.getGameType(), request.getScore(), request.isSuccess(), now);
         gameResultRepository.save(result);
+
+        if (request.isSuccess()) {
+            userProfilesRepository.findByUser(user).ifPresent(profile -> {
+                profile.setTokens(profile.getTokens() + 10);
+                userProfilesRepository.save(profile);
+            });
+        }
 
         updateStreak(user, today);
     }
