@@ -49,16 +49,37 @@ public class ContaboObjectService {
     }
 
     /**
-     * Generates a presigned URL for a given S3 key.
+     * Generates a presigned URL for a given S3 key or existing full URL.
      */
     public String getPresignedUrl(String key) {
-        if (key == null || key.isBlank() || key.startsWith("http")) {
-            return key; // Already a URL or empty
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+
+        // If it's already a full URL, extract the path/key part
+        String cleanKey = key;
+        if (key.startsWith("http")) {
+            // Remove the base URL part (e.g., publicUrl + bucketName) to get just the key
+            String baseUrl = properties.getPublicUrl();
+            if (key.contains(baseUrl)) {
+                cleanKey = key.substring(key.indexOf(baseUrl) + baseUrl.length());
+                if (cleanKey.startsWith("/")) {
+                    cleanKey = cleanKey.substring(1);
+                }
+            } else if (key.contains(properties.getBucketName())) {
+                // Fallback: extract everything after the bucket name
+                cleanKey = key.substring(key.indexOf(properties.getBucketName()) + properties.getBucketName().length());
+                if (cleanKey.startsWith("/")) {
+                    cleanKey = cleanKey.substring(1);
+                }
+            } else {
+                return key; // External URL, return as is
+            }
         }
 
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(properties.getBucketName())
-                .key(key)
+                .key(cleanKey)
                 .build();
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
