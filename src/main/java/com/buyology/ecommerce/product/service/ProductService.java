@@ -927,9 +927,12 @@ public class ProductService {
     }
 
     private ProductResponse.MediaDto toMediaDto(ProductMedia m) {
+        String presignedUrl = contaboObjectService.getPresignedUrl(m.getUrl());
+        String presignedThumbnailUrl = contaboObjectService.getPresignedUrl(m.getThumbnailUrl());
+
         return new ProductResponse.MediaDto(
-                m.getId(), m.getMediaType().name(), m.getUrl(),
-                m.getThumbnailUrl(), m.getIsPrimary(), m.getOrderIndex());
+                m.getId(), m.getMediaType().name(), presignedUrl,
+                presignedThumbnailUrl, m.getIsPrimary(), m.getOrderIndex());
     }
 
     /**

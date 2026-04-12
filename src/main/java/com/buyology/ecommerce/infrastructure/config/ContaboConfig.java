@@ -6,6 +6,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
 
@@ -26,6 +27,16 @@ public class ContaboConfig {
                         AwsBasicCredentials.create(properties.getAccessKey(), properties.getSecretKey())))
                 .region(Region.US_EAST_1) // Contabo S3 is region-agnostic but AWS SDK requires a region
                 .forcePathStyle(true)      // Required for many S3-compatible providers
+                .build();
+    }
+
+    @Bean
+    public S3Presigner s3Presigner() {
+        return S3Presigner.builder()
+                .endpointOverride(URI.create(properties.getEndpoint()))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(properties.getAccessKey(), properties.getSecretKey())))
+                .region(Region.US_EAST_1)
                 .build();
     }
 }

@@ -6,8 +6,12 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -15,15 +19,17 @@ import java.util.stream.Collectors;
 public class ContaboObjectService {
 
     private final S3Client s3Client;
+    private final S3Presigner s3Presigner;
     private final ContaboProperties properties;
 
-    public ContaboObjectService(S3Client s3Client, ContaboProperties properties) {
+    public ContaboObjectService(S3Client s3Client, S3Presigner s3Presigner, ContaboProperties properties) {
         this.s3Client = s3Client;
+        this.s3Presigner = s3Presigner;
         this.properties = properties;
     }
 
     /**
-     * Uploads a file to Contabo S3 and returns the public URL.
+     * Uploads a file to Contabo S3 and returns the S3 key.
      * Path format: products/{uuid}/{filename}
      */
     public String uploadFile(String key, MultipartFile file) {
@@ -32,19 +38,36 @@ public class ContaboObjectService {
                     .bucket(properties.getBucketName())
                     .key(key)
                     .contentType(file.getContentType())
-                    .acl(ObjectCannedACL.PUBLIC_READ) // Make it public
                     .build();
 
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-            String baseUrl = properties.getPublicUrl();
-            if (baseUrl.endsWith("/")) {
-                baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-            }
-            return baseUrl + "/" + key;
+            return key; // Return the KEY instead of the URL
         } catch (IOException e) {
             throw new RuntimeException("Failed to upload file to Contabo S3: " + key, e);
         }
+    }
+
+    /**
+     * Generates a presigned URL for a given S3 key.
+     */
+    public String getPresignedUrl(String key) {
+        if (key == null || key.isBlank() || key.startsWith("http")) {
+            return key; // Already a URL or empty
+        }
+
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(key)
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(2)) // URL valid for 2 hours
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
+        return presignedRequest.url().toString();
     }
 
     /**
