@@ -15,6 +15,9 @@ public class OrderResponse {
     private UUID cartId;
     private UUID paymentTransactionId;
     private UUID courierUserId;
+    private UUID deliveryOrderId;
+    private String courierName;
+    private String courierPhone;
     private DeliveryMethod deliveryMethod;
     private OrderStatus status;
 
@@ -75,6 +78,15 @@ public class OrderResponse {
 
     public UUID getCourierUserId() { return courierUserId; }
     public void setCourierUserId(UUID courierUserId) { this.courierUserId = courierUserId; }
+
+    public UUID getDeliveryOrderId() { return deliveryOrderId; }
+    public void setDeliveryOrderId(UUID deliveryOrderId) { this.deliveryOrderId = deliveryOrderId; }
+
+    public String getCourierName() { return courierName; }
+    public void setCourierName(String courierName) { this.courierName = courierName; }
+
+    public String getCourierPhone() { return courierPhone; }
+    public void setCourierPhone(String courierPhone) { this.courierPhone = courierPhone; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }

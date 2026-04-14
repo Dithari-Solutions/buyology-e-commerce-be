@@ -184,6 +184,19 @@
 			<artifactId>s3</artifactId>
 			<version>2.29.50</version>
 		</dependency>
+
+		<!-- Firebase Admin SDK — FCM push notifications to customer devices -->
+		<dependency>
+			<groupId>com.google.firebase</groupId>
+			<artifactId>firebase-admin</artifactId>
+			<version>9.2.0</version>
+		</dependency>
+
+		<!-- Spring WebSocket — real-time courier location tracking via STOMP -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-websocket</artifactId>
+		</dependency>
 	</dependencies>
 
 	<build>

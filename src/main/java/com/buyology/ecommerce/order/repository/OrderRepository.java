@@ -26,4 +26,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     List<Order> findAllByCourierUserIdAndDeliveryMethod(UUID courierUserId, DeliveryMethod deliveryMethod);
 
     Optional<Order> findByIdAndUserId(UUID id, UUID userId);
+
+    Optional<Order> findByDeliveryOrderId(UUID deliveryOrderId);
 }

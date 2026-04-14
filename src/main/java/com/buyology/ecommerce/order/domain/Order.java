@@ -53,6 +53,22 @@ public class Order {
     @Column(name = "courier_user_id")
     private UUID courierUserId;
 
+    /**
+     * The delivery order ID on the courier backend.
+     * Stored when a CourierAssignedEvent is received so the customer can subscribe
+     * to the WebSocket topic for real-time location tracking.
+     */
+    @Column(name = "delivery_order_id")
+    private UUID deliveryOrderId;
+
+    /** Snapshot of the assigned courier's full name — shown to the customer. */
+    @Column(name = "courier_name", length = 200)
+    private String courierName;
+
+    /** Snapshot of the assigned courier's phone number — shown to the customer. */
+    @Column(name = "courier_phone", length = 30)
+    private String courierPhone;
+
     // ── Delivery classification ───────────────────────────────────────────────
 
     @Convert(converter = com.buyology.ecommerce.order.domain.converter.DeliveryMethodConverter.class)
@@ -202,6 +218,15 @@ public class Order {
 
     public UUID getCourierUserId() { return courierUserId; }
     public void setCourierUserId(UUID courierUserId) { this.courierUserId = courierUserId; }
+
+    public UUID getDeliveryOrderId() { return deliveryOrderId; }
+    public void setDeliveryOrderId(UUID deliveryOrderId) { this.deliveryOrderId = deliveryOrderId; }
+
+    public String getCourierName() { return courierName; }
+    public void setCourierName(String courierName) { this.courierName = courierName; }
+
+    public String getCourierPhone() { return courierPhone; }
+    public void setCourierPhone(String courierPhone) { this.courierPhone = courierPhone; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }

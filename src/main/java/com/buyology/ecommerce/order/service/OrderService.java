@@ -616,6 +616,76 @@ public class OrderService {
     }
 
     // =========================================================================
+    // Courier backend event integration
+    // =========================================================================
+
+    /**
+     * Called when the courier backend sends a {@code delivery.courier.assigned} event.
+     * Stores the delivery order ID (for WebSocket tracking URL) and transitions the
+     * ecommerce order to COURIER_ASSIGNED if it is still in PAID status.
+     */
+    @Transactional
+    public void onCourierAssigned(UUID ecommerceOrderId, UUID deliveryId, UUID courierId) {
+        orderRepo.findById(ecommerceOrderId).ifPresent(order -> {
+            order.setDeliveryOrderId(deliveryId);
+            order.setCourierUserId(courierId);
+            if (order.getStatus() == OrderStatus.PAID) {
+                order.setStatus(OrderStatus.COURIER_ASSIGNED);
+                appendTrackingEvent(order, OrderStatus.COURIER_ASSIGNED,
+                        "Courier assigned by delivery service",
+                        null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+            }
+            orderRepo.save(order);
+            log.info("[ORDER] Courier assigned: orderId={} courierId={} deliveryId={}",
+                    ecommerceOrderId, courierId, deliveryId);
+        });
+    }
+
+    /**
+     * Maps a courier-backend {@link DeliveryStatus} name to the corresponding
+     * ecommerce {@link OrderStatus} and persists it. No-op for unknown statuses
+     * or orders already in a terminal state.
+     */
+    @Transactional
+    public void syncStatusFromCourier(UUID ecommerceOrderId, String deliveryStatus) {
+        OrderStatus target = switch (deliveryStatus) {
+            case "PICKED_UP"              -> OrderStatus.PICKED_UP;
+            case "ON_THE_WAY"             -> OrderStatus.IN_TRANSIT;
+            case "ARRIVED_AT_DESTINATION" -> OrderStatus.IN_TRANSIT;
+            case "DELIVERED"              -> OrderStatus.DELIVERED;
+            case "FAILED"                 -> OrderStatus.FAILED;
+            case "CANCELLED"              -> OrderStatus.CANCELLED;
+            default                       -> null;
+        };
+
+        if (target == null) return;
+
+        orderRepo.findById(ecommerceOrderId).ifPresent(order -> {
+            // Skip if already at target or in a terminal state to avoid duplicate events
+            if (order.getStatus() == target) return;
+            if (order.getStatus() == OrderStatus.DELIVERED
+                    || order.getStatus() == OrderStatus.CANCELLED
+                    || order.getStatus() == OrderStatus.FAILED) return;
+
+            applyMilestoneTimestamp(order, target);
+            order.setStatus(target);
+            appendTrackingEvent(order, target, "Synced from courier backend",
+                    null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+            orderRepo.save(order);
+            log.info("[ORDER] Status synced from courier: orderId={} status={}",
+                    ecommerceOrderId, target);
+        });
+    }
+
+    /**
+     * Returns the {@code userId} of the customer who placed the given order,
+     * used by the event consumer to target push notifications.
+     */
+    public java.util.Optional<UUID> findUserIdByOrderId(UUID orderId) {
+        return orderRepo.findById(orderId).map(Order::getUserId);
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -680,6 +750,9 @@ public class OrderService {
         res.setCartId(o.getCartId());
         res.setPaymentTransactionId(o.getPaymentTransactionId());
         res.setCourierUserId(o.getCourierUserId());
+        res.setDeliveryOrderId(o.getDeliveryOrderId());
+        res.setCourierName(o.getCourierName());
+        res.setCourierPhone(o.getCourierPhone());
         res.setDeliveryMethod(o.getDeliveryMethod());
         res.setStatus(o.getStatus());
         res.setDeliveryAddressId(o.getDeliveryAddressId());
