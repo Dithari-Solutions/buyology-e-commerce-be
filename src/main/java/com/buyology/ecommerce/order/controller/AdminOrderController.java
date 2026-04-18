@@ -5,6 +5,7 @@ import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.order.dto.AdminStatusUpdateRequest;
 import com.buyology.ecommerce.order.dto.AdminTrackingUpdateRequest;
+import com.buyology.ecommerce.order.dto.OrderAdminResponse;
 import com.buyology.ecommerce.order.dto.OrderResponse;
 import com.buyology.ecommerce.order.dto.OrderSummaryResponse;
 import com.buyology.ecommerce.order.service.OrderService;
@@ -56,6 +57,19 @@ public class AdminOrderController {
         return ApiResponse.success(
                 orderService.getOrderForAdmin(orderId),
                 "Order fetched successfully");
+    }
+
+    /**
+     * Get full order detail including delivery proof (photos) from courier service.
+     */
+    @GetMapping("/{orderId}/with-proof")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<OrderAdminResponse>> getOrderWithProof(
+            @AuthenticationPrincipal UUID adminUserId,
+            @PathVariable UUID orderId) {
+        return ApiResponse.success(
+                orderService.getOrderWithProofForAdmin(orderId, adminUserId),
+                "Order with proof fetched successfully");
     }
 
     /**

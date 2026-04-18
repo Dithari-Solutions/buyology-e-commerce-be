@@ -15,6 +15,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
+import java.util.UUID;
 
 @Component
 public class CourierServiceClient {
@@ -217,6 +218,17 @@ public class CourierServiceClient {
             log.error("[COURIER-CLIENT] failed to publish order {} to courier exchange: {}",
                     req.getOrderId(), e.getMessage(), e);
         }
+    }
+
+    public ResponseEntity<String> getDeliveryProof(UUID deliveryOrderId, String adminUserId) {
+        String uri = "/api/v1/deliveries/" + deliveryOrderId + "/proof";
+        String token = tokenProvider.generateToken(adminUserId);
+        log.info("[COURIER-CLIENT] GET {} adminId={}", uri, adminUserId);
+        return execute(
+                webClient.get()
+                        .uri(uri)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        );
     }
 
     // ── shared execute ────────────────────────────────────────────────────────

@@ -13,12 +13,12 @@ Mobile apps should subscribe to both the **Status** topic (for UI transitions) a
 | **GPS Tracking** | `/topic/orders/{orderId}/location` |
 
 ### Status Payload (New Field)
-The status update now includes the `proofImageUrl` taken by the courier.
+The status update now includes the `proofImageUrl` taken by the courier. This is an **absolute presigned S3 URL** from Contabo.
 ```json
 {
     "orderId": "uuid",
     "status": "DELIVERED",
-    "proofImageUrl": "https://storage.buyology.com/proofs/delivery_123.jpg",
+    "proofImageUrl": "https://eu2.contabostorage.com/...",
     "timestamp": "..."
 }
 ```

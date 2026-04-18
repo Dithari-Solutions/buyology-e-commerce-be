@@ -12,6 +12,7 @@ import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.OrderTrackingEvent;
@@ -74,6 +75,7 @@ public class OrderService {
     private final ObjectMapper objectMapper;
     private final CourierServiceClient courierServiceClient;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ContaboObjectService contaboObjectService;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -88,7 +90,8 @@ public class OrderService {
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
                         CourierServiceClient courierServiceClient,
-                        SimpMessagingTemplate messagingTemplate) {
+                        SimpMessagingTemplate messagingTemplate,
+                        ContaboObjectService contaboObjectService) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -103,6 +106,7 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.courierServiceClient = courierServiceClient;
         this.messagingTemplate = messagingTemplate;
+        this.contaboObjectService = contaboObjectService;
     }
 
     // =========================================================================
@@ -501,6 +505,40 @@ public class OrderService {
         return toOrderResponse(order);
     }
 
+    public OrderAdminResponse getOrderWithProofForAdmin(UUID orderId, UUID adminUserId) {
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        OrderAdminResponse res = toAdminOrderResponse(order);
+
+        // If it's an EXPRESS order with a deliveryOrderId, fetch proof from courier service
+        if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS && order.getDeliveryOrderId() != null) {
+            try {
+                org.springframework.http.ResponseEntity<String> proofRes =
+                        courierServiceClient.getDeliveryProof(order.getDeliveryOrderId(), adminUserId.toString());
+
+                if (proofRes.getStatusCode().is2xxSuccessful() && proofRes.getBody() != null) {
+                    JsonNode proofJson = objectMapper.readTree(proofRes.getBody());
+                    res.setPickupProofImageUrl(contaboObjectService.getPresignedUrl(proofJson.path("pickupImageUrl").asText(null)));
+                    if (proofJson.has("pickupPhotoTakenAt")) {
+                        res.setPickupProofTakenAt(Instant.parse(proofJson.get("pickupPhotoTakenAt").asText()));
+                    }
+                    res.setDeliveryProofImageUrl(contaboObjectService.getPresignedUrl(proofJson.path("imageUrl").asText(null)));
+                    res.setDeliveryProofSignatureUrl(contaboObjectService.getPresignedUrl(proofJson.path("signatureUrl").asText(null)));
+                    res.setDeliveredTo(proofJson.path("deliveredTo").asText(null));
+                    if (proofJson.has("photoTakenAt")) {
+                        res.setDeliveryProofTakenAt(Instant.parse(proofJson.get("photoTakenAt").asText()));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[ORDER-ADMIN] Failed to fetch delivery proof for order {}: {}", orderId, e.getMessage());
+                // Don't fail the whole request if proof fetch fails
+            }
+        }
+
+        return res;
+    }
+
     public Page<OrderSummaryResponse> listAllOrders(OrderStatus status, DeliveryMethod deliveryMethod,
                                                      int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
@@ -697,10 +735,11 @@ public class OrderService {
      */
     public void broadcastStatusUpdate(Order order, String proofImageUrl) {
         String destination = "/topic/orders/" + order.getId() + "/status";
+        String presignedUrl = contaboObjectService.getPresignedUrl(proofImageUrl);
         java.util.Map<String, Object> payload = java.util.Map.of(
                 "orderId", order.getId().toString(),
                 "status",  order.getStatus().name(),
-                "proofImageUrl", proofImageUrl != null ? proofImageUrl : "",
+                "proofImageUrl", presignedUrl != null ? presignedUrl : "",
                 "timestamp", Instant.now().toString()
         );
         messagingTemplate.convertAndSend((String) destination, (Object) payload);
@@ -826,6 +865,59 @@ public class OrderService {
         return res;
     }
 
+    private OrderAdminResponse toAdminOrderResponse(Order o) {
+        OrderResponse base = toOrderResponse(o);
+        OrderAdminResponse res = new OrderAdminResponse();
+        // Copy base fields (manual copy or BeanUtils.copyProperties if available)
+        res.setId(base.getId());
+        res.setUserId(base.getUserId());
+        res.setCartId(base.getCartId());
+        res.setPaymentTransactionId(base.getPaymentTransactionId());
+        res.setCourierUserId(base.getCourierUserId());
+        res.setDeliveryOrderId(base.getDeliveryOrderId());
+        res.setCourierName(base.getCourierName());
+        res.setCourierPhone(base.getCourierPhone());
+        res.setDeliveryMethod(base.getDeliveryMethod());
+        res.setStatus(base.getStatus());
+        res.setDeliveryAddressId(base.getDeliveryAddressId());
+        res.setRecipientFirstName(base.getRecipientFirstName());
+        res.setRecipientLastName(base.getRecipientLastName());
+        res.setRecipientPhone(base.getRecipientPhone());
+        res.setAddressLine1(base.getAddressLine1());
+        res.setAddressLine2(base.getAddressLine2());
+        res.setCity(base.getCity());
+        res.setState(base.getState());
+        res.setCountry(base.getCountry());
+        res.setPostalCode(base.getPostalCode());
+        res.setDeliveryLatitude(base.getDeliveryLatitude());
+        res.setDeliveryLongitude(base.getDeliveryLongitude());
+        res.setSubtotal(base.getSubtotal());
+        res.setShippingFee(base.getShippingFee());
+        res.setDiscount(base.getDiscount());
+        res.setTotalAmount(base.getTotalAmount());
+        res.setCurrency(base.getCurrency());
+        res.setCountryCode(base.getCountryCode());
+        res.setCouponCode(base.getCouponCode());
+        res.setEstimatedDeliveryTime(base.getEstimatedDeliveryTime());
+        res.setTrackingCode(base.getTrackingCode());
+        res.setCarrierName(base.getCarrierName());
+        res.setPaidAt(base.getPaidAt());
+        res.setShippedAt(base.getShippedAt());
+        res.setDeliveredAt(base.getDeliveredAt());
+        res.setCancelledAt(base.getCancelledAt());
+        res.setCreatedAt(base.getCreatedAt());
+        res.setUpdatedAt(base.getUpdatedAt());
+        res.setItems(base.getItems());
+        res.setTrackingHistory(base.getTrackingHistory());
+
+        // Set additional admin-only fields
+        if (o.getItems() != null && !o.getItems().isEmpty()) {
+            res.setStoreId(o.getItems().get(0).getStoreId());
+        }
+
+        return res;
+    }
+
     private OrderItemResponse toItemResponse(OrderItem i) {
         OrderItemResponse res = new OrderItemResponse();
         res.setId(i.getId());
@@ -849,7 +941,7 @@ public class OrderService {
         res.setLatitude(e.getLatitude());
         res.setLongitude(e.getLongitude());
         res.setLocationDescription(e.getLocationDescription());
-        res.setProofImageUrl(e.getProofImageUrl());
+        res.setProofImageUrl(contaboObjectService.getPresignedUrl(e.getProofImageUrl()));
         res.setActorId(e.getActorId());
         res.setActorRole(e.getActorRole());
         res.setCreatedAt(e.getCreatedAt());

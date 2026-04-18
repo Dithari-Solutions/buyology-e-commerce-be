@@ -37,14 +37,14 @@ Subscribe to the order-specific status topic to receive real-time transitions (e
 {
     "orderId": "uuid",
     "status": "PICKED_UP", 
-    "proofImageUrl": "https://storage.buyology.com/proofs/abc.jpg", // Populated on PICKED_UP or DELIVERED
+    "proofImageUrl": "https://eu2.contabostorage.com/...", // Absolute S3 Presigned URL
     "timestamp": "2026-04-19T12:00:00Z"
 }
 ```
 
 ### UX Strategy
 1. **Status Mapping**: Map the `status` string to your progress stepper.
-2. **Proof Images**: If `proofImageUrl` is present and not empty, display it as "Courier Photo" in the tracking history.
+2. **Proof Images**: If `proofImageUrl` is present and not empty, display it directly. The URL is an absolute **presigned S3 URL** (valid for 2 hours). **Do not** prefix it with your API base URL.
 3. **Chat/Call Buttons**: When `status` moves to `COURIER_ASSIGNED`, refresh the Order object via REST to get the `courierName`, `courierPhone`, and `deliveryOrderId`.
 
 ---
