@@ -28,7 +28,7 @@ public class CourierEventRabbitMQConfig {
     public static final String ECOMMERCE_DELIVERY_EVENTS_QUEUE =
             "buyology.ecommerce.delivery.events.queue";
 
-    // ── Routing keys (must match DeliveryRabbitMQConfig in courier backend) ───
+    // ── Routing keys (matching courier backend exactly) ───────────────────────
     public static final String COURIER_ASSIGNED_KEY        = "delivery.courier.assigned";
     public static final String ASSIGNMENT_ACCEPTED_KEY     = "delivery.courier.assignment.accepted";
     public static final String DELIVERY_STATUS_CHANGED_KEY = "delivery.status.changed";
@@ -71,6 +71,6 @@ public class CourierEventRabbitMQConfig {
         return BindingBuilder
                 .bind(ecommerceDeliveryEventsQueue())
                 .to(deliveryExchange())
-                .with("delivery.#");
+                .with("delivery.#"); // Captures all events starting with 'delivery.'
     }
 }

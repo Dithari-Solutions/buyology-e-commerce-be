@@ -693,6 +693,8 @@ public class OrderService {
      */
     @Transactional
     public void syncStatusFromCourier(UUID ecommerceOrderId, String deliveryStatus, String proofImageUrl) {
+        log.info("[ORDER-DEBUG] syncStatusFromCourier start: orderId={} status={} proof={}", 
+                ecommerceOrderId, deliveryStatus, proofImageUrl);
         OrderStatus target = switch (deliveryStatus) {
             case "PICKED_UP"              -> OrderStatus.PICKED_UP;
             case "ON_THE_WAY"             -> OrderStatus.IN_TRANSIT;

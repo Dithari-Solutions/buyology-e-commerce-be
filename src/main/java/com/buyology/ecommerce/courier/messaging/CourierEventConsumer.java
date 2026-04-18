@@ -56,7 +56,8 @@ public class CourierEventConsumer {
 
         try {
             switch (routingKey) {
-                case CourierEventRabbitMQConfig.COURIER_ASSIGNED_KEY ->
+                case CourierEventRabbitMQConfig.COURIER_ASSIGNED_KEY,
+                     CourierEventRabbitMQConfig.ASSIGNMENT_ACCEPTED_KEY ->
                         handleCourierAssigned(objectMapper.readValue(payload, CourierAssignedEvent.class));
 
                 case CourierEventRabbitMQConfig.DELIVERY_STATUS_CHANGED_KEY,

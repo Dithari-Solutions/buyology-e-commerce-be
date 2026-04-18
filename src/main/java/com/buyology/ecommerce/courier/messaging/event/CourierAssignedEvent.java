@@ -14,8 +14,8 @@ public record CourierAssignedEvent(
         UUID deliveryId,
         UUID ecommerceOrderId,
         UUID courierId,
-        String courierName,
-        String courierPhone,
+        @com.fasterxml.jackson.annotation.JsonProperty("courierName") String courierName,
+        @com.fasterxml.jackson.annotation.JsonProperty("courierPhone") String courierPhone,
         UUID assignmentId,
         int attemptNumber,
         Instant assignedAt

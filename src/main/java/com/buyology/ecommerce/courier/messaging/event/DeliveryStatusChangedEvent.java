@@ -16,7 +16,7 @@ public record DeliveryStatusChangedEvent(
         UUID ecommerceOrderId,
         String status,      // matches DeliveryStatus enum name in courier backend
         UUID courierId,
-        String proofImageUrl,
+        @com.fasterxml.jackson.annotation.JsonProperty("proofImageUrl") String proofImageUrl,
         String changedBy,
         Instant changedAt
 ) {}
