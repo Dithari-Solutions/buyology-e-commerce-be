@@ -696,6 +696,8 @@ public class OrderService {
         log.info("[ORDER-DEBUG] syncStatusFromCourier start: orderId={} status={} proof={}", 
                 ecommerceOrderId, deliveryStatus, proofImageUrl);
         OrderStatus target = switch (deliveryStatus) {
+            case "COURIER_ASSIGNED",
+                 "COURIER_ACCEPTED"       -> OrderStatus.COURIER_ASSIGNED;
             case "PICKED_UP"              -> OrderStatus.PICKED_UP;
             case "ON_THE_WAY"             -> OrderStatus.IN_TRANSIT;
             case "ARRIVED_AT_DESTINATION" -> OrderStatus.IN_TRANSIT;

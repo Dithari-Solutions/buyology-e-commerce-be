@@ -2,6 +2,7 @@ package com.buyology.ecommerce.courier.messaging;
 
 import com.buyology.ecommerce.courier.messaging.event.AssignmentExhaustedEvent;
 import com.buyology.ecommerce.courier.messaging.event.CourierAssignedEvent;
+import com.buyology.ecommerce.courier.messaging.event.CourierAssignmentAcceptedEvent;
 import com.buyology.ecommerce.courier.messaging.event.CourierLocationBroadcastEvent;
 import com.buyology.ecommerce.courier.messaging.event.DeliveryStatusChangedEvent;
 import com.buyology.ecommerce.notification.service.PushNotificationService;
@@ -56,9 +57,11 @@ public class CourierEventConsumer {
 
         try {
             switch (routingKey) {
-                case CourierEventRabbitMQConfig.COURIER_ASSIGNED_KEY,
-                     CourierEventRabbitMQConfig.ASSIGNMENT_ACCEPTED_KEY ->
+                case CourierEventRabbitMQConfig.COURIER_ASSIGNED_KEY ->
                         handleCourierAssigned(objectMapper.readValue(payload, CourierAssignedEvent.class));
+
+                case CourierEventRabbitMQConfig.ASSIGNMENT_ACCEPTED_KEY ->
+                        handleAssignmentAccepted(objectMapper.readValue(payload, CourierAssignmentAcceptedEvent.class));
 
                 case CourierEventRabbitMQConfig.DELIVERY_STATUS_CHANGED_KEY,
                      CourierEventRabbitMQConfig.DELIVERY_COMPLETED_KEY,
@@ -125,6 +128,24 @@ public class CourierEventConsumer {
                                "orderId", event.ecommerceOrderId().toString()));
             }
         });
+    }
+
+    private void handleAssignmentAccepted(CourierAssignmentAcceptedEvent event) {
+        log.info("[CourierEvent] Assignment accepted ecommerceOrderId={} courierId={}",
+                event.ecommerceOrderId(), event.courierId());
+
+        orderService.onCourierAssigned(event.ecommerceOrderId(), event.deliveryId(), event.courierId(),
+                event.courierName(), event.courierPhone());
+
+        orderService.findUserIdByOrderId(event.ecommerceOrderId()).ifPresent(userId ->
+                pushService.sendToUser(userId,
+                        "Courier accepted!",
+                        "Your courier has accepted the delivery and is on the way.",
+                        Map.of(
+                                "type",    "COURIER_ACCEPTED",
+                                "orderId", event.ecommerceOrderId().toString()
+                        ))
+        );
     }
 
     private void handleAssignmentExhausted(AssignmentExhaustedEvent event) {
