@@ -10,6 +10,7 @@ import com.buyology.ecommerce.order.service.OrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
@@ -17,6 +18,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -51,8 +53,9 @@ public class CourierEventConsumer {
     }
 
     @RabbitListener(queues = CourierEventRabbitMQConfig.ECOMMERCE_DELIVERY_EVENTS_QUEUE)
-    public void handle(String payload,
+    public void handle(Message amqpMessage,
                        @Header(AmqpHeaders.RECEIVED_ROUTING_KEY) String routingKey) {
+        String payload = new String(amqpMessage.getBody(), StandardCharsets.UTF_8);
         log.debug("[CourierEvent] Received routingKey={} payload={}", routingKey, payload);
 
         try {
