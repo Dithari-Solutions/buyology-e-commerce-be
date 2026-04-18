@@ -34,17 +34,18 @@ public class AdminOrderController {
     }
 
     /**
-     * List all orders with optional filtering by status and/or delivery method.
+     * List all orders with optional filtering by status, delivery method, and store.
      */
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_ADMIN')")
     public ResponseEntity<ApiResponse<Page<OrderSummaryResponse>>> listAllOrders(
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(required = false) DeliveryMethod deliveryMethod,
+            @RequestParam(required = false) java.util.UUID storeId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.success(
-                orderService.listAllOrders(status, deliveryMethod, page, size),
+                orderService.listAllOrders(status, deliveryMethod, storeId, page, size),
                 "Orders fetched successfully");
     }
 

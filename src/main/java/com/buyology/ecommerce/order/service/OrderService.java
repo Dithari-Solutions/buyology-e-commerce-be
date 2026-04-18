@@ -540,17 +540,10 @@ public class OrderService {
     }
 
     public Page<OrderSummaryResponse> listAllOrders(OrderStatus status, DeliveryMethod deliveryMethod,
-                                                     int page, int size) {
+                                                     UUID storeId, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        if (status != null && deliveryMethod != null) {
-            return orderRepo.findAllByStatusAndDeliveryMethod(status, deliveryMethod, pageable)
-                    .map(this::toSummaryResponse);
-        } else if (status != null) {
-            return orderRepo.findAllByStatus(status, pageable).map(this::toSummaryResponse);
-        } else if (deliveryMethod != null) {
-            return orderRepo.findAllByDeliveryMethod(deliveryMethod, pageable).map(this::toSummaryResponse);
-        }
-        return orderRepo.findAll(pageable).map(this::toSummaryResponse);
+        return orderRepo.findAllWithFilters(status, deliveryMethod, storeId, pageable)
+                .map(this::toSummaryResponse);
     }
 
     /**
