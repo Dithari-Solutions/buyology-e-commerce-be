@@ -16,6 +16,7 @@ public record DeliveryStatusChangedEvent(
         UUID ecommerceOrderId,
         String status,      // matches DeliveryStatus enum name in courier backend
         UUID courierId,
+        String proofImageUrl,
         String changedBy,
         Instant changedAt
 ) {}

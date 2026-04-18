@@ -13,6 +13,7 @@ public class TrackingEventResponse {
     private Double latitude;
     private Double longitude;
     private String locationDescription;
+    private String proofImageUrl;
     private UUID actorId;
     private String actorRole;
     private Instant createdAt;
@@ -36,6 +37,9 @@ public class TrackingEventResponse {
 
     public String getLocationDescription() { return locationDescription; }
     public void setLocationDescription(String locationDescription) { this.locationDescription = locationDescription; }
+
+    public String getProofImageUrl() { return proofImageUrl; }
+    public void setProofImageUrl(String proofImageUrl) { this.proofImageUrl = proofImageUrl; }
 
     public UUID getActorId() { return actorId; }
     public void setActorId(UUID actorId) { this.actorId = actorId; }

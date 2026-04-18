@@ -52,6 +52,10 @@ public class OrderTrackingEvent {
     @Column(name = "location_description", length = 500)
     private String locationDescription;
 
+    /** URL of the photo proof taken by the courier (e.g. at pickup or delivery). */
+    @Column(name = "proof_image_url", length = 1000)
+    private String proofImageUrl;
+
     /** UUID of the actor that triggered this event (courier, admin, or system UUID). */
     @Column(name = "actor_id")
     private UUID actorId;
@@ -90,6 +94,9 @@ public class OrderTrackingEvent {
 
     public String getLocationDescription() { return locationDescription; }
     public void setLocationDescription(String locationDescription) { this.locationDescription = locationDescription; }
+
+    public String getProofImageUrl() { return proofImageUrl; }
+    public void setProofImageUrl(String proofImageUrl) { this.proofImageUrl = proofImageUrl; }
 
     public UUID getActorId() { return actorId; }
     public void setActorId(UUID actorId) { this.actorId = actorId; }

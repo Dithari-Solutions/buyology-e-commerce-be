@@ -82,10 +82,11 @@ public class CourierEventConsumer {
     // ── Handlers ──────────────────────────────────────────────────────────────
 
     private void handleCourierAssigned(CourierAssignedEvent event) {
-        log.info("[CourierEvent] Courier assigned ecommerceOrderId={} courierId={}",
-                event.ecommerceOrderId(), event.courierId());
+        log.info("[CourierEvent] Courier assigned ecommerceOrderId={} courierId={} name='{}'",
+                event.ecommerceOrderId(), event.courierId(), event.courierName());
 
-        orderService.onCourierAssigned(event.ecommerceOrderId(), event.deliveryId(), event.courierId());
+        orderService.onCourierAssigned(event.ecommerceOrderId(), event.deliveryId(), event.courierId(),
+                event.courierName(), event.courierPhone());
 
         // Push to customer: "Your courier is on the way!"
         orderService.findUserIdByOrderId(event.ecommerceOrderId()).ifPresent(userId ->
@@ -101,10 +102,10 @@ public class CourierEventConsumer {
     }
 
     private void handleStatusChanged(DeliveryStatusChangedEvent event) {
-        log.info("[CourierEvent] Status changed ecommerceOrderId={} status={}",
-                event.ecommerceOrderId(), event.status());
+        log.info("[CourierEvent] Status changed ecommerceOrderId={} status={} proof={}",
+                event.ecommerceOrderId(), event.status(), event.proofImageUrl());
 
-        orderService.syncStatusFromCourier(event.ecommerceOrderId(), event.status());
+        orderService.syncStatusFromCourier(event.ecommerceOrderId(), event.status(), event.proofImageUrl());
 
         // Push customer on significant milestones
         orderService.findUserIdByOrderId(event.ecommerceOrderId()).ifPresent(userId -> {
@@ -129,7 +130,7 @@ public class CourierEventConsumer {
         log.warn("[CourierEvent] Assignment exhausted ecommerceOrderId={} totalAttempts={}",
                 event.ecommerceOrderId(), event.totalAttempts());
 
-        orderService.syncStatusFromCourier(event.ecommerceOrderId(), "FAILED");
+        orderService.syncStatusFromCourier(event.ecommerceOrderId(), "FAILED", null);
 
         orderService.findUserIdByOrderId(event.ecommerceOrderId()).ifPresent(userId ->
                 pushService.sendToUser(userId,
@@ -159,7 +160,7 @@ public class CourierEventConsumer {
                 event.ecommerceOrderId(), event.latitude(), event.longitude());
     }
 
-    // ── Payload DTO ───────────────────────────────────────────────────────────
+    // ── Payload DTOs ──────────────────────────────────────────────────────────
 
     public record LocationPayload(
             String courierId,

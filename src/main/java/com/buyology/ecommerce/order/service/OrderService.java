@@ -28,6 +28,7 @@ import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -72,6 +73,7 @@ public class OrderService {
     private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
     private final CourierServiceClient courierServiceClient;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -85,7 +87,8 @@ public class OrderService {
                         UserProfilesRepository userProfileRepo,
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
-                        CourierServiceClient courierServiceClient) {
+                        CourierServiceClient courierServiceClient,
+                        SimpMessagingTemplate messagingTemplate) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -99,6 +102,7 @@ public class OrderService {
         this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
         this.courierServiceClient = courierServiceClient;
+        this.messagingTemplate = messagingTemplate;
     }
 
     // =========================================================================
@@ -533,7 +537,9 @@ public class OrderService {
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, null, adminUserId, "ADMIN");
 
-        return toOrderResponse(orderRepo.save(order));
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, null);
+        return toOrderResponse(saved);
     }
 
     /**
@@ -564,7 +570,9 @@ public class OrderService {
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, req.getLocationDescription(), adminUserId, "ADMIN");
 
-        return toOrderResponse(orderRepo.save(order));
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, null);
+        return toOrderResponse(saved);
     }
 
     // =========================================================================
@@ -610,9 +618,11 @@ public class OrderService {
 
         appendTrackingEvent(order, target, req.getNotes(),
                 req.getLatitude(), req.getLongitude(),
-                req.getLocationDescription(), courierUserId, "COURIER");
+                req.getLocationDescription(), req.getProofImageUrl(), courierUserId, "COURIER");
 
-        return toOrderResponse(orderRepo.save(order));
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, req.getProofImageUrl());
+        return toOrderResponse(saved);
     }
 
     // =========================================================================
@@ -625,19 +635,23 @@ public class OrderService {
      * ecommerce order to COURIER_ASSIGNED if it is still in PAID status.
      */
     @Transactional
-    public void onCourierAssigned(UUID ecommerceOrderId, UUID deliveryId, UUID courierId) {
+    public void onCourierAssigned(UUID ecommerceOrderId, UUID deliveryId, UUID courierId,
+                                   String courierName, String courierPhone) {
         orderRepo.findById(ecommerceOrderId).ifPresent(order -> {
             order.setDeliveryOrderId(deliveryId);
             order.setCourierUserId(courierId);
+            order.setCourierName(courierName);
+            order.setCourierPhone(courierPhone);
             if (order.getStatus() == OrderStatus.PAID) {
                 order.setStatus(OrderStatus.COURIER_ASSIGNED);
                 appendTrackingEvent(order, OrderStatus.COURIER_ASSIGNED,
                         "Courier assigned by delivery service",
                         null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
             }
-            orderRepo.save(order);
-            log.info("[ORDER] Courier assigned: orderId={} courierId={} deliveryId={}",
-                    ecommerceOrderId, courierId, deliveryId);
+            Order saved = orderRepo.save(order);
+            broadcastStatusUpdate(saved, null);
+            log.info("[ORDER] Courier assigned: orderId={} courierId={} name='{}'",
+                    ecommerceOrderId, courierId, courierName);
         });
     }
 
@@ -647,7 +661,7 @@ public class OrderService {
      * or orders already in a terminal state.
      */
     @Transactional
-    public void syncStatusFromCourier(UUID ecommerceOrderId, String deliveryStatus) {
+    public void syncStatusFromCourier(UUID ecommerceOrderId, String deliveryStatus, String proofImageUrl) {
         OrderStatus target = switch (deliveryStatus) {
             case "PICKED_UP"              -> OrderStatus.PICKED_UP;
             case "ON_THE_WAY"             -> OrderStatus.IN_TRANSIT;
@@ -670,11 +684,27 @@ public class OrderService {
             applyMilestoneTimestamp(order, target);
             order.setStatus(target);
             appendTrackingEvent(order, target, "Synced from courier backend",
-                    null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                    null, null, null, proofImageUrl, SYSTEM_ACTOR_ID, "SYSTEM");
             orderRepo.save(order);
             log.info("[ORDER] Status synced from courier: orderId={} status={}",
                     ecommerceOrderId, target);
         });
+    }
+
+    /**
+     * Broadcasts a real-time status update to the customer via WebSocket.
+     * Topic: /topic/orders/{orderId}/status
+     */
+    public void broadcastStatusUpdate(Order order, String proofImageUrl) {
+        String destination = "/topic/orders/" + order.getId() + "/status";
+        java.util.Map<String, Object> payload = java.util.Map.of(
+                "orderId", order.getId().toString(),
+                "status",  order.getStatus().name(),
+                "proofImageUrl", proofImageUrl != null ? proofImageUrl : "",
+                "timestamp", Instant.now().toString()
+        );
+        messagingTemplate.convertAndSend((String) destination, (Object) payload);
+        log.debug("[ORDER-WS] Status broadcast orderId={} status={}", order.getId(), order.getStatus());
     }
 
     /**
@@ -727,6 +757,13 @@ public class OrderService {
     private void appendTrackingEvent(Order order, OrderStatus status, String notes,
                                       Double lat, Double lng, String locationDescription,
                                       UUID actorId, String actorRole) {
+        appendTrackingEvent(order, status, notes, lat, lng, locationDescription, null, actorId, actorRole);
+    }
+
+    private void appendTrackingEvent(Order order, OrderStatus status, String notes,
+                                      Double lat, Double lng, String locationDescription,
+                                      String proofImageUrl,
+                                      UUID actorId, String actorRole) {
         OrderTrackingEvent event = new OrderTrackingEvent();
         event.setOrder(order);
         event.setStatus(status);
@@ -734,6 +771,7 @@ public class OrderService {
         event.setLatitude(lat);
         event.setLongitude(lng);
         event.setLocationDescription(locationDescription);
+        event.setProofImageUrl(proofImageUrl);
         event.setActorId(actorId);
         event.setActorRole(actorRole);
         order.getTrackingHistory().add(event);
@@ -784,7 +822,7 @@ public class OrderService {
         res.setUpdatedAt(o.getUpdatedAt());
 
         res.setItems(o.getItems().stream().map(this::toItemResponse).toList());
-        res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingResponse).toList());
+        res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingEventResponse).toList());
         return res;
     }
 
@@ -803,7 +841,7 @@ public class OrderService {
         return res;
     }
 
-    private TrackingEventResponse toTrackingResponse(OrderTrackingEvent e) {
+    private TrackingEventResponse toTrackingEventResponse(OrderTrackingEvent e) {
         TrackingEventResponse res = new TrackingEventResponse();
         res.setId(e.getId());
         res.setStatus(e.getStatus());
@@ -811,6 +849,7 @@ public class OrderService {
         res.setLatitude(e.getLatitude());
         res.setLongitude(e.getLongitude());
         res.setLocationDescription(e.getLocationDescription());
+        res.setProofImageUrl(e.getProofImageUrl());
         res.setActorId(e.getActorId());
         res.setActorRole(e.getActorRole());
         res.setCreatedAt(e.getCreatedAt());

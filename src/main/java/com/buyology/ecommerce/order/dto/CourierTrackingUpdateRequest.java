@@ -22,6 +22,8 @@ public class CourierTrackingUpdateRequest {
 
     private String locationDescription;
 
+    private String proofImageUrl;
+
     // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public OrderStatus getStatus() { return status; }
@@ -38,4 +40,7 @@ public class CourierTrackingUpdateRequest {
 
     public String getLocationDescription() { return locationDescription; }
     public void setLocationDescription(String locationDescription) { this.locationDescription = locationDescription; }
+
+    public String getProofImageUrl() { return proofImageUrl; }
+    public void setProofImageUrl(String proofImageUrl) { this.proofImageUrl = proofImageUrl; }
 }

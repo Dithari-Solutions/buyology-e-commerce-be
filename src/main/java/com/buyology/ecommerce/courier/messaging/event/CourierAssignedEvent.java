@@ -14,6 +14,8 @@ public record CourierAssignedEvent(
         UUID deliveryId,
         UUID ecommerceOrderId,
         UUID courierId,
+        String courierName,
+        String courierPhone,
         UUID assignmentId,
         int attemptNumber,
         Instant assignedAt
