@@ -2,6 +2,7 @@ package com.buyology.ecommerce.product.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Schema(description = "Filter parameters for product search — all fields are optional")
@@ -47,6 +48,12 @@ public class ProductFilterRequest {
     @Schema(description = "Keyboard language, e.g. EN, RU, AZ", example = "EN")
     private String keyboardLanguage;
 
+    @Schema(description = "Minimum price (inclusive), in the country's native currency", example = "200")
+    private BigDecimal minPrice;
+
+    @Schema(description = "Maximum price (inclusive), in the country's native currency", example = "2000")
+    private BigDecimal maxPrice;
+
     public String getCondition() { return condition; }
     public void setCondition(String condition) { this.condition = condition; }
 
@@ -85,4 +92,10 @@ public class ProductFilterRequest {
 
     public String getKeyboardLanguage() { return keyboardLanguage; }
     public void setKeyboardLanguage(String keyboardLanguage) { this.keyboardLanguage = keyboardLanguage; }
+
+    public BigDecimal getMinPrice() { return minPrice; }
+    public void setMinPrice(BigDecimal minPrice) { this.minPrice = minPrice; }
+
+    public BigDecimal getMaxPrice() { return maxPrice; }
+    public void setMaxPrice(BigDecimal maxPrice) { this.maxPrice = maxPrice; }
 }

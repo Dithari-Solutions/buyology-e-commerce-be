@@ -139,4 +139,18 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
     List<Object[]> findCheapestStorePerProductBatch(
             @Param("productIds") List<UUID> productIds,
             @Param("countryCode") String countryCode);
+
+    /**
+     * Returns [MIN(storePrice), MAX(storePrice)] across all active store listings.
+     * When countryCode is provided, scope to that country's stores only.
+     */
+    @Query("""
+            SELECT MIN(sp.storePrice), MAX(sp.storePrice) FROM StoreProduct sp
+            WHERE sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+              AND sp.product.status = 'ACTIVE'
+              AND (:countryCode IS NULL OR sp.store.country.code = :countryCode)
+            """)
+    Object[] findPriceRange(@Param("countryCode") String countryCode);
 }

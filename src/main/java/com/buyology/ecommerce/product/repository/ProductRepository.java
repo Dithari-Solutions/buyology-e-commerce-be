@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 import com.buyology.ecommerce.product.domain.Product;
 
@@ -28,4 +29,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     List<Product> findByStatusAndIsSuperDeal(String status, Boolean isSuperDeal);
 
     List<Product> findByStatusAndIsLimitedStock(String status, Boolean isLimitedStock);
+
+    /** Distinct availability statuses present in active products. */
+    @Query("SELECT DISTINCT p.availabilityStatus FROM Product p WHERE p.status = 'ACTIVE'")
+    List<Product.AvailabilityStatus> findDistinctAvailabilityStatuses();
+
+    /** Whether any active product has isRefurbished = :value. */
+    boolean existsByStatusAndIsRefurbished(String status, Boolean isRefurbished);
 }

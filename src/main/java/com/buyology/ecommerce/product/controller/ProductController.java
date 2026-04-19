@@ -2,7 +2,9 @@ package com.buyology.ecommerce.product.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.dto.ProductFilterRequest;
+import com.buyology.ecommerce.product.dto.ProductFiltersResponse;
 import com.buyology.ecommerce.product.dto.ProductResponse;
+import com.buyology.ecommerce.product.service.ProductFilterService;
 import com.buyology.ecommerce.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -24,9 +26,23 @@ import java.util.UUID;
 public class ProductController {
 
     private final ProductService productService;
+    private final ProductFilterService productFilterService;
 
-    public ProductController(ProductService productService) {
+    public ProductController(ProductService productService, ProductFilterService productFilterService) {
         this.productService = productService;
+        this.productFilterService = productFilterService;
+    }
+
+    @Operation(summary = "Get available filter options",
+            description = "Returns all filter options (price range, conditions, categories, brands, " +
+                    "availability statuses, and dynamic spec filters) derived from the active product catalog. " +
+                    "When countryCode is provided, price range is scoped to that country's stores.")
+    @GetMapping("/filters")
+    public ResponseEntity<ApiResponse<ProductFiltersResponse>> getFilters(
+            @RequestParam String lang,
+            @Parameter(description = "ISO 3166-1 alpha-3 country code to scope price range (e.g. UAE, AZE)")
+            @RequestParam(required = false) String countryCode) {
+        return productFilterService.getAvailableFilters(countryCode, lang);
     }
 
     @Operation(summary = "Get all active products",

@@ -4,6 +4,7 @@ import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductSpecGroup;
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
 import com.buyology.ecommerce.product.dto.ProductFilterRequest;
+import com.buyology.ecommerce.store.domain.StoreProduct;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -59,6 +60,24 @@ public class ProductSpecification {
             }
             if (Boolean.TRUE.equals(filter.getIsLimitedStock())) {
                 predicates.add(cb.isTrue(root.get("isLimitedStock")));
+            }
+
+            // Price range — EXISTS subquery on store_products (price lives there, not on product)
+            if (filter.getMinPrice() != null || filter.getMaxPrice() != null) {
+                Subquery<Integer> priceSub = query.subquery(Integer.class);
+                Root<StoreProduct> spRoot = priceSub.from(StoreProduct.class);
+                List<Predicate> pricePredicates = new ArrayList<>();
+                pricePredicates.add(cb.equal(spRoot.get("product"), root));
+                pricePredicates.add(cb.isTrue(spRoot.get("isActive")));
+                pricePredicates.add(cb.isNull(spRoot.get("deletedAt")));
+                if (filter.getMinPrice() != null) {
+                    pricePredicates.add(cb.greaterThanOrEqualTo(spRoot.get("storePrice"), filter.getMinPrice()));
+                }
+                if (filter.getMaxPrice() != null) {
+                    pricePredicates.add(cb.lessThanOrEqualTo(spRoot.get("storePrice"), filter.getMaxPrice()));
+                }
+                priceSub.select(cb.literal(1)).where(pricePredicates.toArray(new Predicate[0]));
+                predicates.add(cb.exists(priceSub));
             }
 
             // Spec-based filters — each uses an EXISTS subquery on product_spec_groups + product_spec_options
