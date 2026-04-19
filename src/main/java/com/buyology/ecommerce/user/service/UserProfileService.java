@@ -2,6 +2,7 @@ package com.buyology.ecommerce.user.service;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
@@ -15,11 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -28,25 +24,25 @@ import java.util.UUID;
 @Service
 public class UserProfileService {
 
-    private static final String AVATAR_UPLOAD_DIR = "/opt/uploads/user/avatars/";
-    private static final String AVATAR_URL_PREFIX = "/user/avatars/";
-
     private final UserRepository userRepo;
     private final UserProfilesRepository profilesRepo;
     private final UserAddressRepository addressRepo;
     private final AuthCredentialRepository authCredentialRepo;
     private final CountryRepository countryRepo;
+    private final ContaboObjectService contaboObjectService;
 
     public UserProfileService(UserRepository userRepo,
                                UserProfilesRepository profilesRepo,
                                UserAddressRepository addressRepo,
                                AuthCredentialRepository authCredentialRepo,
-                               CountryRepository countryRepo) {
+                               CountryRepository countryRepo,
+                               ContaboObjectService contaboObjectService) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
         this.addressRepo = addressRepo;
         this.authCredentialRepo = authCredentialRepo;
         this.countryRepo = countryRepo;
+        this.contaboObjectService = contaboObjectService;
     }
 
     // =========================================================================
@@ -143,19 +139,17 @@ public class UserProfileService {
         Users user = findUser(userId);
         UserProfiles profile = findOrCreateProfile(user);
 
-        String extension = resolveExtension(contentType);
-        String filename = userId + extension;
-
-        try {
-            Path uploadDir = Paths.get(AVATAR_UPLOAD_DIR);
-            Files.createDirectories(uploadDir);
-            Path target = uploadDir.resolve(filename);
-            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to save avatar file", e);
+        // Delete old avatar from S3 if present
+        if (profile.getAvatarUrl() != null && profile.getAvatarUrl().startsWith("users/")) {
+            try { contaboObjectService.deleteFile(profile.getAvatarUrl()); } catch (Exception ignored) {}
         }
 
-        profile.setAvatarUrl(AVATAR_URL_PREFIX + filename);
+        String extension = resolveExtension(contentType);
+        String key = "users/" + userId + "/avatar/" + userId + extension;
+        contaboObjectService.uploadFile(key, file);
+
+        // Store the S3 key (presigned URL generated on read)
+        profile.setAvatarUrl(key);
         profilesRepo.save(profile);
 
         return toResponse(user, profile);
@@ -226,7 +220,12 @@ public class UserProfileService {
         res.setLastName(user.getLastName());
         res.setPhoneNumber(profile.getPhoneNumber());
         res.setDateOfBirth(profile.getDateOfBirth());
-        res.setAvatarUrl(profile.getAvatarUrl());
+        String avatarUrl = null;
+        if (profile.getAvatarUrl() != null) {
+            try { avatarUrl = contaboObjectService.getPresignedUrl(profile.getAvatarUrl()); }
+            catch (Exception ignored) { avatarUrl = profile.getAvatarUrl(); }
+        }
+        res.setAvatarUrl(avatarUrl);
         res.setPaymentReady(missing.isEmpty());
         res.setMissingFields(missing);
         res.setSelectedCountryCode(profile.getSelectedCountryCode());

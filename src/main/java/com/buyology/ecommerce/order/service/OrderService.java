@@ -4,6 +4,8 @@ import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.common.outbox.OutboxEvent;
 import com.buyology.ecommerce.common.outbox.OutboxEventRepository;
+import com.buyology.ecommerce.promo.dto.ValidatePromoCodeResponse;
+import com.buyology.ecommerce.promo.service.PromoCodeService;
 import com.buyology.ecommerce.courier.CourierOrderRequest;
 import com.buyology.ecommerce.courier.CourierServiceClient;
 import com.buyology.ecommerce.courier.DeliveryRabbitMQConfig;
@@ -82,6 +84,7 @@ public class OrderService {
     private final SimpMessagingTemplate messagingTemplate;
     private final ContaboObjectService contaboObjectService;
     private final OutboxEventRepository outboxEventRepository;
+    private final PromoCodeService promoCodeService;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -98,7 +101,8 @@ public class OrderService {
                         CourierServiceClient courierServiceClient,
                         SimpMessagingTemplate messagingTemplate,
                         ContaboObjectService contaboObjectService,
-                        OutboxEventRepository outboxEventRepository) {
+                        OutboxEventRepository outboxEventRepository,
+                        PromoCodeService promoCodeService) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -115,6 +119,7 @@ public class OrderService {
         this.messagingTemplate = messagingTemplate;
         this.contaboObjectService = contaboObjectService;
         this.outboxEventRepository = outboxEventRepository;
+        this.promoCodeService = promoCodeService;
     }
 
     // =========================================================================
@@ -194,6 +199,20 @@ public class OrderService {
         // Pricing
         BigDecimal subtotal = cart.getTotalPrice();
         BigDecimal discount = BigDecimal.ZERO;
+        UUID appliedPromoId = null;
+
+        if (req.getCouponCode() != null && !req.getCouponCode().isBlank()) {
+            List<UUID> productIds = cartItems.stream()
+                    .map(ci -> ci.getProduct().getId())
+                    .collect(java.util.stream.Collectors.toList());
+            ValidatePromoCodeResponse promoResult = promoCodeService.validateAndCalculate(
+                    req.getCouponCode(), userId, subtotal, productIds);
+            if (promoResult.isValid()) {
+                discount = promoResult.getDiscountAmount();
+                appliedPromoId = promoResult.getPromoCodeId();
+            }
+        }
+
         order.setSubtotal(subtotal);
         order.setDiscount(discount);
         order.setTotalAmount(subtotal.add(shippingFee).subtract(discount));
@@ -223,6 +242,11 @@ public class OrderService {
                 null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
 
         order = orderRepo.save(order);
+
+        if (appliedPromoId != null) {
+            promoCodeService.recordUsage(appliedPromoId, order.getId(), userId, discount);
+        }
+
         return toOrderResponse(order);
     }
 

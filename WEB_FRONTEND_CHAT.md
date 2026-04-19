@@ -215,6 +215,7 @@ export function ChatPanel({ ecommerceOrderId, deliveryOrderId, accessToken, orde
   const [connected, setConnected] = useState(false);
   const clientRef = useRef<Client | null>(null);
 
+
   const isChatActive = ['COURIER_ASSIGNED', 'PICKED_UP', 'IN_TRANSIT'].includes(orderStatus);
 
   // Load history
