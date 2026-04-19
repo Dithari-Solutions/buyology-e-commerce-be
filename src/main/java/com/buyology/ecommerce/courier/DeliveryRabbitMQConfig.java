@@ -15,8 +15,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class DeliveryRabbitMQConfig {
 
-    public static final String ECOMMERCE_EXCHANGE          = "buyology.ecommerce.exchange";
-    public static final String ORDER_DELIVERY_REQUESTED_KEY = "order.delivery.requested";
+    public static final String ECOMMERCE_EXCHANGE             = "buyology.ecommerce.exchange";
+    public static final String ORDER_DELIVERY_REQUESTED_KEY  = "order.delivery.requested";
+    public static final String ORDER_DELIVERY_CANCELLED_KEY  = "order.delivery.cancelled";
 
     @Bean
     TopicExchange ecommerceExchange() {

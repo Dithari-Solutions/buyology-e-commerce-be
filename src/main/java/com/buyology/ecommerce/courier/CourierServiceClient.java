@@ -1,9 +1,12 @@
 package com.buyology.ecommerce.courier;
 
+import com.buyology.ecommerce.common.outbox.OutboxEvent;
+import com.buyology.ecommerce.common.outbox.OutboxEventRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -24,7 +27,8 @@ public class CourierServiceClient {
 
     private final WebClient webClient;
     private final CourierServiceTokenProvider tokenProvider;
-    private final RabbitTemplate rabbitTemplate;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
     private final StoreLocationRepository storeLocationRepository;
 
     @Value("${courier.service.timeout-ms:10000}")
@@ -33,12 +37,14 @@ public class CourierServiceClient {
     public CourierServiceClient(
             @Value("${courier.service.url:http://localhost:8081}") String baseUrl,
             CourierServiceTokenProvider tokenProvider,
-            RabbitTemplate rabbitTemplate,
+            OutboxEventRepository outboxEventRepository,
+            ObjectMapper objectMapper,
             StoreLocationRepository storeLocationRepository
     ) {
-        this.webClient             = WebClient.builder().baseUrl(baseUrl).build();
-        this.tokenProvider         = tokenProvider;
-        this.rabbitTemplate        = rabbitTemplate;
+        this.webClient               = WebClient.builder().baseUrl(baseUrl).build();
+        this.tokenProvider           = tokenProvider;
+        this.outboxEventRepository   = outboxEventRepository;
+        this.objectMapper            = objectMapper;
         this.storeLocationRepository = storeLocationRepository;
     }
 
@@ -203,17 +209,22 @@ public class CourierServiceClient {
                     java.time.Instant.now()
             );
 
-            log.info("[COURIER-CLIENT] publishing event to exchange={} routingKey={} — {}",
+            log.info("[COURIER-CLIENT] writing order {} to outbox — exchange={} routingKey={}",
+                    req.getOrderId(),
                     DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE,
-                    DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY,
-                    event);
+                    DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY);
 
-            rabbitTemplate.convertAndSend(
-                    DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE,
-                    DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY,
-                    event
-            );
-            log.info("[COURIER-CLIENT] successfully published order {} to courier exchange", req.getOrderId());
+            try {
+                outboxEventRepository.save(OutboxEvent.builder()
+                        .exchange(DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE)
+                        .routingKey(DeliveryRabbitMQConfig.ORDER_DELIVERY_REQUESTED_KEY)
+                        .payload(objectMapper.writeValueAsString(event))
+                        .eventVersion(1)
+                        .build());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException("Failed to serialize DeliveryOrderEvent for order " + req.getOrderId(), e);
+            }
+            log.info("[COURIER-CLIENT] order {} queued in outbox for courier backend", req.getOrderId());
         } catch (Exception e) {
             log.error("[COURIER-CLIENT] failed to publish order {} to courier exchange: {}",
                     req.getOrderId(), e.getMessage(), e);

@@ -2,8 +2,13 @@ package com.buyology.ecommerce.order.service;
 
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
+import com.buyology.ecommerce.common.outbox.OutboxEvent;
+import com.buyology.ecommerce.common.outbox.OutboxEventRepository;
 import com.buyology.ecommerce.courier.CourierOrderRequest;
 import com.buyology.ecommerce.courier.CourierServiceClient;
+import com.buyology.ecommerce.courier.DeliveryRabbitMQConfig;
+import com.buyology.ecommerce.courier.messaging.event.OrderCancelledEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.buyology.ecommerce.cart.repository.CartItemRepository;
 import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
@@ -76,6 +81,7 @@ public class OrderService {
     private final CourierServiceClient courierServiceClient;
     private final SimpMessagingTemplate messagingTemplate;
     private final ContaboObjectService contaboObjectService;
+    private final OutboxEventRepository outboxEventRepository;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -91,7 +97,8 @@ public class OrderService {
                         ObjectMapper objectMapper,
                         CourierServiceClient courierServiceClient,
                         SimpMessagingTemplate messagingTemplate,
-                        ContaboObjectService contaboObjectService) {
+                        ContaboObjectService contaboObjectService,
+                        OutboxEventRepository outboxEventRepository) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -107,6 +114,7 @@ public class OrderService {
         this.courierServiceClient = courierServiceClient;
         this.messagingTemplate = messagingTemplate;
         this.contaboObjectService = contaboObjectService;
+        this.outboxEventRepository = outboxEventRepository;
     }
 
     // =========================================================================
@@ -570,7 +578,30 @@ public class OrderService {
 
         Order saved = orderRepo.save(order);
         broadcastStatusUpdate(saved, null);
+
+        // Notify courier backend to cancel the in-flight delivery
+        if (req.getStatus() == OrderStatus.CANCELLED
+                && order.getDeliveryMethod() == DeliveryMethod.EXPRESS
+                && order.getDeliveryOrderId() != null) {
+            publishOrderCancelledEvent(order.getId(), req.getNotes());
+        }
+
         return toOrderResponse(saved);
+    }
+
+    private void publishOrderCancelledEvent(UUID orderId, String reason) {
+        OrderCancelledEvent event = new OrderCancelledEvent(orderId, reason, Instant.now());
+        try {
+            outboxEventRepository.save(OutboxEvent.builder()
+                    .exchange(DeliveryRabbitMQConfig.ECOMMERCE_EXCHANGE)
+                    .routingKey(DeliveryRabbitMQConfig.ORDER_DELIVERY_CANCELLED_KEY)
+                    .payload(objectMapper.writeValueAsString(event))
+                    .eventVersion(1)
+                    .build());
+            log.info("[ORDER] Cancellation queued in outbox for courier — orderId={}", orderId);
+        } catch (JsonProcessingException e) {
+            log.error("[ORDER] Failed to serialize OrderCancelledEvent for orderId={}: {}", orderId, e.getMessage(), e);
+        }
     }
 
     /**

@@ -195,6 +195,12 @@
       "name": "paymob.tamara.integration-id",
       "type": "java.lang.String",
       "description": "Paymob integration ID for Tamara (buy now pay later). Set via PAYMOB_TAMARA_INTEGRATION_ID env var."
+    },
+    {
+      "name": "outbox.poll-interval-ms",
+      "type": "java.lang.Long",
+      "description": "Interval in milliseconds between outbox publisher job runs — polls for PENDING events and publishes them to RabbitMQ.",
+      "defaultValue": 5000
     }
   ]
 }
