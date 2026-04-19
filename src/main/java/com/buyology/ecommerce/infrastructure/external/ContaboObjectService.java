@@ -77,6 +77,12 @@ public class ContaboObjectService {
             }
         }
 
+        // Strip any existing query string — the presigner adds its own
+        int queryIdx = cleanKey.indexOf('?');
+        if (queryIdx != -1) {
+            cleanKey = cleanKey.substring(0, queryIdx);
+        }
+
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(properties.getBucketName())
                 .key(cleanKey)
