@@ -131,6 +131,7 @@ public class ProductFilterService {
         // 5. Availability statuses present in the catalog
         List<String> availabilityStatuses = productRepository.findDistinctAvailabilityStatuses()
                 .stream()
+                .filter(java.util.Objects::nonNull)
                 .map(Enum::name)
                 .toList();
         response.setAvailabilityStatuses(availabilityStatuses);

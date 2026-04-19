@@ -31,7 +31,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     List<Product> findByStatusAndIsLimitedStock(String status, Boolean isLimitedStock);
 
     /** Distinct availability statuses present in active products. */
-    @Query("SELECT DISTINCT p.availabilityStatus FROM Product p WHERE p.status = 'ACTIVE'")
+    @Query("SELECT DISTINCT p.availabilityStatus FROM Product p WHERE p.status = 'ACTIVE' AND p.availabilityStatus IS NOT NULL")
     List<Product.AvailabilityStatus> findDistinctAvailabilityStatuses();
 
     /** Whether any active product has isRefurbished = :value. */
