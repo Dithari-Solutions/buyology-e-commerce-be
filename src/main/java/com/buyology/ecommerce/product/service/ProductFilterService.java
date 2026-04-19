@@ -75,11 +75,12 @@ public class ProductFilterService {
         ProductFiltersResponse response = new ProductFiltersResponse();
 
         // 1. Price range
-        Object[] priceRow = storeProductRepository.findPriceRange(countryCode);
-        if (priceRow != null && priceRow[0] != null) {
-            response.setPriceRange(new PriceRangeDto(
-                    (BigDecimal) priceRow[0],
-                    (BigDecimal) priceRow[1]));
+        List<Object[]> priceRows = storeProductRepository.findPriceRange(countryCode);
+        if (!priceRows.isEmpty() && priceRows.get(0) != null && priceRows.get(0)[0] != null) {
+            Object[] row = priceRows.get(0);
+            BigDecimal min = new BigDecimal(row[0].toString());
+            BigDecimal max = new BigDecimal(row[1].toString());
+            response.setPriceRange(new PriceRangeDto(min, max));
         } else {
             response.setPriceRange(new PriceRangeDto(BigDecimal.ZERO, BigDecimal.ZERO));
         }

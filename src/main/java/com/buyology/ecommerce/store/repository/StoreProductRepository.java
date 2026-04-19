@@ -152,5 +152,5 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
               AND sp.product.status = 'ACTIVE'
               AND (:countryCode IS NULL OR sp.store.country.code = :countryCode)
             """)
-    Object[] findPriceRange(@Param("countryCode") String countryCode);
+    List<Object[]> findPriceRange(@Param("countryCode") String countryCode);
 }
