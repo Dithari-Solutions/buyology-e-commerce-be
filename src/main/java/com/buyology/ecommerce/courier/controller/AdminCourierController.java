@@ -67,6 +67,19 @@ public class AdminCourierController {
                 "/api/auth/admin/couriers", body, adminId(), clientIp(httpRequest)));
     }
 
+    // ── GET /api/admin/couriers/map ───────────────────────────────────────────
+    // Proxies → GET /api/v1/couriers/map
+    // Query params forwarded as-is: status, vehicleType, isAvailable
+
+    @GetMapping("/map")
+    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @Operation(summary = "All couriers with latest GPS location for map display")
+    public ResponseEntity<Object> getCouriersForMap(HttpServletRequest httpRequest) {
+        return parsed(courierServiceClient.forwardNoBody(
+                "GET", "/api/v1/couriers/map",
+                httpRequest.getQueryString(), adminId(), clientIp(httpRequest)));
+    }
+
     // ── GET /api/admin/couriers ────────────────────────────────────────────────
     // Proxies → GET /api/v1/couriers
     // Query params forwarded as-is: status, vehicleType, isAvailable, page, size, sort
