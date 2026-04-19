@@ -33,7 +33,7 @@ public class DeliveryMethodConverter implements AttributeConverter<DeliveryMetho
         }
 
         // Legacy mapping
-        if ("EXPRESS_DELIVERY".equalsIgnoreCase(dbData)) {
+        if ("EXPRESS_DELIVERY".equalsIgnoreCase(dbData) || "LOCAL_EXPRESS".equalsIgnoreCase(dbData)) {
             return DeliveryMethod.EXPRESS;
         }
         if ("REGULAR_ORDER".equalsIgnoreCase(dbData)) {

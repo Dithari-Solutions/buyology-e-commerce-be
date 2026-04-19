@@ -23,7 +23,7 @@ public enum DeliveryMethod {
         String normalized = value.trim().toUpperCase();
         
         // Handle legacy names
-        if ("EXPRESS_DELIVERY".equals(normalized)) {
+        if ("EXPRESS_DELIVERY".equals(normalized) || "LOCAL_EXPRESS".equals(normalized)) {
             return EXPRESS;
         }
         if ("REGULAR_ORDER".equals(normalized)) {
