@@ -110,6 +110,16 @@ public class EmailService {
         }
     }
 
+    public void sendNewsletterSubscriptionEmail(String toEmail, String unsubscribeUrl) {
+        try {
+            String template = loadTemplate("static/newsletter-subscription-confirmation.html");
+            String html = template.replace("{{UNSUBSCRIBE_URL}}", unsubscribeUrl);
+            send(toEmail, "Welcome to the Buyology Newsletter!", html);
+        } catch (Exception e) {
+            log.warn("Could not send newsletter subscription email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     public void sendB2bInquiryNotification(String adminEmail, String company, String contact,
                                             String email, String phone, int quantity, String message) {
         try {

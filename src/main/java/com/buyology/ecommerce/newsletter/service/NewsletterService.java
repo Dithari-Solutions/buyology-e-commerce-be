@@ -51,16 +51,29 @@ public class NewsletterService {
         Optional<NewsletterSubscriber> existing = subscriberRepo.findByEmailIgnoreCase(normalised);
         if (existing.isPresent()) {
             if (!existing.get().isActive()) {
-                existing.get().setActive(true);
-                subscriberRepo.save(existing.get());
+                NewsletterSubscriber sub = existing.get();
+                sub.setActive(true);
+                subscriberRepo.save(sub);
+                sendConfirmationEmail(sub);
                 return "Subscription reactivated successfully";
             }
             return "Already subscribed";
         }
         NewsletterSubscriber sub = new NewsletterSubscriber();
         sub.setEmail(normalised);
+        sub.setActive(true);
         subscriberRepo.save(sub);
+        sendConfirmationEmail(sub);
         return "Subscribed successfully";
+    }
+
+    private void sendConfirmationEmail(NewsletterSubscriber sub) {
+        try {
+            String unsubUrl = baseUrl + "/api/newsletter/unsubscribe?token=" + sub.getUnsubscribeToken();
+            emailService.sendNewsletterSubscriptionEmail(sub.getEmail(), unsubUrl);
+        } catch (Exception e) {
+            log.warn("Failed to send subscription confirmation to {}: {}", sub.getEmail(), e.getMessage());
+        }
     }
 
     @Transactional
