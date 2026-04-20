@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.repository;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductSpecGroup;
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
+import com.buyology.ecommerce.product.domain.ProductTranslation;
 import com.buyology.ecommerce.product.dto.ProductFilterRequest;
 import com.buyology.ecommerce.store.domain.StoreProduct;
 import jakarta.persistence.criteria.*;
@@ -27,6 +28,19 @@ public class ProductSpecification {
 
             // Always exclude deleted products on the public search
             predicates.add(cb.notEqual(root.get("status"), "DELETED"));
+
+            // General search query (matches title in any language)
+            if (filter.getQ() != null && !filter.getQ().isBlank()) {
+                String searchPattern = "%" + filter.getQ().toLowerCase() + "%";
+                Subquery<Integer> titleSub = query.subquery(Integer.class);
+                Root<ProductTranslation> ptRoot = titleSub.from(ProductTranslation.class);
+                titleSub.select(cb.literal(1))
+                        .where(
+                                cb.equal(ptRoot.get("product"), root),
+                                cb.like(cb.lower(ptRoot.get("title")), searchPattern)
+                        );
+                predicates.add(cb.exists(titleSub));
+            }
 
             // Condition: NEW = isRefurbished false, REFURBISHED = true
             if (filter.getCondition() != null && !filter.getCondition().isBlank()) {

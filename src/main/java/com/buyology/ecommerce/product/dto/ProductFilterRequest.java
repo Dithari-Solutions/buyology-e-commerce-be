@@ -8,6 +8,9 @@ import java.util.UUID;
 @Schema(description = "Filter parameters for product search — all fields are optional")
 public class ProductFilterRequest {
 
+    @Schema(description = "General search query (matches product title in any language)", example = "Gaming Laptop")
+    private String q;
+
     @Schema(description = "Condition: NEW or REFURBISHED", allowableValues = {"NEW", "REFURBISHED"})
     private String condition;
 
@@ -53,6 +56,9 @@ public class ProductFilterRequest {
 
     @Schema(description = "Maximum price (inclusive), in the country's native currency", example = "2000")
     private BigDecimal maxPrice;
+
+    public String getQ() { return q; }
+    public void setQ(String q) { this.q = q; }
 
     public String getCondition() { return condition; }
     public void setCondition(String condition) { this.condition = condition; }

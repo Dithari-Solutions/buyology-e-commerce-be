@@ -53,6 +53,7 @@ import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
+import com.buyology.ecommerce.product.search.service.ProductSearchService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -75,6 +76,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ProductService {
@@ -101,6 +103,7 @@ public class ProductService {
     private final CurrencyExchangeService currencyExchangeService;
     private final StoreLocationRepository storeLocationRepository;
     private final ContaboObjectService contaboObjectService;
+    private final ProductSearchService productSearchService;
 
     public ProductService(
             ProductRepository productRepository,
@@ -124,7 +127,8 @@ public class ProductService {
             CountryRepository countryRepository,
             CurrencyExchangeService currencyExchangeService,
             StoreLocationRepository storeLocationRepository,
-            ContaboObjectService contaboObjectService) {
+            ContaboObjectService contaboObjectService,
+            ProductSearchService productSearchService) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
@@ -147,6 +151,7 @@ public class ProductService {
         this.currencyExchangeService = currencyExchangeService;
         this.storeLocationRepository = storeLocationRepository;
         this.contaboObjectService = contaboObjectService;
+        this.productSearchService = productSearchService;
     }
 
     /**
@@ -232,6 +237,9 @@ public class ProductService {
         ProductResponse response = buildResponse(
                 savedProduct, first.getTitle(), first.getDescription(), first.getSlug(),
                 mediaDtos, specGroupDtos, colorDtos, variantDtos, resolvedAccessoryIds, true, "EN");
+
+        // Index in Elasticsearch
+        productSearchService.indexProduct(savedProduct, savedTranslations);
 
         return ApiResponse.created(response, "Product created successfully");
     }
@@ -398,6 +406,37 @@ public class ProductService {
                 .toList();
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProductsElastic(
+            String query, String lang, String countryCode, String currency, Double lat, Double lng) {
+        List<com.buyology.ecommerce.product.search.domain.ProductDocument> searchResults = productSearchService.search(query);
+        
+        List<UUID> productIds = searchResults.stream()
+                .map(com.buyology.ecommerce.product.search.domain.ProductDocument::getId)
+                .collect(Collectors.toList());
+        
+        if (productIds.isEmpty()) {
+            return ApiResponse.success(List.of(), "No products found matching the query");
+        }
+
+        List<Product> products = productRepository.findAllById(productIds).stream()
+                .filter(p -> "ACTIVE".equals(p.getStatus()))
+                .toList();
+
+        // Maintain order from search results
+        Map<UUID, Product> productMap = products.stream().collect(Collectors.toMap(Product::getId, p -> p));
+        List<Product> orderedProducts = productIds.stream()
+                .map(productMap::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
+        List<ProductResponse> responses = orderedProducts.stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        
+        applyBatchCountryPricing(responses, orderedProducts, countryCode, currency, lat, lng);
+        return ApiResponse.success(responses, "Search results fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(

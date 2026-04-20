@@ -95,15 +95,11 @@ public class ProductController {
         return productService.getProductsByCategoryPublic(categoryId, lang, countryCode, currency, lat, lng);
     }
 
-    @Operation(summary = "Search and filter active products",
-            description = "All filter params are optional. Spec filters (ram, storage, processor, " +
-                    "screenSize, touchableScreen, operatingSystem, keyboardLanguage) match against " +
-                    "product spec groups using codes: ram, storage, processor, screen_size, " +
-                    "touchable_screen, operating_system, keyboard_language. " +
-                    "When countryCode is provided, results are scoped to stores in that country.")
-    @GetMapping("/search")
-    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
-            @ModelAttribute ProductFilterRequest filter,
+    @Operation(summary = "Search products using Elasticsearch",
+            description = "Performs a full-text search across product titles, descriptions, categories, and brands.")
+    @GetMapping("/search-elastic")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProductsElastic(
+            @RequestParam String query,
             @RequestParam String lang,
             @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
@@ -113,6 +109,6 @@ public class ProductController {
             @RequestParam(required = false) Double lat,
             @Parameter(description = "Customer longitude for express delivery badge")
             @RequestParam(required = false) Double lng) {
-        return productService.searchProducts(filter, lang, countryCode, currency, lat, lng);
+        return productService.searchProductsElastic(query, lang, countryCode, currency, lat, lng);
     }
 }
