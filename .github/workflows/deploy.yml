@@ -152,7 +152,25 @@ jobs:
               -e "SPRING_RABBITMQ_USERNAME=$RABBITMQ_USERNAME" \
               -e "SPRING_RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
               -e "SPRING_RABBITMQ_VIRTUAL_HOST=/" \
+              -e "SPRING_ELASTICSEARCH_URIS=http://ecommerce-elasticsearch:9200" \
               "$DOCKER_USERNAME/ecommerce-app:latest"
 
+            # Ensure elasticsearch is running
+            if ! [ "$(docker ps -q -f name=ecommerce-elasticsearch)" ]; then
+                if [ "$(docker ps -aq -f name=ecommerce-elasticsearch)" ]; then
+                    docker start ecommerce-elasticsearch
+                else
+                    docker run -d \
+                      --name ecommerce-elasticsearch \
+                      --network ecommerce-network \
+                      --restart always \
+                      -e "discovery.type=single-node" \
+                      -e "xpack.security.enabled=false" \
+                      -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+                      docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+                fi
+            fi
+
             # Connect to courier's network so buyology-rabbitmq hostname resolves
-            docker network connect buyology-e-commerce-courier-be_default ecommerce-app
+            docker network connect buyology-e-commerce-courier-be_default ecommerce-app || true
+            docker network connect ecommerce-network ecommerce-elasticsearch || true
