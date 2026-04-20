@@ -45,6 +45,20 @@ public class ProductSearchService {
         productSearchRepository.save(doc);
     }
 
+    public void reindexAll(List<Product> products, java.util.function.Function<Product, List<ProductTranslation>> translationLoader) {
+        long count = productSearchRepository.count();
+        if (count > 0) {
+            log.info("[ES] Index already has {} documents, skipping reindex", count);
+            return;
+        }
+        log.info("[ES] Reindexing {} products into Elasticsearch", products.size());
+        List<ProductDocument> docs = products.stream()
+                .map(p -> mapToDocument(p, translationLoader.apply(p)))
+                .collect(Collectors.toList());
+        productSearchRepository.saveAll(docs);
+        log.info("[ES] Reindex complete");
+    }
+
     public void deleteProduct(Product product) {
         productSearchRepository.deleteById(product.getId());
     }
