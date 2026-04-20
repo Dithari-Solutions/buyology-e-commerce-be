@@ -8,7 +8,7 @@ import org.springframework.data.elasticsearch.annotations.FieldType;
 import java.util.List;
 import java.util.UUID;
 
-@Document(indexName = "products", createIndex = false)
+@Document(indexName = "products", createIndex = true)
 public class ProductDocument {
 
     @Id
