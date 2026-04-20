@@ -167,7 +167,7 @@ jobs:
                       -e "discovery.type=single-node" \
                       -e "xpack.security.enabled=false" \
                       -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
-                      docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+                      docker.elastic.co/elasticsearch/elasticsearch:8.17.0
                 fi
             fi
 
