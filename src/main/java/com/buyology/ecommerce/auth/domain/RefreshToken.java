@@ -15,7 +15,7 @@ public class RefreshToken {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "auth_id", nullable = false, foreignKey = @ForeignKey(name = "fk_refresh_token_auth"))
-    private AuthCredentials authCredentials;
+    private AuthCredentials authCredential;
 
     @Column(nullable = false, unique = true)
     private String token;
@@ -42,7 +42,7 @@ public class RefreshToken {
     }
 
     public RefreshToken(AuthCredentials authCredentials, String token, Instant expiresAt, String deviceInfo) {
-        this.authCredentials = authCredentials;
+        this.authCredential = authCredentials;
         this.token = token;
         this.expiresAt = expiresAt;
         this.deviceInfo = deviceInfo;
@@ -60,11 +60,11 @@ public class RefreshToken {
     }
 
     public AuthCredentials getAuthCredential() {
-        return authCredentials;
+        return authCredential;
     }
 
     public void setAuthCredential(AuthCredentials authCredentials) {
-        this.authCredentials = authCredentials;
+        this.authCredential = authCredentials;
     }
 
     public String getToken() {
