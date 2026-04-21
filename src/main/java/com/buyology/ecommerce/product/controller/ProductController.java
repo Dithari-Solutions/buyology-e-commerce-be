@@ -111,4 +111,17 @@ public class ProductController {
             @RequestParam(required = false) Double lng) {
         return productService.searchProductsElastic(query, lang, countryCode, currency, lat, lng);
     }
+
+    @Operation(summary = "Search and filter products",
+            description = "Binds multiple optional filters (brand, category, condition, etc.) via query parameters.")
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
+            @ModelAttribute ProductFilterRequest filter,
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productService.searchProducts(filter, lang, countryCode, currency, lat, lng);
+    }
 }

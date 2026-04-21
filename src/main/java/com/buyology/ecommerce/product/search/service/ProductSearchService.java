@@ -2,6 +2,8 @@ package com.buyology.ecommerce.product.search.service;
 
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductTranslation;
+import com.buyology.ecommerce.product.repository.BrandTranslationRepository;
+import com.buyology.ecommerce.product.repository.ProductCategoryTranslationRepository;
 import com.buyology.ecommerce.product.search.domain.ProductDocument;
 import com.buyology.ecommerce.product.search.repository.ProductSearchRepository;
 import org.slf4j.Logger;
@@ -25,10 +27,18 @@ public class ProductSearchService {
 
     private final ProductSearchRepository productSearchRepository;
     private final ElasticsearchOperations elasticsearchOperations;
+    private final BrandTranslationRepository brandTranslationRepository;
+    private final ProductCategoryTranslationRepository categoryTranslationRepository;
 
-    public ProductSearchService(ProductSearchRepository productSearchRepository, ElasticsearchOperations elasticsearchOperations) {
+    public ProductSearchService(
+            ProductSearchRepository productSearchRepository,
+            ElasticsearchOperations elasticsearchOperations,
+            BrandTranslationRepository brandTranslationRepository,
+            ProductCategoryTranslationRepository categoryTranslationRepository) {
         this.productSearchRepository = productSearchRepository;
         this.elasticsearchOperations = elasticsearchOperations;
+        this.brandTranslationRepository = brandTranslationRepository;
+        this.categoryTranslationRepository = categoryTranslationRepository;
         ensureIndexExists();
     }
 
@@ -48,15 +58,20 @@ public class ProductSearchService {
     public void reindexAll(List<Product> products, java.util.function.Function<Product, List<ProductTranslation>> translationLoader) {
         long count = productSearchRepository.count();
         if (count > 0) {
-            log.info("[ES] Index already has {} documents, skipping reindex", count);
+            log.info("[ES] Index already has {} documents, skipping reindex. Use manual trigger if needed.", count);
             return;
         }
-        log.info("[ES] Reindexing {} products into Elasticsearch", products.size());
+        forceReindex(products, translationLoader);
+    }
+
+    public void forceReindex(List<Product> products, java.util.function.Function<Product, List<ProductTranslation>> translationLoader) {
+        log.info("[ES] Force reindexing {} products into Elasticsearch", products.size());
+        productSearchRepository.deleteAll();
         List<ProductDocument> docs = products.stream()
                 .map(p -> mapToDocument(p, translationLoader.apply(p)))
                 .collect(Collectors.toList());
         productSearchRepository.saveAll(docs);
-        log.info("[ES] Reindex complete");
+        log.info("[ES] Force reindex complete");
     }
 
     public void deleteProduct(Product product) {
@@ -66,9 +81,26 @@ public class ProductSearchService {
     public List<ProductDocument> search(String query) {
         NativeQuery nativeQuery = NativeQuery.builder()
                 .withQuery(q -> q
-                        .multiMatch(m -> m
-                                .fields("translations.title", "translations.description", "categoryName", "brandName")
-                                .query(query)
+                        .bool(b -> b
+                                .should(s -> s
+                                        .nested(n -> n
+                                                .path("translations")
+                                                .query(nq -> nq
+                                                        .multiMatch(m -> m
+                                                                .fields("translations.title^2", "translations.description")
+                                                                .query(query)
+                                                                .fuzziness("AUTO")
+                                                        )
+                                                )
+                                        )
+                                )
+                                .should(s -> s
+                                        .multiMatch(m -> m
+                                                .fields("categoryName", "brandName", "sku")
+                                                .query(query)
+                                                .fuzziness("AUTO")
+                                        )
+                                )
                         )
                 )
                 .build();
@@ -91,11 +123,19 @@ public class ProductSearchService {
         doc.setSku(product.getSku());
         doc.setStatus(product.getStatus());
         doc.setCategoryId(product.getCategory().getId());
-        // Category name and Brand name would ideally come from their translations too,
-        // but for simplicity we take them from the entity if available or just leave null for now
-        // In a real app, you'd fetch the primary language translation.
         
-        doc.setBrandId(product.getBrand() != null ? product.getBrand().getId() : null);
+        // Populate category names from all translations to make it searchable
+        String categoryNames = categoryTranslationRepository.findAllByCategoryId(product.getCategory().getId())
+                .stream().map(t -> t.getName()).collect(Collectors.joining(" "));
+        doc.setCategoryName(categoryNames);
+
+        if (product.getBrand() != null) {
+            doc.setBrandId(product.getBrand().getId());
+            String brandNames = brandTranslationRepository.findAllByBrand_Id(product.getBrand().getId())
+                    .stream().map(t -> t.getName()).collect(Collectors.joining(" "));
+            doc.setBrandName(brandNames);
+        }
+        
         doc.setProductType(product.getProductType() != null ? product.getProductType().name() : null);
         doc.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
         doc.setIsSuperDeal(product.getIsSuperDeal());

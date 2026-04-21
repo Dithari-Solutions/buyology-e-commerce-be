@@ -104,6 +104,13 @@ public class AdminProductController {
         return productService.restoreFromTrash(productId, lang);
     }
 
+    @Operation(summary = "Manually trigger Elasticsearch reindexing for all products",
+            description = "Deletes the existing index and rebuilds it from the database. Use this if search results are out of sync.")
+    @PostMapping("/reindex")
+    public ResponseEntity<ApiResponse<Void>> reindex() {
+        return productService.reindexElasticsearch();
+    }
+
     private static class CreateProductForm {
 
         @Schema(

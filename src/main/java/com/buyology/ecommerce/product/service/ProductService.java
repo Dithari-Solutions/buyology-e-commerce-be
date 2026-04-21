@@ -440,6 +440,20 @@ public class ProductService {
         return ApiResponse.success(responses, "Search results fetched successfully");
     }
 
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> reindexElasticsearch() {
+        List<Product> products = productRepository.findAll();
+        // Clear index is handled by the force-reindex implementation we'll use
+        // or just by the repository saveAll which overwrites if IDs match.
+        // However, to be safe and clean up deleted products, a clear is better.
+        // We'll update the search service to support a force reindex.
+        productSearchService.forceReindex(
+                products,
+                product -> translationRepository.findByProductId(product.getId())
+        );
+        return ApiResponse.success(null, "Elasticsearch reindexing triggered successfully for " + products.size() + " products");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryPublic(
             UUID categoryId, String lang, String countryCode, String currency, Double lat, Double lng) {
         categoryRepository.findById(categoryId)
