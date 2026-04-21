@@ -19,6 +19,7 @@ import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreOperatingHoursRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.store.repository.StoreTranslationRepository;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -222,6 +223,7 @@ public class StoreService {
     private static final String STORE_UPLOAD_PATH = "/opt/uploads/store";
 
     private String saveBannerFile(UUID storeId, MultipartFile file) {
+        FileValidationUtils.validateImage(file);
         Path dir = Paths.get(STORE_UPLOAD_PATH, storeId.toString());
         try {
             Files.createDirectories(dir);

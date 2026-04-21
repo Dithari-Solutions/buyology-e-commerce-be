@@ -2,6 +2,7 @@ package com.buyology.ecommerce.user.service;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;

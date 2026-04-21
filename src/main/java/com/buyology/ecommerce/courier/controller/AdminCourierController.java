@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.courier.controller;
 
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.courier.CourierServiceClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -194,6 +195,7 @@ public class AdminCourierController {
     private void addFilePart(MultiValueMap<String, HttpEntity<?>> body,
                               String partName, MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) return;
+        FileValidationUtils.validateImage(file);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType(
                 file.getContentType() != null ? file.getContentType() : "application/octet-stream"));

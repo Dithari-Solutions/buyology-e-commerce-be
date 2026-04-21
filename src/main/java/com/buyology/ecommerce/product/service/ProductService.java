@@ -22,6 +22,7 @@ import com.buyology.ecommerce.product.domain.ProductVariant;
 import com.buyology.ecommerce.product.domain.ProductVariantOption;
 import com.buyology.ecommerce.product.dto.CreateColorRequest;
 import com.buyology.ecommerce.product.dto.CreateProductRequest;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.common.utils.SlugUtils;
 import com.buyology.ecommerce.product.dto.CreateSpecGroupRequest;
 import com.buyology.ecommerce.product.dto.CreateSpecOptionRequest;
@@ -948,6 +949,7 @@ public class ProductService {
     }
 
     private String uploadToContabo(UUID productId, MultipartFile file, String baseName) {
+        FileValidationUtils.validateImage(file);
         String originalFilename = file.getOriginalFilename();
         String extension = "";
         if (originalFilename != null && originalFilename.contains(".")) {

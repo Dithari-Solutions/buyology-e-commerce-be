@@ -21,6 +21,7 @@ import com.buyology.ecommerce.story.repository.StoryRepository;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
 import org.springframework.transaction.annotation.Transactional;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 
 @Service
@@ -62,6 +63,9 @@ public class StoryService {
     @Transactional
     public Story createStory(CreateStoryRequest request, MultipartFile thumbnail,
             List<MultipartFile> mediaFiles, UUID createdBy) {
+        FileValidationUtils.validateImage(thumbnail);
+        FileValidationUtils.validateMediaList(mediaFiles);
+
         Story story = new Story(createdBy);
 
         // Build and add translations from single translation object
@@ -295,6 +299,7 @@ public class StoryService {
 
     @Transactional
     public Story addMediaToStory(UUID storyId, List<MultipartFile> mediaFiles) {
+        FileValidationUtils.validateMediaList(mediaFiles);
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 

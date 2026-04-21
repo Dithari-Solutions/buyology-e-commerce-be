@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.common.exception;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.exception.FileValidationException;
 import com.buyology.ecommerce.order.exception.OrderNotFoundException;
 import com.buyology.ecommerce.product.domain.ProductNotFoundException;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
@@ -44,6 +45,11 @@ public class GlobalExceptionHandler {
     }
 
     // ── Validation & bad-input ────────────────────────────────────────────────
+
+    @ExceptionHandler(FileValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleFileValidation(FileValidationException ex) {
+        return ApiResponse.failure(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {

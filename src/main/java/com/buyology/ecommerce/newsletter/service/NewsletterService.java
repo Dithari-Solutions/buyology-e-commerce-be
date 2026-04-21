@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.newsletter.service;
 
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.newsletter.domain.NewsArticle;
 import com.buyology.ecommerce.newsletter.domain.NewsletterSubscriber;
@@ -105,6 +106,7 @@ public class NewsletterService {
         article.setCreatedBy(adminId);
 
         if (image != null && !image.isEmpty()) {
+            FileValidationUtils.validateImage(image);
             String key = "news/" + UUID.randomUUID() + "/" + image.getOriginalFilename();
             contaboObjectService.uploadFile(key, image);
             article.setImageKey(key);

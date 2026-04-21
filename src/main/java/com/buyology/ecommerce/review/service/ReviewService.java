@@ -18,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -420,6 +421,7 @@ public class ReviewService {
     // ── File helpers ──────────────────────────────────────────────────────────
 
     private String saveFile(Path dir, MultipartFile file, String baseName) {
+        FileValidationUtils.validateImage(file);
         String original = file.getOriginalFilename();
         String extension = "";
         if (original != null && original.contains(".")) {
