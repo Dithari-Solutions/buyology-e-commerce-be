@@ -25,7 +25,6 @@ public class FileValidationUtils {
             "<?PHP",
             "<script",
             "<SCRIPT",
-            "#!",
             "eval(",
             "exec(",
             "system(",

@@ -373,6 +373,26 @@ public class ProductService {
         return ApiResponse.success(response, "Product fetched successfully");
     }
 
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getRelatedProducts(
+            UUID productId, String lang, String countryCode, String currency, Double lat, Double lng) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        // Get products from same category, exclude current product, limit to 4
+        List<Product> related = productRepository.findByStatusAndCategoryId("ACTIVE", product.getCategory().getId())
+                .stream()
+                .filter(p -> !p.getId().equals(productId))
+                .limit(4)
+                .toList();
+
+        List<ProductResponse> responses = related.stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        
+        applyBatchCountryPricing(responses, related, countryCode, currency, lat, lng);
+        return ApiResponse.success(responses, "Related products fetched successfully");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
             String lang, String countryCode, String currency, Double lat, Double lng) {
         List<Product> products = (countryCode != null && !countryCode.isBlank())
