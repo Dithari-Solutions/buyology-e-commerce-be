@@ -203,14 +203,9 @@
       "defaultValue": false
     },
     {
-      "name": "firebase.service-account-json",
-      "type": "java.lang.String",
-      "description": "Raw Firebase service account JSON string. Injected from FIREBASE_SERVICE_ACCOUNT_KEY env var. Takes precedence over firebase.service-account-key when non-blank."
-    },
-    {
       "name": "firebase.service-account-key",
       "type": "java.lang.String",
-      "description": "Classpath or file path to the Firebase service account JSON file. Fallback when firebase.service-account-json is not set.",
+      "description": "Spring Resource path to the Firebase service account JSON file. In production this is file:/firebase/service-account.json (mounted from the VPS via Docker volume). For local dev use classpath:firebase-service-account.json.",
       "defaultValue": "classpath:firebase-service-account.json"
     },
     {

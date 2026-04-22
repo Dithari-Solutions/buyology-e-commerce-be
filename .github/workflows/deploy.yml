@@ -96,6 +96,11 @@ jobs:
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
             docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
 
+            # Decode Firebase service-account JSON from base64 secret to a file on the VPS.
+            # The secret must be stored as base64: cat service-account.json | base64 | tr -d '\n'
+            mkdir -p /opt/buyology/firebase
+            echo "$FIREBASE_SERVICE_ACCOUNT_KEY" | base64 -d > /opt/buyology/firebase/service-account.json
+
             docker stop ecommerce-app || true
             docker rm ecommerce-app || true
 
@@ -106,6 +111,7 @@ jobs:
               --network ecommerce-network \
               --dns 8.8.8.8 \
               --dns 1.1.1.1 \
+              -v /opt/buyology/firebase/service-account.json:/firebase/service-account.json:ro \
               -e SPRING_PROFILES_ACTIVE=prod \
               -e "SPRING_DATASOURCE_URL=$DB_URL" \
               -e "SPRING_DATASOURCE_USERNAME=$DB_USERNAME" \
@@ -129,7 +135,6 @@ jobs:
               -e "PAYMOB_HMAC_SECRET=$PAYMOB_HMAC_SECRET" \
               -e "PAYMOB_NOTIFICATION_URL=$PAYMOB_NOTIFICATION_URL" \
               -e "PAYMOB_REDIRECTION_URL=$PAYMOB_REDIRECTION_URL" \
-              -e "PAYMOB_BASE_URL=$PAYMOB_BASE_URL" \
               -e "PAYMOB_BASE_URL=https://uae.paymob.com" \
               -e "PAYMOB_CARD_INTEGRATION_ID=$PAYMOB_CARD_INTEGRATION_ID" \
               -e "PAYMOB_CARD_IFRAME_ID=$PAYMOB_CARD_IFRAME_ID" \
@@ -139,7 +144,6 @@ jobs:
               -e "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" \
               -e "TWILIO_PHONE_NUMBER=$TWILIO_PHONE_NUMBER" \
               -e "FIREBASE_ENABLED=true" \
-              -e "FIREBASE_SERVICE_ACCOUNT_KEY=$FIREBASE_SERVICE_ACCOUNT_KEY" \
               -e "COURIER_SERVICE_PRIVATE_KEY=$COURIER_SERVICE_PRIVATE_KEY" \
               -e "CONTABO_S3_ENDPOINT=$CONTABO_S3_ENDPOINT" \
               -e "CONTABO_S3_ACCESS_KEY=$CONTABO_S3_ACCESS_KEY" \
