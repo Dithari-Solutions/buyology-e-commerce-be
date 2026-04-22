@@ -26,9 +26,12 @@ Use this endpoint to fetch the primary product data.
 3.  **Variant Selector**:
     *   The `colors` array provides color circles (using `colorCode`) and localized `value`.
     *   Selecting a color should update the gallery with that color's specific `media` items.
-4.  **Specifications & Upgrades**:
+4.  **Specifications & Variants**:
     *   The `specs` array contains grouped specifications (e.g., Memory, Storage).
-    *   **Selection Logic**: If an option in `specs` has `additionalPrice > 0`, it's an upgrade. Update the total price in the UI: `Total = storePrice + selectedUpgradePrice`.
+    *   **Selection Logic**: Users pick one option from every spec group.
+    *   **Variant ID**: Match the selected `specOptionIds` with the `variants[]` array to find the correct `variantId`.
+    *   **Price**: The `storePrice` returned in the response represents the price of the current/default variant. Changing specs should trigger a UI update based on variant price (managed in store layer).
+    *   **Cart**: Always pass the `variantId` that matches the user's choices.
 
 ---
 
@@ -106,6 +109,6 @@ Show a "You may also like" section at the bottom of the PDP.
     *   Execute `GET /api/reviews/product/{productId}/stats`
     *   Execute `GET /api/product/{productId}/related`
 2.  **User Action - Change Color**: Filter `media` gallery by selected color's UUID.
-3.  **User Action - Change Spec**: If option has `additionalPrice`, update display price.
-4.  **User Action - Add to Cart**: Use the `storeId` returned in the core product response when calling the Cart API.
+3.  **User Action - Change Spec**: When a user picks a different spec option (e.g. 16GB RAM), look through the `variants[]` array to find the unique entry where all `specOptionIds` match the user's selection. Use this `variantId` for future operations.
+4.  **User Action - Add to Cart**: Pass the `variantId` corresponding to the user's selected combination. The backend will set the `unitPrice` based on the fixed price for that variant in the store.
 5.  **User Action - Load Reviews/Questions**: Call the paginated `GET` endpoints when the user taps on the respective tabs.

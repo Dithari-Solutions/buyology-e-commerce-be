@@ -153,23 +153,21 @@ public class ProductResponse {
         public void setOrderIndex(Integer orderIndex) { this.orderIndex = orderIndex; }
     }
 
-    @Schema(description = "Spec option belonging to a spec group — additionalPrice is 0 for base specs, > 0 for upgrade options")
+    @Schema(description = "Spec option belonging to a spec group")
     public static class SpecOptionDto {
 
         private UUID id;
         private String value;
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private SpecUnit unit;
-        private BigDecimal additionalPrice;
 
         public SpecOptionDto() {
         }
 
-        public SpecOptionDto(UUID id, String value, SpecUnit unit, BigDecimal additionalPrice) {
+        public SpecOptionDto(UUID id, String value, SpecUnit unit) {
             this.id = id;
             this.value = value;
             this.unit = unit;
-            this.additionalPrice = additionalPrice;
         }
 
         public UUID getId() { return id; }
@@ -178,8 +176,6 @@ public class ProductResponse {
         public void setValue(String value) { this.value = value; }
         public SpecUnit getUnit() { return unit; }
         public void setUnit(SpecUnit unit) { this.unit = unit; }
-        public BigDecimal getAdditionalPrice() { return additionalPrice; }
-        public void setAdditionalPrice(BigDecimal additionalPrice) { this.additionalPrice = additionalPrice; }
     }
 
     @Schema(description = "Spec group with its options")

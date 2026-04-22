@@ -104,27 +104,32 @@ public class ChatServiceImpl implements ChatService {
         msg.setSentAt(Instant.now());
         chatMessageRepository.save(msg);
 
-        // ── Relay to courier backend via RabbitMQ ─────────────────────────────
-        ChatMessageEvent event = new ChatMessageEvent(
-                msg.getId(),
-                deliveryOrderId,
-                ecommerceOrderId,
-                customerId,
-                SenderType.CUSTOMER,
-                request.messageType(),
-                request.content(),
-                msg.getSentAt()
-        );
-        rabbitTemplate.convertAndSend(DELIVERY_EXCHANGE, CHAT_FROM_CUSTOMER_KEY, event);
-        log.debug("[Chat] Relayed customer message to courier backend deliveryOrderId={}", deliveryOrderId);
-
-        // ── Echo to sender's own WS session (delivery confirmation) ───────────
+        // ── Echo to sender immediately so the message appears in their chat ─────
         ChatMessageResponse response = ChatMessageResponse.from(msg);
         messagingTemplate.convertAndSendToUser(
                 customerId.toString(),
                 "/queue/chat/" + deliveryOrderId,
                 response
         );
+
+        // ── Relay to courier backend via RabbitMQ ─────────────────────────────
+        try {
+            ChatMessageEvent event = new ChatMessageEvent(
+                    msg.getId(),
+                    deliveryOrderId,
+                    ecommerceOrderId,
+                    customerId,
+                    SenderType.CUSTOMER,
+                    request.messageType(),
+                    request.content(),
+                    msg.getSentAt()
+            );
+            rabbitTemplate.convertAndSend(DELIVERY_EXCHANGE, CHAT_FROM_CUSTOMER_KEY, event);
+            log.debug("[Chat] Relayed customer message to courier backend deliveryOrderId={}", deliveryOrderId);
+        } catch (Exception e) {
+            log.error("[Chat] Failed to relay message to courier backend deliveryOrderId={} — {}", deliveryOrderId, e.getMessage());
+        }
+
         return response;
     }
 

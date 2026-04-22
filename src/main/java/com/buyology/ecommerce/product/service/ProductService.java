@@ -643,7 +643,7 @@ public class ProductService {
                                 .map(t -> t.getValue())
                                 .orElse(opt.getValue());
                         SpecUnit unit = opt.getGlobalSpecOption().getUnit();
-                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, unit, opt.getAdditionalPrice());
+                        return new ProductResponse.SpecOptionDto(opt.getId(), optValue, unit);
                     })
                     .toList();
 
@@ -728,7 +728,7 @@ public class ProductService {
                         .orElse(globalOption.getId().toString());
 
                 ProductSpecOption option = specOptionRepository.save(
-                        new ProductSpecOption(group, globalOption, valueEn, globalOption.getUnit(), optReq.getAdditionalPrice()));
+                        new ProductSpecOption(group, globalOption, valueEn, globalOption.getUnit()));
 
                 if (optReq.getLocalKey() != null) {
                     localKeyToOption.put(optReq.getLocalKey(), option);
@@ -836,9 +836,9 @@ public class ProductService {
                 throw new IllegalArgumentException("Duplicate localKey in colors: " + colorReq.getLocalKey());
             }
 
-            // Save the color as a spec option (colors have no additional price — price comes from variants)
+            // Save the color as a spec option (colors have no price — price comes from variants)
             ProductSpecOption colorOption = specOptionRepository.save(
-                    new ProductSpecOption(colorGroup, colorReq.getValueEn(), BigDecimal.ZERO, colorReq.getColorCode()));
+                    new ProductSpecOption(colorGroup, colorReq.getValueEn(), colorReq.getColorCode()));
 
             specOptionTranslationRepository.saveAll(List.of(
                     new ProductSpecOptionTranslation(colorOption, Language.AZ, colorReq.getValueAz()),

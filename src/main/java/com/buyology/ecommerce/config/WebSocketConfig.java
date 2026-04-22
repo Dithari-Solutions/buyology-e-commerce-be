@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.config;
 
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import org.slf4j.Logger;
@@ -48,6 +49,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Value("${jwt.secret}")
     private String jwtSecret;
 
+    private final AuthCredentialRepository authCredentialRepository;
+
+    public WebSocketConfig(AuthCredentialRepository authCredentialRepository) {
+        this.authCredentialRepository = authCredentialRepository;
+    }
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // SockJS transport for web browsers (ChatPanel.tsx uses sockjs-client)
@@ -76,8 +83,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 StompHeaderAccessor accessor =
                         MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
-                if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
+                if (accessor == null) return message;
+
+                StompCommand cmd = accessor.getCommand();
+
+                if (StompCommand.CONNECT.equals(cmd)) {
+                    String clientType = accessor.getFirstNativeHeader("X-Client-Type");
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
+                    log.info("[WS] CONNECT received — clientType={} hasToken={}",
+                            clientType, authHeader != null);
+
                     if (authHeader != null && authHeader.startsWith("Bearer ")) {
                         String token = authHeader.substring(7);
                         try {
@@ -88,16 +103,38 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                     .parseSignedClaims(token)
                                     .getPayload();
 
-                            UUID userId = UUID.fromString(claims.getSubject());
+                            // JWT sub is authCredentialsId — must resolve to actual userId,
+                            // same as JwtAuthenticationFilter does for HTTP requests.
+                            UUID authCredentialsId = UUID.fromString(claims.getSubject());
+                            var credentials = authCredentialRepository.findById(authCredentialsId)
+                                    .orElse(null);
+                            if (credentials == null || !Boolean.TRUE.equals(credentials.getIsActive())) {
+                                log.warn("[WS] CONNECT rejected — credentials not found or inactive: {}", authCredentialsId);
+                                return message;
+                            }
+
+                            UUID userId = credentials.getUserId();
                             UsernamePasswordAuthenticationToken auth =
                                     new UsernamePasswordAuthenticationToken(
                                             userId, null,
                                             List.of(new SimpleGrantedAuthority("ROLE_USER")));
                             accessor.setUser(auth);
+                            log.info("[WS] CONNECT authenticated — userId={} clientType={}", userId, clientType);
                         } catch (Exception ex) {
-                            log.warn("[WebSocket] Invalid JWT on CONNECT — {}", ex.getMessage());
+                            log.warn("[WS] CONNECT rejected — invalid JWT: {}", ex.getMessage());
                         }
+                    } else {
+                        log.warn("[WS] CONNECT missing or malformed Authorization header — clientType={}", clientType);
                     }
+
+                } else if (StompCommand.SUBSCRIBE.equals(cmd)) {
+                    log.info("[WS] SUBSCRIBE — destination={} user={}",
+                            accessor.getDestination(),
+                            accessor.getUser() != null ? accessor.getUser().getName() : "anonymous");
+
+                } else if (StompCommand.DISCONNECT.equals(cmd)) {
+                    log.info("[WS] DISCONNECT — user={}",
+                            accessor.getUser() != null ? accessor.getUser().getName() : "anonymous");
                 }
                 return message;
             }

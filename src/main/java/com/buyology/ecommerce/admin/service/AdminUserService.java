@@ -204,7 +204,6 @@ public class AdminUserService {
                         if (sel.getSpecOption().getUnit() != null) {
                             specResp.setUnit(sel.getSpecOption().getUnit().name());
                         }
-                        specResp.setAdditionalPrice(sel.getSpecOption().getAdditionalPrice());
                         specResp.setColorCode(sel.getSpecOption().getColorCode());
                         return specResp;
                     })

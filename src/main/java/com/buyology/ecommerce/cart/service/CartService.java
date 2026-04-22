@@ -213,10 +213,7 @@ public class CartService {
             basePrice = storeProduct.getStorePrice();
         }
 
-        BigDecimal specAdditional = selectedSpecOptions.stream()
-                .map(ProductSpecOption::getAdditionalPrice)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal unitPrice = basePrice.add(specAdditional);
+        BigDecimal unitPrice = basePrice;
 
         // Stamp the cart with country + currency on first item
         if (cart.getCountryCode() == null) {
@@ -488,7 +485,6 @@ public class CartService {
             if (sel.getSpecOption().getUnit() != null) {
                 specResp.setUnit(sel.getSpecOption().getUnit().name());
             }
-            specResp.setAdditionalPrice(sel.getSpecOption().getAdditionalPrice());
             specResp.setColorCode(sel.getSpecOption().getColorCode());
             specResponses.add(specResp);
         }

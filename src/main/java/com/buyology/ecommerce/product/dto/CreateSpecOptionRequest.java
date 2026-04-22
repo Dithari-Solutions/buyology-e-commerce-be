@@ -32,10 +32,6 @@ public class CreateSpecOptionRequest {
     @Schema(description = "Unit for the option value. Used when globalOptionId is omitted.", example = "Wh")
     private SpecUnit unit;
 
-    @DecimalMin(value = "0.00", message = "Additional price must be non-negative")
-    @Schema(description = "Additional price added to the base price for this option (default 0)", example = "50.00")
-    private BigDecimal additionalPrice = BigDecimal.ZERO;
-
     // ========================
     // Getters & Setters
     // ========================
@@ -86,13 +82,5 @@ public class CreateSpecOptionRequest {
 
     public void setUnit(SpecUnit unit) {
         this.unit = unit;
-    }
-
-    public BigDecimal getAdditionalPrice() {
-        return additionalPrice;
-    }
-
-    public void setAdditionalPrice(BigDecimal additionalPrice) {
-        this.additionalPrice = additionalPrice;
     }
 }
