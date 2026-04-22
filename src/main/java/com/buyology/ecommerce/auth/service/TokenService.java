@@ -116,9 +116,10 @@ public class TokenService {
                 .collect(Collectors.joining(",", "[", "]"));
 
         String payloadJson = String.format(
-                "{\"iss\":\"%s\",\"sub\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
+                "{\"iss\":\"%s\",\"sub\":\"%s\",\"uid\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
                 issuer,
                 authCredentials.getId(),
+                userId,
                 rolesJson,
                 permissionsJson,
                 now.getEpochSecond(),
