@@ -3,6 +3,7 @@ package com.buyology.ecommerce.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -12,6 +13,8 @@ import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -67,9 +70,29 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/queue");
+        log.info("[WS] Configuring message broker with heartbeats (10s) and task scheduler");
+        registry.enableSimpleBroker("/topic", "/queue")
+                .setHeartbeatValue(new long[]{10000, 10000})
+                .setTaskScheduler(heartbeatScheduler());
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
+    }
+
+    @Bean
+    public TaskScheduler heartbeatScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("ws-heartbeat-");
+        scheduler.initialize();
+        return scheduler;
+    }
+
+    @Override
+    public void configureWebSocketTransport(org.springframework.web.socket.config.annotation.WebSocketTransportRegistration registration) {
+        // Increase buffer sizes to handle larger JWT tokens in headers
+        registration.setMessageSizeLimit(128 * 1024); // 128 KB
+        registration.setSendBufferSizeLimit(512 * 1024); // 512 KB
+        registration.setSendTimeLimit(20000); // 20 seconds
     }
 
     @Override
@@ -77,11 +100,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registration.interceptors(new ChannelInterceptor() {
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
-                // Safety net — no exception must escape preSend or Spring closes the session.
                 try {
                     return handlePreSend(message);
                 } catch (Exception ex) {
-                    log.error("[WS] Unexpected error in preSend interceptor — passing message through", ex);
+                    log.error("[WS] Unexpected error in preSend interceptor", ex);
                     return message;
                 }
             }
@@ -94,6 +116,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         if (accessor == null) return message;
 
         StompCommand cmd = accessor.getCommand();
+        if (cmd == null) return message; // Probably a heartbeat or other low-level frame
+
+        log.debug("[WS] Inbound message: command={}", cmd);
 
         if (StompCommand.CONNECT.equals(cmd)) {
             String clientType = accessor.getFirstNativeHeader("X-Client-Type");
