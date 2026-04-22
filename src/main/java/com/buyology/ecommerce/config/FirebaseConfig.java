@@ -11,16 +11,22 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Initialises the Firebase Admin SDK so the ecommerce backend can send
  * FCM push notifications to customer devices.
  *
- * <p>Set {@code firebase.enabled=true} and supply the service-account JSON
- * path via {@code firebase.service-account-key} to activate.
- * When disabled (default) the {@link FirebaseMessaging} bean is null and
- * all push-sending code skips gracefully.
+ * <p>Two ways to supply credentials (checked in order):
+ * <ol>
+ *   <li>{@code firebase.service-account-json} — raw JSON string from the
+ *       {@code FIREBASE_SERVICE_ACCOUNT_KEY} env var (preferred for Docker).</li>
+ *   <li>{@code firebase.service-account-key} — file/classpath resource path.</li>
+ * </ol>
+ * Set {@code firebase.enabled=true} to activate. When disabled the
+ * {@link FirebaseMessaging} bean is null and push-sending code skips gracefully.
  */
 @Configuration
 public class FirebaseConfig {
@@ -29,6 +35,10 @@ public class FirebaseConfig {
 
     @Value("${firebase.enabled:false}")
     private boolean firebaseEnabled;
+
+    /** Raw service-account JSON injected from FIREBASE_SERVICE_ACCOUNT_KEY env var. */
+    @Value("${firebase.service-account-json:}")
+    private String serviceAccountJson;
 
     @Value("${firebase.service-account-key:classpath:firebase-service-account.json}")
     private Resource serviceAccountKey;
@@ -41,10 +51,18 @@ public class FirebaseConfig {
         }
 
         if (FirebaseApp.getApps().isEmpty()) {
-            FirebaseOptions options = FirebaseOptions.builder()
-                    .setCredentials(GoogleCredentials.fromStream(serviceAccountKey.getInputStream()))
-                    .build();
-            FirebaseApp.initializeApp(options);
+            GoogleCredentials credentials;
+            if (serviceAccountJson != null && !serviceAccountJson.isBlank()) {
+                credentials = GoogleCredentials.fromStream(
+                        new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8)));
+                log.info("[Firebase] Loaded credentials from FIREBASE_SERVICE_ACCOUNT_KEY env var");
+            } else {
+                credentials = GoogleCredentials.fromStream(serviceAccountKey.getInputStream());
+                log.info("[Firebase] Loaded credentials from file: {}", serviceAccountKey);
+            }
+            FirebaseApp.initializeApp(FirebaseOptions.builder()
+                    .setCredentials(credentials)
+                    .build());
             log.info("[Firebase] FirebaseApp initialised successfully");
         }
 

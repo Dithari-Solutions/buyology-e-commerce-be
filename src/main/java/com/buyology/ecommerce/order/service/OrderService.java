@@ -912,6 +912,17 @@ public class OrderService {
         res.setCreatedAt(o.getCreatedAt());
         res.setUpdatedAt(o.getUpdatedAt());
 
+        // Populate store coordinates from the first item (EXPRESS orders are from one store)
+        if (o.getItems() != null && !o.getItems().isEmpty()) {
+            UUID storeId = o.getItems().get(0).getStoreId();
+            if (storeId != null) {
+                storeLocationRepo.findByStoreIdAndIsPrimary(storeId, true).ifPresent(loc -> {
+                    res.setStoreLatitude(loc.getLatitude());
+                    res.setStoreLongitude(loc.getLongitude());
+                });
+            }
+        }
+
         res.setItems(o.getItems().stream().map(this::toItemResponse).toList());
         res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingEventResponse).toList());
         return res;

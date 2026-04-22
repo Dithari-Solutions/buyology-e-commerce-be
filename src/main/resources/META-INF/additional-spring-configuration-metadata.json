@@ -197,6 +197,23 @@
       "description": "Paymob integration ID for Tamara (buy now pay later). Set via PAYMOB_TAMARA_INTEGRATION_ID env var."
     },
     {
+      "name": "firebase.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Set to true to enable Firebase Admin SDK and FCM push notifications. Requires credentials via firebase.service-account-json or firebase.service-account-key.",
+      "defaultValue": false
+    },
+    {
+      "name": "firebase.service-account-json",
+      "type": "java.lang.String",
+      "description": "Raw Firebase service account JSON string. Injected from FIREBASE_SERVICE_ACCOUNT_KEY env var. Takes precedence over firebase.service-account-key when non-blank."
+    },
+    {
+      "name": "firebase.service-account-key",
+      "type": "java.lang.String",
+      "description": "Classpath or file path to the Firebase service account JSON file. Fallback when firebase.service-account-json is not set.",
+      "defaultValue": "classpath:firebase-service-account.json"
+    },
+    {
       "name": "outbox.poll-interval-ms",
       "type": "java.lang.Long",
       "description": "Interval in milliseconds between outbox publisher job runs — polls for PENDING events and publishes them to RabbitMQ.",

@@ -35,6 +35,10 @@ public class OrderResponse {
     private Double deliveryLatitude;
     private Double deliveryLongitude;
 
+    // Store Location
+    private Double storeLatitude;
+    private Double storeLongitude;
+
     // Pricing
     private BigDecimal subtotal;
     private BigDecimal shippingFee;
@@ -129,6 +133,12 @@ public class OrderResponse {
 
     public Double getDeliveryLongitude() { return deliveryLongitude; }
     public void setDeliveryLongitude(Double deliveryLongitude) { this.deliveryLongitude = deliveryLongitude; }
+
+    public Double getStoreLatitude() { return storeLatitude; }
+    public void setStoreLatitude(Double storeLatitude) { this.storeLatitude = storeLatitude; }
+
+    public Double getStoreLongitude() { return storeLongitude; }
+    public void setStoreLongitude(Double storeLongitude) { this.storeLongitude = storeLongitude; }
 
     public BigDecimal getSubtotal() { return subtotal; }
     public void setSubtotal(BigDecimal subtotal) { this.subtotal = subtotal; }
