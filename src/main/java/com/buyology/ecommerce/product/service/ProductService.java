@@ -1020,11 +1020,18 @@ public class ProductService {
     private void applyCountryPricing(ProductResponse response, UUID productId,
                                      String countryCode, String displayCurrency,
                                      Double lat, Double lng) {
-        if (countryCode == null || countryCode.isBlank()) return;
+        if (countryCode == null || countryCode.isBlank()) {
+            // No country code provided - try to find global cheapest price
+            setGlobalPrice(response, productId, displayCurrency);
+            return;
+        }
 
         String code = countryCode.toUpperCase();
         Country country = countryRepository.findByCode(code).orElse(null);
-        if (country == null) return;
+        if (country == null) {
+            setGlobalPrice(response, productId, displayCurrency);
+            return;
+        }
 
         List<Object[]> allStores = storeProductRepository.findCheapestStoreByProductAndCountry(productId, code);
         boolean available = !allStores.isEmpty();
@@ -1058,6 +1065,22 @@ public class ProductService {
             response.setStorePrice(primary.getStorePrice());
             response.setCurrency(target);
             response.setExpressDelivery(primary.getExpressDelivery());
+        } else {
+            // Not available in this specific country - fall back to global price for display
+            setGlobalPrice(response, productId, displayCurrency);
+        }
+    }
+
+    private void setGlobalPrice(ProductResponse response, UUID productId, String displayCurrency) {
+        List<Object[]> globalPrice = storeProductRepository.findCheapestStoreGlobally(productId);
+        if (!globalPrice.isEmpty()) {
+            BigDecimal rawPrice = (BigDecimal) globalPrice.get(0)[0];
+            String storeCurrency = (String) globalPrice.get(0)[1];
+            String target = (displayCurrency != null && !displayCurrency.isBlank()) ? displayCurrency.toUpperCase() : storeCurrency;
+            
+            BigDecimal converted = currencyExchangeService.convert(rawPrice, storeCurrency, target);
+            response.setStorePrice(converted);
+            response.setCurrency(target);
         }
     }
 
@@ -1068,55 +1091,82 @@ public class ProductService {
     private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
                                           String countryCode, String displayCurrency,
                                           Double lat, Double lng) {
-        if (countryCode == null || countryCode.isBlank() || products.isEmpty()) return;
+        if (products.isEmpty()) return;
 
-        String code = countryCode.toUpperCase();
-        Country country = countryRepository.findByCode(code).orElse(null);
-        if (country == null) return;
-
-        String storeCurrency = country.getCurrency();
-        String target = (displayCurrency != null && !displayCurrency.isBlank())
-                ? displayCurrency.toUpperCase()
-                : storeCurrency;
-
-        List<UUID> ids = products.stream().map(Product::getId).toList();
-        List<Object[]> rows = storeProductRepository.findAllStoresPerProductBatch(ids, code);
-
-        // Group rows by productId → ordered list of [storeId, rawPrice]
-        Map<UUID, List<Object[]>> storesByProduct = new java.util.LinkedHashMap<>();
-        for (Object[] row : rows) {
-            UUID pid = (UUID) row[0];
-            storesByProduct.computeIfAbsent(pid, k -> new java.util.ArrayList<>()).add(row);
-        }
-
+        List<UUID> allProductIds = products.stream().map(Product::getId).toList();
+        Map<UUID, List<Object[]>> storesByProduct = new java.util.HashMap<>();
+        String targetCurrency = displayCurrency != null ? displayCurrency.toUpperCase() : null;
         Set<UUID> expressStoreIds = (lat != null && lng != null)
                 ? new HashSet<>(storeLocationRepository.findStoreIdsWithinRadius(lat, lng, EXPRESS_RADIUS_KM))
                 : null;
+
+        String countryStoreCurrency = null;
+        if (countryCode != null && !countryCode.isBlank()) {
+            String code = countryCode.toUpperCase();
+            Country country = countryRepository.findByCode(code).orElse(null);
+            if (country != null) {
+                countryStoreCurrency = country.getCurrency();
+                if (targetCurrency == null) targetCurrency = countryStoreCurrency;
+
+                List<Object[]> rows = storeProductRepository.findAllStoresPerProductBatch(allProductIds, code);
+                for (Object[] row : rows) {
+                    UUID pid = (UUID) row[0];
+                    storesByProduct.computeIfAbsent(pid, k -> new java.util.ArrayList<>()).add(row);
+                }
+            }
+        }
+
+        // Identify products needing global price (either no country provided or not available in country)
+        List<UUID> missingPriceIds = new java.util.ArrayList<>();
+        for (Product p : products) {
+            if (!storesByProduct.containsKey(p.getId())) {
+                missingPriceIds.add(p.getId());
+            }
+        }
+
+        Map<UUID, Object[]> globalPrices = new java.util.HashMap<>();
+        if (!missingPriceIds.isEmpty()) {
+            List<Object[]> gRows = storeProductRepository.findCheapestPricesGloballyBatch(missingPriceIds);
+            for (Object[] grow : gRows) {
+                globalPrices.put((UUID) grow[0], grow);
+            }
+        }
 
         for (int i = 0; i < responses.size(); i++) {
             ProductResponse resp = responses.get(i);
             UUID pid = products.get(i).getId();
             List<Object[]> productRows = storesByProduct.get(pid);
-            resp.setAvailableInSelectedCountry(productRows != null && !productRows.isEmpty());
-            if (productRows != null && !productRows.isEmpty()) {
+            boolean availableInCountry = productRows != null && !productRows.isEmpty();
+            resp.setAvailableInSelectedCountry(availableInCountry);
+
+            if (availableInCountry) {
                 List<ProductResponse.StoreOptionDto> options = new java.util.ArrayList<>();
                 for (Object[] row : productRows) {
                     UUID sid = (UUID) row[1];
-                    BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[2], storeCurrency, target);
+                    BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[2], countryStoreCurrency, targetCurrency);
                     Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
-                    options.add(new ProductResponse.StoreOptionDto(sid, converted, target, express));
+                    options.add(new ProductResponse.StoreOptionDto(sid, converted, targetCurrency, express));
                 }
                 resp.setStoreOptions(options);
 
-                // Primary store: first express store, or cheapest if none are express
                 ProductResponse.StoreOptionDto primary = options.stream()
                         .filter(o -> Boolean.TRUE.equals(o.getExpressDelivery()))
                         .findFirst()
                         .orElse(options.get(0));
                 resp.setStoreId(primary.getStoreId());
                 resp.setStorePrice(primary.getStorePrice());
-                resp.setCurrency(target);
+                resp.setCurrency(targetCurrency);
                 resp.setExpressDelivery(primary.getExpressDelivery());
+            } else {
+                // Fallback to global price
+                Object[] gPrice = globalPrices.get(pid);
+                if (gPrice != null) {
+                    BigDecimal rawPrice = (BigDecimal) gPrice[1];
+                    String gCurrency = (String) gPrice[2];
+                    String finalTarget = targetCurrency != null ? targetCurrency : gCurrency;
+                    resp.setStorePrice(currencyExchangeService.convert(rawPrice, gCurrency, finalTarget));
+                    resp.setCurrency(finalTarget);
+                }
             }
         }
     }

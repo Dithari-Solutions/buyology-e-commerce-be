@@ -1,6 +1,8 @@
 package com.buyology.ecommerce.notification.service.impl;
 
+import com.buyology.ecommerce.notification.domain.NotificationHistory;
 import com.buyology.ecommerce.notification.domain.UserPushToken;
+import com.buyology.ecommerce.notification.repository.NotificationHistoryRepository;
 import com.buyology.ecommerce.notification.repository.UserPushTokenRepository;
 import com.buyology.ecommerce.notification.service.PushNotificationService;
 import com.google.firebase.messaging.BatchResponse;
@@ -27,19 +29,40 @@ public class PushNotificationServiceImpl implements PushNotificationService {
     private static final Logger log = LoggerFactory.getLogger(PushNotificationServiceImpl.class);
 
     private final UserPushTokenRepository pushTokenRepository;
+    private final NotificationHistoryRepository historyRepository;
 
     /** Null when firebase.enabled=false — all sends are skipped gracefully. */
     @Autowired(required = false)
     private FirebaseMessaging firebaseMessaging;
 
-    public PushNotificationServiceImpl(UserPushTokenRepository pushTokenRepository) {
+    public PushNotificationServiceImpl(UserPushTokenRepository pushTokenRepository, NotificationHistoryRepository historyRepository) {
         this.pushTokenRepository = pushTokenRepository;
+        this.historyRepository = historyRepository;
     }
 
     @Override
     @Async
     @Transactional
     public void sendToUser(UUID userId, String title, String body, Map<String, String> data) {
+        sendToUserInternal(userId, title, body, null, data);
+    }
+
+    @Override
+    @Async
+    @Transactional
+    public void sendToUser(UUID userId, String title, String body, String type, Map<String, String> data) {
+        sendToUserInternal(userId, title, body, type, data);
+    }
+
+    private void sendToUserInternal(UUID userId, String title, String body, String type, Map<String, String> data) {
+        // Record in history
+        try {
+            NotificationHistory history = new NotificationHistory(userId, title, body, type);
+            historyRepository.save(history);
+        } catch (Exception e) {
+            log.error("[Push] Failed to save notification history for userId={}: {}", userId, e.getMessage());
+        }
+
         if (firebaseMessaging == null) {
             log.debug("[Push] Firebase disabled — skipping push for userId={}", userId);
             return;
@@ -70,7 +93,7 @@ public class PushNotificationServiceImpl implements PushNotificationService {
                     userId, fcmTokens.size(),
                     batchResponse.getSuccessCount(), batchResponse.getFailureCount());
 
-            // Remove stale tokens that are no longer registered on the device
+            // Remove stale tokens
             List<SendResponse> responses = batchResponse.getResponses();
             for (int i = 0; i < responses.size(); i++) {
                 SendResponse resp = responses.get(i);

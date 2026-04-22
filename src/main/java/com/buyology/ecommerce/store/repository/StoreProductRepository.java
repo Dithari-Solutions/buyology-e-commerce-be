@@ -98,6 +98,40 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
             @Param("countryCode") String countryCode);
 
     /**
+     * Returns [storePrice (BigDecimal), currency (String)] for the globally cheapest store for a product.
+     */
+    @Query("""
+            SELECT sp.storePrice, sp.store.country.currency FROM StoreProduct sp
+            WHERE sp.product.id = :productId
+              AND sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+            ORDER BY sp.storePrice ASC
+            LIMIT 1
+            """)
+    List<Object[]> findCheapestStoreGlobally(@Param("productId") UUID productId);
+
+    /**
+     * Batch version of findCheapestStoreGlobally.
+     * Returns [productId (UUID), storePrice (BigDecimal), currency (String)] for the globally cheapest store per product.
+     */
+    @Query("""
+            SELECT sp.product.id, sp.storePrice, sp.store.country.currency FROM StoreProduct sp
+            WHERE sp.product.id IN :productIds
+              AND sp.isActive = true
+              AND sp.deletedAt IS NULL
+              AND sp.store.deletedAt IS NULL
+              AND sp.storePrice = (
+                SELECT MIN(sp2.storePrice) FROM StoreProduct sp2
+                WHERE sp2.product.id = sp.product.id
+                  AND sp2.isActive = true
+                  AND sp2.deletedAt IS NULL
+                  AND sp2.store.deletedAt IS NULL
+              )
+            """)
+    List<Object[]> findCheapestPricesGloballyBatch(@Param("productIds") List<UUID> productIds);
+
+    /**
      * Batch: returns [productId (UUID), storeId (UUID), storePrice (BigDecimal)] for ALL
      * active stores per product in the given country, ordered by price ASC.
      * Use this when you need to show every store option with its own delivery badge.

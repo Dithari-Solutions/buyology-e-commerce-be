@@ -20,7 +20,8 @@ Use this endpoint to fetch the primary product data.
 ### Components to Build
 1.  **Image Gallery**: Use the `media` array. Swap the source list if a user selects a different color from the `colors` array.
 2.  **Price & Shipping**:
-    *   `storePrice` + `currency`: Base price.
+    *   `storePrice` + `currency`: Base price. This is always provided (falls back to global cheapest if not available in the user's specific country).
+    *   `availableInSelectedCountry`: **CRITICAL**: Use this field to enable/disable the "Add to Cart" button. If `false`, the product cannot be purchased in the user's region.
     *   `expressDelivery`: Show "Express Delivery (30 min)" badge if `true`.
 3.  **Variant Selector**:
     *   The `colors` array provides color circles (using `colorCode`) and localized `value`.

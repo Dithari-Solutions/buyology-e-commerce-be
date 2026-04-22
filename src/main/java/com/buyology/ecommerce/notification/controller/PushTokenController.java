@@ -1,8 +1,10 @@
 package com.buyology.ecommerce.notification.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.notification.domain.NotificationHistory;
 import com.buyology.ecommerce.notification.domain.UserPushToken;
 import com.buyology.ecommerce.notification.domain.UserPushToken.DeviceType;
+import com.buyology.ecommerce.notification.repository.NotificationHistoryRepository;
 import com.buyology.ecommerce.notification.repository.UserPushTokenRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -12,27 +14,63 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Allows customer devices to register their FCM token so the backend
- * can send push notifications for delivery status updates.
+ * Allows customer devices to register their FCM token and retrieve notification history.
  */
 @RestController
 @RequestMapping("/api/v1/notifications")
 public class PushTokenController {
 
     private final UserPushTokenRepository pushTokenRepository;
+    private final NotificationHistoryRepository historyRepository;
 
-    public PushTokenController(UserPushTokenRepository pushTokenRepository) {
+    public PushTokenController(UserPushTokenRepository pushTokenRepository, NotificationHistoryRepository historyRepository) {
         this.pushTokenRepository = pushTokenRepository;
+        this.historyRepository = historyRepository;
+    }
+
+    /**
+     * Get the notification history for the authenticated user.
+     */
+    @GetMapping("/history")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<NotificationHistory>>> getHistory(
+            @AuthenticationPrincipal UUID userId) {
+        return ApiResponse.success(historyRepository.findByUserIdOrderByCreatedAtDesc(userId), "Notification history retrieved");
+    }
+
+    /**
+     * Mark a notification as read.
+     */
+    @PutMapping("/history/{id}/read")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> markAsRead(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        historyRepository.findById(id).ifPresent(n -> {
+            if (n.getUserId().equals(userId)) {
+                n.setRead(true);
+                historyRepository.save(n);
+            }
+        });
+        return ApiResponse.success(null, "Notification marked as read");
+    }
+
+    /**
+     * Get the count of unread notifications for the authenticated user.
+     */
+    @GetMapping("/unread-count")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Long>> getUnreadCount(
+            @AuthenticationPrincipal UUID userId) {
+        return ApiResponse.success(historyRepository.countByUserIdAndIsReadFalse(userId), "Unread count retrieved");
     }
 
     /**
      * Register or update the FCM push token for the authenticated customer's device.
-     * One token is kept per user per device type — calling this again updates the token.
-     *
-     * POST /api/v1/notifications/register-token
      */
     @PostMapping("/register-token")
     @PreAuthorize("isAuthenticated()")
@@ -60,8 +98,6 @@ public class PushTokenController {
 
     /**
      * Remove the FCM token for the authenticated user's device (e.g. on logout).
-     *
-     * DELETE /api/v1/notifications/register-token
      */
     @DeleteMapping("/register-token")
     @PreAuthorize("isAuthenticated()")

@@ -18,4 +18,9 @@ public interface PushNotificationService {
      * @param data      optional key-value data payload for the app to handle silently
      */
     void sendToUser(UUID userId, String title, String body, Map<String, String> data);
+
+    /**
+     * Sends a push notification and records it in the history with a specific type.
+     */
+    void sendToUser(UUID userId, String title, String body, String type, Map<String, String> data);
 }
