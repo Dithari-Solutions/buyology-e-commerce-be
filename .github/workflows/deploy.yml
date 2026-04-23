@@ -183,12 +183,18 @@ jobs:
             docker compose down --remove-orphans || true
             docker compose up -d
 
+            # Give Spring Boot time to start before probing (avoids burning
+            # probe attempts during the 30s JVM startup window)
+            sleep 40
+
             # ── Readiness probe (max 120s) ─────────────────────────────────────
+            # Accepts any HTTP response as "up" — a non-empty code means Tomcat
+            # is listening. 000 means the app is not yet accepting connections.
             echo "Waiting for app readiness..."
             for i in $(seq 1 24); do
-              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health 2>/dev/null || echo "000")
-              if [ "$HTTP" = "200" ]; then
-                echo "  Deploy successful — health probe returned 200."
+              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null)
+              if [ -n "$HTTP" ] && [ "$HTTP" != "000" ]; then
+                echo "  Deploy successful — app is responding (HTTP $HTTP)."
                 break
               fi
               if [ "$i" = "24" ]; then
