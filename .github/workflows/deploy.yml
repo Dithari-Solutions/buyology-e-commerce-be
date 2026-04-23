@@ -56,7 +56,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Push the latest docker-compose.yml to the server so deploys are idempotent
       - name: Copy docker-compose.yml to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -75,30 +74,31 @@ jobs:
           command_timeout: 10m
           script: |
             set -euo pipefail
+            mkdir -p ${{ env.DEPLOY_PATH }}
             cd ${{ env.DEPLOY_PATH }}
 
-            # ── Configure Docker daemon log rotation (idempotent) ──────────────
-            if [ ! -f /etc/docker/daemon.json ] || \
-               ! grep -q '"max-size"' /etc/docker/daemon.json 2>/dev/null; then
+            # ── Docker daemon log rotation (idempotent) ────────────────────────
+            if [ ! -f /etc/docker/daemon.json ] || ! grep -q '"max-size"' /etc/docker/daemon.json 2>/dev/null; then
               mkdir -p /etc/docker
-              cat > /etc/docker/daemon.json << 'DAEMONEOF'
-            {
-              "log-driver": "json-file",
-              "log-opts": {
-                "max-size": "50m",
-                "max-file": "3"
-              }
-            }
-            DAEMONEOF
+              printf '{\n  "log-driver": "json-file",\n  "log-opts": { "max-size": "50m", "max-file": "3" }\n}\n' > /etc/docker/daemon.json
               systemctl reload docker || true
             fi
 
-            # ── Decode Firebase service-account JSON ───────────────────────────
+            # ── Firebase service-account JSON (stored as base64 in secrets) ────
             mkdir -p /opt/buyology/firebase
-            echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" \
-              | base64 -d > /opt/buyology/firebase/service-account.json
+            echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" | base64 -d > /opt/buyology/firebase/service-account.json
 
-            # ── Write .env atomically ─────────────────────────────────────────
+            # ── Apple private key (stored as base64 in secrets) ────────────────
+            # Store APPLE_PRIVATE_KEY as base64 in GitHub Secrets:
+            #   cat AuthKey_XXXX.p8 | base64 | tr -d '\n'
+            # The decoded PEM is exported so Docker Compose reads it from the
+            # shell environment (which overrides the .env file).
+            mkdir -p /opt/buyology/apple
+            echo "${{ secrets.APPLE_PRIVATE_KEY }}" | base64 -d > /opt/buyology/apple/private.key
+            chmod 600 /opt/buyology/apple/private.key
+            export APPLE_PRIVATE_KEY="$(cat /opt/buyology/apple/private.key)"
+
+            # ── Write .env atomically ──────────────────────────────────────────
             cat > .env.tmp << 'ENVEOF'
             DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
             IMAGE_TAG=sha-${{ github.sha }}
@@ -113,7 +113,6 @@ jobs:
             APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}
             APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
             APPLE_KEY_ID=${{ secrets.APPLE_KEY_ID }}
-            APPLE_PRIVATE_KEY=${{ secrets.APPLE_PRIVATE_KEY }}
             APPLE_REDIRECT_URI=${{ secrets.APPLE_REDIRECT_URI }}
             REDIS_HOST=redis
             REDIS_PORT=6379
@@ -123,7 +122,7 @@ jobs:
             PAYMOB_HMAC_SECRET=${{ secrets.PAYMOB_HMAC_SECRET }}
             PAYMOB_NOTIFICATION_URL=${{ secrets.PAYMOB_NOTIFICATION_URL }}
             PAYMOB_REDIRECTION_URL=${{ secrets.PAYMOB_REDIRECTION_URL }}
-            PAYMOB_BASE_URL=${{ secrets.PAYMOB_BASE_URL }}
+            PAYMOB_BASE_URL=https://uae.paymob.com
             PAYMOB_CARD_INTEGRATION_ID=${{ secrets.PAYMOB_CARD_INTEGRATION_ID }}
             PAYMOB_CARD_IFRAME_ID=${{ secrets.PAYMOB_CARD_IFRAME_ID }}
             PAYMOB_TABBY_INTEGRATION_ID=${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
@@ -144,32 +143,26 @@ jobs:
             chmod 600 .env
 
             # ── Ensure courier network exists (guard for fresh server) ─────────
-            # The courier stack owns this network; we create it as a plain bridge
-            # only if it doesn't already exist so this deploy never fails on it.
-            docker network create buyology-e-commerce-courier-be_default \
-              2>/dev/null || true
+            docker network create buyology-e-commerce-courier-be_default 2>/dev/null || true
 
-            # ── Pull new image ─────────────────────────────────────────────────
-            echo "${{ secrets.DOCKER_PASSWORD }}" \
-              | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            # ── Login and pull new image ───────────────────────────────────────
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
             docker compose pull app
 
-            # ── Tear down old stack and bring up fresh ─────────────────────────
+            # ── Tear down and bring up fresh ──────────────────────────────────
             docker compose down --remove-orphans || true
             docker compose up -d
 
             # ── Readiness probe (max 120s) ─────────────────────────────────────
             echo "Waiting for app readiness..."
             for i in $(seq 1 24); do
-              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
-                http://localhost:8080/actuator/health/readiness 2>/dev/null || echo "000")
+              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health/readiness 2>/dev/null || echo "000")
               if [ "$HTTP" = "200" ]; then
                 echo "  Deploy successful — readiness probe returned 200."
                 break
               fi
               if [ "$i" = "24" ]; then
                 echo "ERROR: App did not become ready in 120s (last HTTP: $HTTP)."
-                echo "--- Last 80 log lines ---"
                 docker compose logs --tail=80 app
                 exit 1
               fi
