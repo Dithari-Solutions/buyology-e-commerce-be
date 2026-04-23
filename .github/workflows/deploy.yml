@@ -4,8 +4,12 @@ on:
   push:
     branches: [main]
 
+env:
+  DEPLOY_PATH: /opt/buyology-ecommerce-be
+
 jobs:
 
+  # ── Job 1: Build JAR, build & push Docker image ────────────────────────────
   build-and-push:
     runs-on: ubuntu-latest
 
@@ -29,6 +33,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -36,149 +43,142 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/ecommerce-app:latest
-            ${{ secrets.DOCKER_USERNAME }}/ecommerce-app:${{ github.sha }}
+            ${{ secrets.DOCKER_USERNAME }}/ecommerce-app:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+  # ── Job 2: Deploy to VPS via Docker Compose ────────────────────────────────
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
 
-    env:
-      DB_URL: ${{ secrets.DB_URL }}
-      DB_USERNAME: ${{ secrets.DB_USERNAME }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-      GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
-      APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
-      APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
-      APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
-      REDIS_HOST: ${{ secrets.REDIS_HOST }}
-      REDIS_PORT: ${{ secrets.REDIS_PORT }}
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      PAYMOB_API_KEY: ${{ secrets.PAYMOB_API_KEY }}
-      PAYMOB_SECRET_KEY: ${{ secrets.PAYMOB_SECRET_KEY }}
-      PAYMOB_PUBLIC_KEY: ${{ secrets.PAYMOB_PUBLIC_KEY }}
-      PAYMOB_HMAC_SECRET: ${{ secrets.PAYMOB_HMAC_SECRET }}
-      PAYMOB_NOTIFICATION_URL: ${{ secrets.PAYMOB_NOTIFICATION_URL }}
-      PAYMOB_REDIRECTION_URL: ${{ secrets.PAYMOB_REDIRECTION_URL }}
-      PAYMOB_BASE_URL: ${{ secrets.PAYMOB_BASE_URL }}
-      PAYMOB_CARD_INTEGRATION_ID: ${{ secrets.PAYMOB_CARD_INTEGRATION_ID }}
-      PAYMOB_CARD_IFRAME_ID: ${{ secrets.PAYMOB_CARD_IFRAME_ID }}
-      PAYMOB_TABBY_INTEGRATION_ID: ${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
-      PAYMOB_TAMARA_INTEGRATION_ID: ${{ secrets.PAYMOB_TAMARA_INTEGRATION_ID }}
-      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-      TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
-      FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
-      COURIER_SERVICE_PRIVATE_KEY: ${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}
-      CONTABO_S3_ENDPOINT: ${{ secrets.CONTABO_S3_ENDPOINT }}
-      CONTABO_S3_ACCESS_KEY: ${{ secrets.CONTABO_S3_ACCESS_KEY }}
-      CONTABO_S3_SECRET_KEY: ${{ secrets.CONTABO_S3_SECRET_KEY }}
-      CONTABO_S3_BUCKET_NAME: ${{ secrets.CONTABO_S3_BUCKET_NAME }}
-      CONTABO_S3_PUBLIC_URL: ${{ secrets.CONTABO_S3_PUBLIC_URL }}
-      RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
-      RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
-
     steps:
-      - name: Deploy to VPS
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Push the latest docker-compose.yml to the server so deploys are idempotent
+      - name: Copy docker-compose.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: docker-compose.yml
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,APPLE_TEAM_ID,APPLE_CLIENT_ID,APPLE_KEY_ID,APPLE_PRIVATE_KEY,APPLE_REDIRECT_URI,REDIS_HOST,REDIS_PORT,DOCKER_USERNAME,DOCKER_PASSWORD,PAYMOB_API_KEY,PAYMOB_SECRET_KEY,PAYMOB_PUBLIC_KEY,PAYMOB_HMAC_SECRET,PAYMOB_NOTIFICATION_URL,PAYMOB_CARD_INTEGRATION_ID,PAYMOB_CARD_IFRAME_ID,PAYMOB_TABBY_INTEGRATION_ID,PAYMOB_TAMARA_INTEGRATION_ID,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,FIREBASE_SERVICE_ACCOUNT_KEY,COURIER_SERVICE_PRIVATE_KEY,CONTABO_S3_ENDPOINT,CONTABO_S3_ACCESS_KEY,CONTABO_S3_SECRET_KEY,CONTABO_S3_BUCKET_NAME,CONTABO_S3_PUBLIC_URL,RABBITMQ_USERNAME,RABBITMQ_PASSWORD
+          command_timeout: 10m
           script: |
-            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-            docker pull "$DOCKER_USERNAME/ecommerce-app:latest"
+            set -euo pipefail
+            cd ${{ env.DEPLOY_PATH }}
 
-            # Decode Firebase service-account JSON from base64 secret to a file on the VPS.
-            # The secret must be stored as base64: cat service-account.json | base64 | tr -d '\n'
-            mkdir -p /opt/buyology/firebase
-            echo "$FIREBASE_SERVICE_ACCOUNT_KEY" | base64 -d > /opt/buyology/firebase/service-account.json
-
-            docker stop ecommerce-app || true
-            docker rm ecommerce-app || true
-
-            docker run -d \
-              --name ecommerce-app \
-              -p 8080:8080 \
-              --restart always \
-              --network ecommerce-network \
-              --dns 8.8.8.8 \
-              --dns 1.1.1.1 \
-              -v /opt/buyology/firebase/service-account.json:/firebase/service-account.json:ro \
-              -e SPRING_PROFILES_ACTIVE=prod \
-              -e "SPRING_DATASOURCE_URL=$DB_URL" \
-              -e "SPRING_DATASOURCE_USERNAME=$DB_USERNAME" \
-              -e "SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD" \
-              -e "JWT_SECRET=$JWT_SECRET" \
-              -e "SENDGRID_API_KEY=$SENDGRID_API_KEY" \
-              -e "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
-              -e "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET" \
-              -e "GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI" \
-              -e "APPLE_TEAM_ID=$APPLE_TEAM_ID" \
-              -e "APPLE_CLIENT_ID=$APPLE_CLIENT_ID" \
-              -e "APPLE_KEY_ID=$APPLE_KEY_ID" \
-              -e "APPLE_PRIVATE_KEY=$APPLE_PRIVATE_KEY" \
-              -e "APPLE_REDIRECT_URI=$APPLE_REDIRECT_URI" \
-              -e "REDIS_HOST=$REDIS_HOST" \
-              -e "REDIS_PORT=$REDIS_PORT" \
-              -e COOKIE_SECURE=true \
-              -e "PAYMOB_API_KEY=$PAYMOB_API_KEY" \
-              -e "PAYMOB_SECRET_KEY=$PAYMOB_SECRET_KEY" \
-              -e "PAYMOB_PUBLIC_KEY=$PAYMOB_PUBLIC_KEY" \
-              -e "PAYMOB_HMAC_SECRET=$PAYMOB_HMAC_SECRET" \
-              -e "PAYMOB_NOTIFICATION_URL=$PAYMOB_NOTIFICATION_URL" \
-              -e "PAYMOB_REDIRECTION_URL=$PAYMOB_REDIRECTION_URL" \
-              -e "PAYMOB_BASE_URL=https://uae.paymob.com" \
-              -e "PAYMOB_CARD_INTEGRATION_ID=$PAYMOB_CARD_INTEGRATION_ID" \
-              -e "PAYMOB_CARD_IFRAME_ID=$PAYMOB_CARD_IFRAME_ID" \
-              -e "PAYMOB_TABBY_INTEGRATION_ID=$PAYMOB_TABBY_INTEGRATION_ID" \
-              -e "PAYMOB_TAMARA_INTEGRATION_ID=$PAYMOB_TAMARA_INTEGRATION_ID" \
-              -e "TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID" \
-              -e "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" \
-              -e "TWILIO_PHONE_NUMBER=$TWILIO_PHONE_NUMBER" \
-              -e "FIREBASE_ENABLED=true" \
-              -e "COURIER_SERVICE_PRIVATE_KEY=$COURIER_SERVICE_PRIVATE_KEY" \
-              -e "CONTABO_S3_ENDPOINT=$CONTABO_S3_ENDPOINT" \
-              -e "CONTABO_S3_ACCESS_KEY=$CONTABO_S3_ACCESS_KEY" \
-              -e "CONTABO_S3_SECRET_KEY=$CONTABO_S3_SECRET_KEY" \
-              -e "CONTABO_S3_BUCKET_NAME=$CONTABO_S3_BUCKET_NAME" \
-              -e "CONTABO_S3_PUBLIC_URL=$CONTABO_S3_PUBLIC_URL" \
-              -e "RABBITMQ_HOST=buyology-rabbitmq" \
-              -e "RABBITMQ_PORT=5672" \
-              -e "RABBITMQ_USERNAME=$RABBITMQ_USERNAME" \
-              -e "RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
-              -e "RABBITMQ_VHOST=/" \
-              -e "SPRING_RABBITMQ_HOST=buyology-rabbitmq" \
-              -e "SPRING_RABBITMQ_PORT=5672" \
-              -e "SPRING_RABBITMQ_USERNAME=$RABBITMQ_USERNAME" \
-              -e "SPRING_RABBITMQ_PASSWORD=$RABBITMQ_PASSWORD" \
-              -e "SPRING_RABBITMQ_VIRTUAL_HOST=/" \
-              -e "SPRING_ELASTICSEARCH_URIS=http://ecommerce-elasticsearch:9200" \
-              "$DOCKER_USERNAME/ecommerce-app:latest"
-
-            # Ensure elasticsearch is running
-            if ! [ "$(docker ps -q -f name=ecommerce-elasticsearch)" ]; then
-                if [ "$(docker ps -aq -f name=ecommerce-elasticsearch)" ]; then
-                    docker start ecommerce-elasticsearch
-                else
-                    docker run -d \
-                      --name ecommerce-elasticsearch \
-                      --network ecommerce-network \
-                      --restart always \
-                      -e "discovery.type=single-node" \
-                      -e "xpack.security.enabled=false" \
-                      -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
-                      docker.elastic.co/elasticsearch/elasticsearch:8.17.0
-                fi
+            # ── Configure Docker daemon log rotation (idempotent) ──────────────
+            if [ ! -f /etc/docker/daemon.json ] || \
+               ! grep -q '"max-size"' /etc/docker/daemon.json 2>/dev/null; then
+              mkdir -p /etc/docker
+              cat > /etc/docker/daemon.json << 'DAEMONEOF'
+            {
+              "log-driver": "json-file",
+              "log-opts": {
+                "max-size": "50m",
+                "max-file": "3"
+              }
+            }
+            DAEMONEOF
+              systemctl reload docker || true
             fi
 
-            # Connect to courier's network so buyology-rabbitmq hostname resolves
-            docker network connect buyology-e-commerce-courier-be_default ecommerce-app || true
-            docker network connect ecommerce-network ecommerce-elasticsearch || true
+            # ── Decode Firebase service-account JSON ───────────────────────────
+            mkdir -p /opt/buyology/firebase
+            echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" \
+              | base64 -d > /opt/buyology/firebase/service-account.json
+
+            # ── Write .env atomically ─────────────────────────────────────────
+            cat > .env.tmp << 'ENVEOF'
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+            IMAGE_TAG=sha-${{ github.sha }}
+            DB_URL=${{ secrets.DB_URL }}
+            DB_USERNAME=${{ secrets.DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI }}
+            APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}
+            APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
+            APPLE_KEY_ID=${{ secrets.APPLE_KEY_ID }}
+            APPLE_PRIVATE_KEY=${{ secrets.APPLE_PRIVATE_KEY }}
+            APPLE_REDIRECT_URI=${{ secrets.APPLE_REDIRECT_URI }}
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            PAYMOB_API_KEY=${{ secrets.PAYMOB_API_KEY }}
+            PAYMOB_SECRET_KEY=${{ secrets.PAYMOB_SECRET_KEY }}
+            PAYMOB_PUBLIC_KEY=${{ secrets.PAYMOB_PUBLIC_KEY }}
+            PAYMOB_HMAC_SECRET=${{ secrets.PAYMOB_HMAC_SECRET }}
+            PAYMOB_NOTIFICATION_URL=${{ secrets.PAYMOB_NOTIFICATION_URL }}
+            PAYMOB_REDIRECTION_URL=${{ secrets.PAYMOB_REDIRECTION_URL }}
+            PAYMOB_BASE_URL=${{ secrets.PAYMOB_BASE_URL }}
+            PAYMOB_CARD_INTEGRATION_ID=${{ secrets.PAYMOB_CARD_INTEGRATION_ID }}
+            PAYMOB_CARD_IFRAME_ID=${{ secrets.PAYMOB_CARD_IFRAME_ID }}
+            PAYMOB_TABBY_INTEGRATION_ID=${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
+            PAYMOB_TAMARA_INTEGRATION_ID=${{ secrets.PAYMOB_TAMARA_INTEGRATION_ID }}
+            TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}
+            TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}
+            TWILIO_PHONE_NUMBER=${{ secrets.TWILIO_PHONE_NUMBER }}
+            COURIER_SERVICE_PRIVATE_KEY=${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}
+            CONTABO_S3_ENDPOINT=${{ secrets.CONTABO_S3_ENDPOINT }}
+            CONTABO_S3_ACCESS_KEY=${{ secrets.CONTABO_S3_ACCESS_KEY }}
+            CONTABO_S3_SECRET_KEY=${{ secrets.CONTABO_S3_SECRET_KEY }}
+            CONTABO_S3_BUCKET_NAME=${{ secrets.CONTABO_S3_BUCKET_NAME }}
+            CONTABO_S3_PUBLIC_URL=${{ secrets.CONTABO_S3_PUBLIC_URL }}
+            RABBITMQ_USERNAME=${{ secrets.RABBITMQ_USERNAME }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            ENVEOF
+            mv .env.tmp .env
+            chmod 600 .env
+
+            # ── Ensure courier network exists (guard for fresh server) ─────────
+            # The courier stack owns this network; we create it as a plain bridge
+            # only if it doesn't already exist so this deploy never fails on it.
+            docker network create buyology-e-commerce-courier-be_default \
+              2>/dev/null || true
+
+            # ── Pull new image ─────────────────────────────────────────────────
+            echo "${{ secrets.DOCKER_PASSWORD }}" \
+              | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            docker compose pull app
+
+            # ── Tear down old stack and bring up fresh ─────────────────────────
+            docker compose down --remove-orphans || true
+            docker compose up -d
+
+            # ── Readiness probe (max 120s) ─────────────────────────────────────
+            echo "Waiting for app readiness..."
+            for i in $(seq 1 24); do
+              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+                http://localhost:8080/actuator/health/readiness 2>/dev/null || echo "000")
+              if [ "$HTTP" = "200" ]; then
+                echo "  Deploy successful — readiness probe returned 200."
+                break
+              fi
+              if [ "$i" = "24" ]; then
+                echo "ERROR: App did not become ready in 120s (last HTTP: $HTTP)."
+                echo "--- Last 80 log lines ---"
+                docker compose logs --tail=80 app
+                exit 1
+              fi
+              echo "  attempt $i/24: HTTP $HTTP"
+              sleep 5
+            done
+
+            # ── Clean up dangling images ───────────────────────────────────────
+            docker image prune -f --filter "until=24h" || true
+
+            echo "=== Running containers ==="
+            docker compose ps

@@ -58,6 +58,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        log.info("[WS] Registering STOMP endpoints: /ws (SockJS) and /ws-native (Raw)");
         // SockJS transport for web browsers (ChatPanel.tsx uses sockjs-client)
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
@@ -113,36 +114,43 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private Message<?> handlePreSend(Message<?> message) {
         StompHeaderAccessor accessor =
                 MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        if (accessor == null) return message;
+        if (accessor == null) {
+            log.trace("[WS] No accessor for message: {}", message);
+            return message;
+        }
 
         StompCommand cmd = accessor.getCommand();
-        if (cmd == null) return message; // Probably a heartbeat or other low-level frame
-
-        log.debug("[WS] Inbound message: command={}", cmd);
+        if (cmd == null) return message;
 
         if (StompCommand.CONNECT.equals(cmd)) {
+            log.info("[WS] STOMP CONNECT - All headers: {}", accessor.toNativeHeaderMap());
             String clientType = accessor.getFirstNativeHeader("X-Client-Type");
             String authHeader = accessor.getFirstNativeHeader("Authorization");
-            log.info("[WS] CONNECT received — clientType={} hasToken={}", clientType, authHeader != null);
 
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                String token = authHeader.substring(7);
-                UUID userId = extractUserIdFromToken(token);
-                if (userId != null) {
-                    UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(
-                                    userId, null,
-                                    List.of(new SimpleGrantedAuthority("ROLE_USER")));
-                    accessor.setUser(auth);
-                    log.info("[WS] CONNECT authenticated — userId={} clientType={}", userId, clientType);
-                } else {
-                    log.warn("[WS] CONNECT — token present but could not extract userId (invalid/expired token)");
+                String token = authHeader.substring(7).trim();
+                log.debug("[WS] Attempting to extract userId from token");
+                try {
+                    UUID userId = extractUserIdFromToken(token);
+                    if (userId != null) {
+                        UsernamePasswordAuthenticationToken auth =
+                                new UsernamePasswordAuthenticationToken(
+                                        userId, null,
+                                        List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                        accessor.setUser(auth);
+                        log.info("[WS] STOMP CONNECT authenticated successfully - userId: {}", userId);
+                    } else {
+                        log.warn("[WS] STOMP CONNECT - userId extraction failed (invalid/expired token)");
+                    }
+                } catch (Exception e) {
+                    log.error("[WS] STOMP CONNECT - Error during token extraction", e);
                 }
             } else {
-                log.warn("[WS] CONNECT — missing or malformed Authorization header (clientType={})", clientType);
+                log.warn("[WS] STOMP CONNECT - Missing or invalid Bearer token. Header: {}", 
+                    (authHeader != null ? "present (but no Bearer)" : "null"));
             }
-
-        } else if (StompCommand.SUBSCRIBE.equals(cmd)) {
+        }
+ else if (StompCommand.SUBSCRIBE.equals(cmd)) {
             log.debug("[WS] SUBSCRIBE — destination={} user={}",
                     accessor.getDestination(),
                     accessor.getUser() != null ? accessor.getUser().getName() : "anonymous");
