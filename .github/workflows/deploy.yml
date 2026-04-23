@@ -67,11 +67,51 @@ jobs:
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CLIENT_ID: ${{ secrets.APPLE_CLIENT_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+          APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
+          PAYMOB_API_KEY: ${{ secrets.PAYMOB_API_KEY }}
+          PAYMOB_SECRET_KEY: ${{ secrets.PAYMOB_SECRET_KEY }}
+          PAYMOB_PUBLIC_KEY: ${{ secrets.PAYMOB_PUBLIC_KEY }}
+          PAYMOB_HMAC_SECRET: ${{ secrets.PAYMOB_HMAC_SECRET }}
+          PAYMOB_NOTIFICATION_URL: ${{ secrets.PAYMOB_NOTIFICATION_URL }}
+          PAYMOB_REDIRECTION_URL: ${{ secrets.PAYMOB_REDIRECTION_URL }}
+          PAYMOB_CARD_INTEGRATION_ID: ${{ secrets.PAYMOB_CARD_INTEGRATION_ID }}
+          PAYMOB_CARD_IFRAME_ID: ${{ secrets.PAYMOB_CARD_IFRAME_ID }}
+          PAYMOB_TABBY_INTEGRATION_ID: ${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
+          PAYMOB_TAMARA_INTEGRATION_ID: ${{ secrets.PAYMOB_TAMARA_INTEGRATION_ID }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+          COURIER_SERVICE_PRIVATE_KEY: ${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}
+          CONTABO_S3_ENDPOINT: ${{ secrets.CONTABO_S3_ENDPOINT }}
+          CONTABO_S3_ACCESS_KEY: ${{ secrets.CONTABO_S3_ACCESS_KEY }}
+          CONTABO_S3_SECRET_KEY: ${{ secrets.CONTABO_S3_SECRET_KEY }}
+          CONTABO_S3_BUCKET_NAME: ${{ secrets.CONTABO_S3_BUCKET_NAME }}
+          CONTABO_S3_PUBLIC_URL: ${{ secrets.CONTABO_S3_PUBLIC_URL }}
+          RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 10m
+          envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD,DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SENDGRID_API_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,APPLE_TEAM_ID,APPLE_CLIENT_ID,APPLE_KEY_ID,APPLE_PRIVATE_KEY,APPLE_REDIRECT_URI,PAYMOB_API_KEY,PAYMOB_SECRET_KEY,PAYMOB_PUBLIC_KEY,PAYMOB_HMAC_SECRET,PAYMOB_NOTIFICATION_URL,PAYMOB_REDIRECTION_URL,PAYMOB_CARD_INTEGRATION_ID,PAYMOB_CARD_IFRAME_ID,PAYMOB_TABBY_INTEGRATION_ID,PAYMOB_TAMARA_INTEGRATION_ID,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,FIREBASE_SERVICE_ACCOUNT_KEY,COURIER_SERVICE_PRIVATE_KEY,CONTABO_S3_ENDPOINT,CONTABO_S3_ACCESS_KEY,CONTABO_S3_SECRET_KEY,CONTABO_S3_BUCKET_NAME,CONTABO_S3_PUBLIC_URL,RABBITMQ_USERNAME,RABBITMQ_PASSWORD
           script: |
             set -euo pipefail
             mkdir -p ${{ env.DEPLOY_PATH }}
@@ -84,60 +124,53 @@ jobs:
               systemctl reload docker || true
             fi
 
-            # ── Firebase service-account JSON (stored as base64 in secrets) ────
+            # ── Firebase service-account JSON (base64-encoded secret) ──────────
             mkdir -p /opt/buyology/firebase
-            echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" | base64 -d > /opt/buyology/firebase/service-account.json
+            printf '%s' "${FIREBASE_SERVICE_ACCOUNT_KEY}" | base64 -d > /opt/buyology/firebase/service-account.json
 
-            # ── Apple private key (stored as base64 in secrets) ────────────────
-            # Store APPLE_PRIVATE_KEY as base64 in GitHub Secrets:
-            #   cat AuthKey_XXXX.p8 | base64 | tr -d '\n'
-            # The decoded PEM is exported so Docker Compose reads it from the
-            # shell environment (which overrides the .env file).
-            mkdir -p /opt/buyology/apple
-            echo "${{ secrets.APPLE_PRIVATE_KEY }}" | base64 -d > /opt/buyology/apple/private.key
-            chmod 600 /opt/buyology/apple/private.key
-            export APPLE_PRIVATE_KEY="$(cat /opt/buyology/apple/private.key)"
-
-            # ── Write .env atomically ──────────────────────────────────────────
-            cat > .env.tmp << 'ENVEOF'
-            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
-            IMAGE_TAG=sha-${{ github.sha }}
-            DB_URL=${{ secrets.DB_URL }}
-            DB_USERNAME=${{ secrets.DB_USERNAME }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
-            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
-            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI }}
-            APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}
-            APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
-            APPLE_KEY_ID=${{ secrets.APPLE_KEY_ID }}
-            APPLE_REDIRECT_URI=${{ secrets.APPLE_REDIRECT_URI }}
+            # ── Write .env from shell env vars ────────────────────────────────
+            # APPLE_PRIVATE_KEY and COURIER_SERVICE_PRIVATE_KEY are excluded —
+            # both are multi-line PEM keys that break .env file parsing.
+            # They are already exported in the shell environment via envs above
+            # and Docker Compose reads them from there directly.
+            cat > .env.tmp << ENVEOF
+            DOCKER_USERNAME=${DOCKER_USERNAME}
+            IMAGE_TAG=${IMAGE_TAG}
+            DB_URL=${DB_URL}
+            DB_USERNAME=${DB_USERNAME}
+            DB_PASSWORD=${DB_PASSWORD}
+            JWT_SECRET=${JWT_SECRET}
+            SENDGRID_API_KEY=${SENDGRID_API_KEY}
+            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+            APPLE_TEAM_ID=${APPLE_TEAM_ID}
+            APPLE_CLIENT_ID=${APPLE_CLIENT_ID}
+            APPLE_KEY_ID=${APPLE_KEY_ID}
+            APPLE_REDIRECT_URI=${APPLE_REDIRECT_URI}
             REDIS_HOST=redis
             REDIS_PORT=6379
-            PAYMOB_API_KEY=${{ secrets.PAYMOB_API_KEY }}
-            PAYMOB_SECRET_KEY=${{ secrets.PAYMOB_SECRET_KEY }}
-            PAYMOB_PUBLIC_KEY=${{ secrets.PAYMOB_PUBLIC_KEY }}
-            PAYMOB_HMAC_SECRET=${{ secrets.PAYMOB_HMAC_SECRET }}
-            PAYMOB_NOTIFICATION_URL=${{ secrets.PAYMOB_NOTIFICATION_URL }}
-            PAYMOB_REDIRECTION_URL=${{ secrets.PAYMOB_REDIRECTION_URL }}
+            PAYMOB_API_KEY=${PAYMOB_API_KEY}
+            PAYMOB_SECRET_KEY=${PAYMOB_SECRET_KEY}
+            PAYMOB_PUBLIC_KEY=${PAYMOB_PUBLIC_KEY}
+            PAYMOB_HMAC_SECRET=${PAYMOB_HMAC_SECRET}
+            PAYMOB_NOTIFICATION_URL=${PAYMOB_NOTIFICATION_URL}
+            PAYMOB_REDIRECTION_URL=${PAYMOB_REDIRECTION_URL}
             PAYMOB_BASE_URL=https://uae.paymob.com
-            PAYMOB_CARD_INTEGRATION_ID=${{ secrets.PAYMOB_CARD_INTEGRATION_ID }}
-            PAYMOB_CARD_IFRAME_ID=${{ secrets.PAYMOB_CARD_IFRAME_ID }}
-            PAYMOB_TABBY_INTEGRATION_ID=${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
-            PAYMOB_TAMARA_INTEGRATION_ID=${{ secrets.PAYMOB_TAMARA_INTEGRATION_ID }}
-            TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}
-            TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}
-            TWILIO_PHONE_NUMBER=${{ secrets.TWILIO_PHONE_NUMBER }}
-            COURIER_SERVICE_PRIVATE_KEY=${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}
-            CONTABO_S3_ENDPOINT=${{ secrets.CONTABO_S3_ENDPOINT }}
-            CONTABO_S3_ACCESS_KEY=${{ secrets.CONTABO_S3_ACCESS_KEY }}
-            CONTABO_S3_SECRET_KEY=${{ secrets.CONTABO_S3_SECRET_KEY }}
-            CONTABO_S3_BUCKET_NAME=${{ secrets.CONTABO_S3_BUCKET_NAME }}
-            CONTABO_S3_PUBLIC_URL=${{ secrets.CONTABO_S3_PUBLIC_URL }}
-            RABBITMQ_USERNAME=${{ secrets.RABBITMQ_USERNAME }}
-            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            PAYMOB_CARD_INTEGRATION_ID=${PAYMOB_CARD_INTEGRATION_ID}
+            PAYMOB_CARD_IFRAME_ID=${PAYMOB_CARD_IFRAME_ID}
+            PAYMOB_TABBY_INTEGRATION_ID=${PAYMOB_TABBY_INTEGRATION_ID}
+            PAYMOB_TAMARA_INTEGRATION_ID=${PAYMOB_TAMARA_INTEGRATION_ID}
+            TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+            TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+            TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+            CONTABO_S3_ENDPOINT=${CONTABO_S3_ENDPOINT}
+            CONTABO_S3_ACCESS_KEY=${CONTABO_S3_ACCESS_KEY}
+            CONTABO_S3_SECRET_KEY=${CONTABO_S3_SECRET_KEY}
+            CONTABO_S3_BUCKET_NAME=${CONTABO_S3_BUCKET_NAME}
+            CONTABO_S3_PUBLIC_URL=${CONTABO_S3_PUBLIC_URL}
+            RABBITMQ_USERNAME=${RABBITMQ_USERNAME}
+            RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
             ENVEOF
             mv .env.tmp .env
             chmod 600 .env
@@ -146,7 +179,7 @@ jobs:
             docker network create buyology-e-commerce-courier-be_default 2>/dev/null || true
 
             # ── Login and pull new image ───────────────────────────────────────
-            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            printf '%s' "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
             docker compose pull app
 
             # ── Tear down and bring up fresh ──────────────────────────────────
