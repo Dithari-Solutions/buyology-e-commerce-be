@@ -175,9 +175,6 @@ jobs:
             mv .env.tmp .env
             chmod 600 .env
 
-            # ── Ensure courier network exists (guard for fresh server) ─────────
-            docker network create buyology-e-commerce-courier-be_default 2>/dev/null || true
-
             # ── Login and pull new image ───────────────────────────────────────
             printf '%s' "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
             docker compose pull app
@@ -189,9 +186,9 @@ jobs:
             # ── Readiness probe (max 120s) ─────────────────────────────────────
             echo "Waiting for app readiness..."
             for i in $(seq 1 24); do
-              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health/readiness 2>/dev/null || echo "000")
+              HTTP=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health 2>/dev/null || echo "000")
               if [ "$HTTP" = "200" ]; then
-                echo "  Deploy successful — readiness probe returned 200."
+                echo "  Deploy successful — health probe returned 200."
                 break
               fi
               if [ "$i" = "24" ]; then

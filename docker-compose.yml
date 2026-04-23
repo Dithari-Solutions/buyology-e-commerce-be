@@ -44,6 +44,28 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ecommerce-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ecommerce-network
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     container_name: ecommerce-elasticsearch
@@ -114,13 +136,12 @@ services:
       CONTABO_S3_SECRET_KEY: ${CONTABO_S3_SECRET_KEY}
       CONTABO_S3_BUCKET_NAME: ${CONTABO_S3_BUCKET_NAME}
       CONTABO_S3_PUBLIC_URL: ${CONTABO_S3_PUBLIC_URL}
-      # RabbitMQ is provided by the courier stack (buyology-rabbitmq)
-      RABBITMQ_HOST: buyology-rabbitmq
+      RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: "5672"
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: "/"
-      SPRING_RABBITMQ_HOST: buyology-rabbitmq
+      SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
       SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
@@ -133,11 +154,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       elasticsearch:
         condition: service_healthy
     networks:
       - ecommerce-network
-      - courier-network
     restart: always
     logging:
       driver: json-file
@@ -148,13 +170,9 @@ services:
 networks:
   ecommerce-network:
     driver: bridge
-  # Shared network with the courier stack — gives ecommerce-app access to buyology-rabbitmq.
-  # The courier deploy creates this network; we pre-create it in CI if missing.
-  courier-network:
-    external: true
-    name: buyology-e-commerce-courier-be_default
 
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
   elasticsearch_data:
