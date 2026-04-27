@@ -104,7 +104,7 @@ public class UserAddressService {
         address.setAddressLine2(req.getAddressLine2());
         address.setCity(req.getCity());
         address.setState(req.getState());
-        address.setCountry(req.getCountry());
+        address.setCountry(normalizeCountry(req.getCountry()));
         address.setPostalCode(req.getPostalCode());
         // Use coordinates from the frontend map picker if provided;
         // full geocoding (formatted address, verification) will be added when the map service is integrated.
@@ -214,5 +214,13 @@ public class UserAddressService {
         res.setCreatedAt(a.getCreatedAt());
         res.setUpdatedAt(a.getUpdatedAt());
         return res;
+    }
+
+    private String normalizeCountry(String code) {
+        if (code == null) return null;
+        String upper = code.toUpperCase();
+        if (upper.equals("AZ")) return "AZE";
+        if (upper.equals("AE")) return "UAE";
+        return upper;
     }
 }

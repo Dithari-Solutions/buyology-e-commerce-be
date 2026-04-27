@@ -161,7 +161,8 @@ public class OrderService {
         // Validate customer country
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
-        if (!address.getCountry().equalsIgnoreCase(profile.getSelectedCountryCode())) {
+        
+        if (!isSameCountry(address.getCountry(), profile.getSelectedCountryCode())) {
             throw new IllegalArgumentException("You can only purchase products for delivery in your selected country (" + 
                     profile.getSelectedCountryCode() + ").");
         }
@@ -1031,5 +1032,30 @@ public class OrderService {
         res.setCreatedAt(o.getCreatedAt());
         res.setUpdatedAt(o.getUpdatedAt());
         return res;
+    }
+
+    /**
+     * Compares two country codes, handling Alpha-2 to Alpha-3 mappings for supported countries.
+     * e.g. "AZ" == "AZE", "AE" == "UAE" or "ARE".
+     */
+    private boolean isSameCountry(String code1, String code2) {
+        if (code1 == null || code2 == null) return false;
+        if (code1.equalsIgnoreCase(code2)) return true;
+
+        String c1 = code1.toUpperCase();
+        String c2 = code2.toUpperCase();
+
+        // Azerbaijan
+        if ((c1.equals("AZ") && c2.equals("AZE")) || (c1.equals("AZE") && c2.equals("AZ"))) {
+            return true;
+        }
+
+        // UAE
+        if ((c1.equals("AE") && (c2.equals("UAE") || c2.equals("ARE"))) ||
+            ((c1.equals("UAE") || c1.equals("ARE")) && c2.equals("AE"))) {
+            return true;
+        }
+
+        return false;
     }
 }
