@@ -36,6 +36,8 @@ import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.buyology.ecommerce.common.outbox.OutboxStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -812,6 +814,37 @@ public class OrderService {
      */
     public java.util.Optional<UUID> findUserIdByOrderId(UUID orderId) {
         return orderRepo.findById(orderId).map(Order::getUserId);
+    }
+
+    /**
+     * Periodically checks for EXPRESS orders stuck in PAID status that haven't been
+     * pushed to the courier backend (no pending or published outbox event found).
+     * Runs every 5 minutes.
+     */
+    @Scheduled(fixedDelayString = "${order.reconciliation-interval-ms:300000}")
+    @Transactional
+    public void reconcilePaidOrders() {
+        log.info("[RECONCILE] Checking for stuck PAID EXPRESS orders...");
+
+        // Find PAID EXPRESS orders
+        List<Order> stuckOrders = orderRepo.findAllByStatusAndDeliveryMethod(
+                OrderStatus.PAID, DeliveryMethod.EXPRESS, PageRequest.of(0, 50)).getContent();
+
+        if (stuckOrders.isEmpty()) return;
+
+        for (Order order : stuckOrders) {
+            // Check if a PENDING or PUBLISHED outbox event already exists for this order
+            // We search the payload for the order ID
+            boolean alreadyQueued = outboxEventRepository.existsByPayloadContainingAndStatusIn(
+                    order.getId().toString(),
+                    List.of(OutboxStatus.PENDING, OutboxStatus.PUBLISHED)
+            );
+
+            if (!alreadyQueued) {
+                log.warn("[RECONCILE] Found stuck order {} (PAID but not in outbox). Re-pushing to courier...", order.getId());
+                pushToCourier(order);
+            }
+        }
     }
 
     // =========================================================================

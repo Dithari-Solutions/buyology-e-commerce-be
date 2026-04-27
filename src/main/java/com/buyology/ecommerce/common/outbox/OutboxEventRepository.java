@@ -17,4 +17,6 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
     List<OutboxEvent> findAndLockPendingBatch(@Param("limit") int limit);
+
+    boolean existsByPayloadContainingAndStatusIn(String orderId, List<OutboxStatus> statuses);
 }
