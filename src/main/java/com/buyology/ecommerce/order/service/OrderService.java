@@ -51,6 +51,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -832,16 +833,31 @@ public class OrderService {
 
         if (stuckOrders.isEmpty()) return;
 
+        Instant cutoff = Instant.now().minus(Duration.ofMinutes(15));
+
         for (Order order : stuckOrders) {
-            // Check if a PENDING or PUBLISHED outbox event already exists for this order
-            // We search the payload for the order ID
-            boolean alreadyQueued = outboxEventRepository.existsByPayloadContainingAndStatusIn(
+            // Skip recently-paid orders to give the normal flow time to complete
+            if (order.getPaidAt() != null && order.getPaidAt().isAfter(cutoff)) {
+                continue;
+            }
+
+            // If the courier already acknowledged this order (deliveryOrderId is set), nothing to do
+            if (order.getDeliveryOrderId() != null) {
+                continue;
+            }
+
+            // Re-push if there is no pending outbox event (covers FAILED/missing events).
+            // PUBLISHED events are no longer treated as definitive — the message may have
+            // been nacked and routed to the DLQ without the courier ever processing it.
+            boolean pendingExists = outboxEventRepository.existsByPayloadContainingAndStatusIn(
                     order.getId().toString(),
-                    List.of(OutboxStatus.PENDING, OutboxStatus.PUBLISHED)
+                    List.of(OutboxStatus.PENDING)
             );
 
-            if (!alreadyQueued) {
-                log.warn("[RECONCILE] Found stuck order {} (PAID but not in outbox). Re-pushing to courier...", order.getId());
+            if (!pendingExists) {
+                log.warn("[RECONCILE] Found stuck order {} (PAID {}m ago, no deliveryOrderId, no pending outbox event). Re-pushing to courier...",
+                        order.getId(),
+                        order.getPaidAt() != null ? Duration.between(order.getPaidAt(), Instant.now()).toMinutes() : "?");
                 pushToCourier(order);
             }
         }
