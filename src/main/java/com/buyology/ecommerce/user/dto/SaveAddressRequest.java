@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.user.dto;
 
 import com.buyology.ecommerce.user.enums.AddressLabel;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -46,6 +47,7 @@ public class SaveAddressRequest {
     @Size(max = 20)
     private String postalCode;
 
+    @JsonProperty("isDefault")
     private boolean isDefault = false;
 
     // Optional — supplied by the frontend map picker when the user pins their location.

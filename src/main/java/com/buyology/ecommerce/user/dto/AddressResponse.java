@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.user.dto;
 
 import com.buyology.ecommerce.user.enums.AddressLabel;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -23,6 +24,8 @@ public class AddressResponse {
     private Double latitude;
     private Double longitude;
     private boolean addressVerified;
+
+    @JsonProperty("isDefault")
     private boolean isDefault;
     private Instant createdAt;
     private Instant updatedAt;
