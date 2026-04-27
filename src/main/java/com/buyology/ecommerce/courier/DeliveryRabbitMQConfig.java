@@ -1,9 +1,5 @@
 package com.buyology.ecommerce.courier;
 
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.core.ExchangeBuilder;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -27,18 +23,6 @@ public class DeliveryRabbitMQConfig {
     @Bean
     TopicExchange ecommerceExchange() {
         return ExchangeBuilder.topicExchange(ECOMMERCE_EXCHANGE).durable(true).build();
-    }
-
-    @Bean
-    Queue deliveryOrderReceivedQueue() {
-        return QueueBuilder.durable(DELIVERY_ORDER_RECEIVED_QUEUE).build();
-    }
-
-    @Bean
-    Binding deliveryOrderRequestedBinding(Queue deliveryOrderReceivedQueue, TopicExchange ecommerceExchange) {
-        return BindingBuilder.bind(deliveryOrderReceivedQueue)
-                .to(ecommerceExchange)
-                .with(ORDER_DELIVERY_REQUESTED_KEY);
     }
 
     @Bean
