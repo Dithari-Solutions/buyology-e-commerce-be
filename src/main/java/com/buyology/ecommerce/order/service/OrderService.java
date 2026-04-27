@@ -217,8 +217,15 @@ public class OrderService {
         order.setSubtotal(subtotal);
         order.setDiscount(discount);
         order.setTotalAmount(subtotal.add(shippingFee).subtract(discount));
-        order.setCurrency(cart.getCurrency());
-        order.setCountryCode(cart.getCountryCode());
+        
+        // Ensure currency is never null (fall back to profile if cart was somehow not stamped)
+        String currency = cart.getCurrency();
+        if (currency == null || currency.isBlank()) {
+            currency = profile.getPreferredCurrency();
+        }
+        order.setCurrency(currency);
+        
+        order.setCountryCode(cart.getCountryCode() != null ? cart.getCountryCode() : profile.getSelectedCountryCode());
         order.setCouponCode(req.getCouponCode());
 
         order = orderRepo.save(order);

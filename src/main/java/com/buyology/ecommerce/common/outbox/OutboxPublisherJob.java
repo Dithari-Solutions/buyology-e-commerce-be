@@ -35,7 +35,7 @@ public class OutboxPublisherJob {
         List<OutboxEvent> pending = outboxEventRepository.findAndLockPendingBatch(BATCH_SIZE);
         if (pending.isEmpty()) return;
 
-        log.debug("[Outbox] Processing {} pending event(s)", pending.size());
+        log.info("[Outbox] Processing {} pending event(s)", pending.size());
 
         for (OutboxEvent event : pending) {
             try {
@@ -49,7 +49,7 @@ public class OutboxPublisherJob {
 
                 event.setStatus(OutboxStatus.PUBLISHED);
                 event.setPublishedAt(Instant.now());
-                log.debug("[Outbox] Published [{}] id={}", event.getRoutingKey(), event.getId());
+                log.info("[Outbox] Published [{}] id={}", event.getRoutingKey(), event.getId());
 
             } catch (Exception ex) {
                 int newRetryCount = event.getRetryCount() + 1;
