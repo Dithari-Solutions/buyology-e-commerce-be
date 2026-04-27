@@ -191,18 +191,26 @@ jobs:
             # Accepts any HTTP response as "up" — a non-empty code means Tomcat
             # is listening. 000 means the app is not yet accepting connections.
             echo "Waiting for app readiness..."
-            for i in $(seq 1 24); do
-              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null)
-              if [ -n "$HTTP" ] && [ "$HTTP" != "000" ]; then
+            for i in $(seq 1 30); do
+              # We use '|| echo "000"' to prevent 'set -e' from killing the script 
+              # if curl fails (e.g. exit code 7 or 56) while the app is still starting.
+              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+              
+              if [ "$HTTP" != "000" ]; then
                 echo "  Deploy successful — app is responding (HTTP $HTTP)."
                 break
               fi
-              if [ "$i" = "24" ]; then
-                echo "ERROR: App did not become ready in 120s (last HTTP: $HTTP)."
-                docker compose logs --tail=80 app
+              
+              if [ "$i" = "30" ]; then
+                echo "ERROR: App did not become ready in 150s (last HTTP: $HTTP)."
+                echo "=== Docker Compose Status ==="
+                docker compose ps
+                echo "=== Application Logs (last 100 lines) ==="
+                docker compose logs --tail=100 app
                 exit 1
               fi
-              echo "  attempt $i/24: HTTP $HTTP"
+              
+              echo "  attempt $i/30: HTTP $HTTP"
               sleep 5
             done
 
