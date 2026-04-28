@@ -220,11 +220,21 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     /** Extracts a simple string claim value from a JSON payload string. */
     private String extractClaim(String json, String key) {
-        String search = "\"" + key + "\":";
-        int idx = json.indexOf(search);
-        if (idx < 0) return null;
-        int start = idx + search.length();
+        String search = "\"" + key + "\"";
+        int keyIdx = json.indexOf(search);
+        if (keyIdx < 0) return null;
+
+        int colonIdx = json.indexOf(':', keyIdx + search.length());
+        if (colonIdx < 0) return null;
+
+        int start = colonIdx + 1;
+        // Skip whitespace
+        while (start < json.length() && Character.isWhitespace(json.charAt(start))) {
+            start++;
+        }
+
         if (start >= json.length()) return null;
+
         char first = json.charAt(start);
         if (first == '"') {
             // String value

@@ -93,14 +93,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // ✅ Only allow HTTPS origins in production
-        configuration.setAllowedOrigins(List.of(
-                "https://api-dev.dithari.com",
-                "https://dev.dithari.com",
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "https://admin-dev.dithari.com"
-        ));
+        // Allow all origins via patterns to support mobile apps and various dev environments
+        // while still allowing credentials (which setAllowedOrigins("*") would forbid).
+        configuration.setAllowedOriginPatterns(List.of("*"));
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
