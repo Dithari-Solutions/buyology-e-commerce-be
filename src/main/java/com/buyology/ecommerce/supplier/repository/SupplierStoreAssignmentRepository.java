@@ -10,8 +10,12 @@ import java.util.List;
 import java.util.UUID;
 
 public interface SupplierStoreAssignmentRepository extends JpaRepository<SupplierStoreAssignment, Id> {
-    List<SupplierStoreAssignment> findBySupplierId(UUID supplierId);
-    boolean existsBySupplierIdAndStoreId(UUID supplierId, UUID storeId);
+
+    @Query("SELECT a FROM SupplierStoreAssignment a WHERE a.id.supplierId = :supplierId")
+    List<SupplierStoreAssignment> findBySupplierId(@Param("supplierId") UUID supplierId);
+
+    @Query("SELECT COUNT(a) > 0 FROM SupplierStoreAssignment a WHERE a.id.supplierId = :supplierId AND a.id.storeId = :storeId")
+    boolean existsBySupplierIdAndStoreId(@Param("supplierId") UUID supplierId, @Param("storeId") UUID storeId);
 
     @Query("SELECT a.id.storeId FROM SupplierStoreAssignment a WHERE a.id.supplierId = :supplierId")
     List<UUID> findStoreIdsBySupplierId(@Param("supplierId") UUID supplierId);
