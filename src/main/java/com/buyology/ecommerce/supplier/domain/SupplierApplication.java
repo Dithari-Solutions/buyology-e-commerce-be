@@ -78,7 +78,7 @@ public class SupplierApplication {
     private String phoneNumber;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "preferred_contact", nullable = false, length = 20)
+    @Column(name = "preferred_contact", nullable = true, length = 20)
     private PreferredContact preferredContact;
 
     @Column(name = "otp_verified", nullable = false)

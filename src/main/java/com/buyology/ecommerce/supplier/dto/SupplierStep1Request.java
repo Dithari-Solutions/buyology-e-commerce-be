@@ -33,7 +33,7 @@ public class SupplierStep1Request {
     @Size(max = 30)
     private String phoneNumber;
 
-    @NotNull
+//    @NotNull
     private PreferredContact preferredContact;
 
     public String getFullName() { return fullName; }

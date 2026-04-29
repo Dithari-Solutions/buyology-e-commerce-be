@@ -78,11 +78,13 @@ public class SupplierApplicationService {
                     "An application with this email already exists");
         }
 
+/*
         if (request.getPreferredContact() != PreferredContact.EMAIL
                 && (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank())) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
                     "Phone number is required for WhatsApp or Phone Call contact preference");
         }
+*/
 
         SupplierApplication app = new SupplierApplication();
         app.setFullName(request.getFullName());
@@ -93,11 +95,12 @@ public class SupplierApplicationService {
         app.setEmail(request.getEmail());
         app.setPhoneNumber(request.getPhoneNumber());
         app.setPreferredContact(request.getPreferredContact());
+        app.setOtpVerified(true);
         applicationRepository.save(app);
 
-        sendOtp(app);
+        // sendOtp(app);
 
-        return ApiResponse.success(app.getId(), "OTP sent. Please verify your contact.");
+        return ApiResponse.success(app.getId(), "Application initiated. Please proceed to step 2.");
     }
 
     // ── OTP verification ─────────────────────────────────────────────────────
@@ -182,8 +185,11 @@ public class SupplierApplicationService {
             otpRepository.save(otp);
         }
 
+/*
         sendOtp(app);
         return ApiResponse.success("sent", "New OTP sent");
+*/
+        return ApiResponse.success("not_needed", "OTP is not required for this process");
     }
 
     // ── Step 2: Product details ──────────────────────────────────────────────
@@ -325,6 +331,7 @@ public class SupplierApplicationService {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private void sendOtp(SupplierApplication app) {
+        /*
         String otpCode = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
 
         SupplierOtp otp = new SupplierOtp();
@@ -346,6 +353,7 @@ public class SupplierApplicationService {
             otpRepository.save(otp);
             emailService.sendSupplierOtpEmail(app.getEmail(), otpCode);
         }
+        */
     }
 
     private SupplierApplication findVerifiedApplication(UUID id) {
