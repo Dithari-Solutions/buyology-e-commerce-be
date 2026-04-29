@@ -65,6 +65,14 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.STORE_ADMIN_READ
     );
 
+    private static final List<String> SUPPLIER_PERMISSIONS = List.of(
+            PermissionConstants.SUPPLIER_PRODUCT_CREATE,
+            PermissionConstants.SUPPLIER_PRODUCT_READ,
+            PermissionConstants.SUPPLIER_PRODUCT_UPDATE,
+            PermissionConstants.SUPPLIER_ANALYTICS_READ,
+            PermissionConstants.SUPPLIER_STORE_READ
+    );
+
     private static final List<String> ALL_PERMISSIONS = List.of(
             PermissionConstants.REVIEW_READ,
             PermissionConstants.REVIEW_MODERATE,
@@ -92,7 +100,15 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.STORE_ADMIN_READ,
             PermissionConstants.STORE_ADMIN_ASSIGN,
             PermissionConstants.STORE_ADMIN_UPDATE,
-            PermissionConstants.STORE_ADMIN_REMOVE
+            PermissionConstants.STORE_ADMIN_REMOVE,
+            PermissionConstants.SUPPLIER_APPLICATION_READ,
+            PermissionConstants.SUPPLIER_APPLICATION_REVIEW,
+            PermissionConstants.SUPPLIER_PRODUCT_APPROVE,
+            PermissionConstants.SUPPLIER_PRODUCT_CREATE,
+            PermissionConstants.SUPPLIER_PRODUCT_READ,
+            PermissionConstants.SUPPLIER_PRODUCT_UPDATE,
+            PermissionConstants.SUPPLIER_ANALYTICS_READ,
+            PermissionConstants.SUPPLIER_STORE_READ
     );
 
     // ── Role definitions ─────────────────────────────────────────────────────
@@ -112,6 +128,10 @@ public class RoleDataInitializer implements ApplicationRunner {
                     "STORE_ADMIN",
                     "Manages product assignments and inventory for their store",
                     STORE_ADMIN_PERMISSIONS),
+            new RoleDefinition(
+                    "SUPPLIER",
+                    "Third-party supplier: manage own products and view own analytics",
+                    SUPPLIER_PERMISSIONS),
             new RoleDefinition(
                     "SUPERADMIN",
                     "Full access to all modules and operations",

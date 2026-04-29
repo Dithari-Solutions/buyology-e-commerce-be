@@ -153,6 +153,96 @@ public class EmailService {
         }
     }
 
+    // ── Supplier emails ──────────────────────────────────────────────────────
+
+    public void sendSupplierOtpEmail(String toEmail, String otpCode) {
+        try {
+            String htmlBody = buildOtpEmailHtml(otpCode);
+            send(toEmail, "Verify your Buyology supplier application", htmlBody);
+        } catch (IOException e) {
+            log.error("Failed to send supplier OTP email to {}: {}", toEmail, e.getMessage());
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
+    public void sendSupplierApplicationReceivedEmail(String toEmail, String supplierName, String businessName) {
+        try {
+            String template = loadTemplate("static/supplier-application-received.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{BUSINESS_NAME}}", businessName)
+                    .replace("{{APPLICATION_DATE}}", java.time.LocalDate.now().toString());
+            send(toEmail, "Your supplier application is under review — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier application received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendSupplierApprovedEmail(String toEmail, String supplierName, String businessName, String setupLink) {
+        try {
+            String template = loadTemplate("static/supplier-approved.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{BUSINESS_NAME}}", businessName)
+                    .replace("{{SETUP_LINK}}", setupLink);
+            send(toEmail, "Your Buyology supplier account is approved!", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier approved email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendSupplierRejectedEmail(String toEmail, String supplierName, String businessName, String reason) {
+        try {
+            String template = loadTemplate("static/supplier-rejected.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{BUSINESS_NAME}}", businessName)
+                    .replace("{{REJECTION_REASON}}", reason);
+            send(toEmail, "Update on your Buyology supplier application", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendSupplierProductUnderReviewEmail(String toEmail, String supplierName, String productName, String sku) {
+        try {
+            String template = loadTemplate("static/supplier-product-under-review.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{PRODUCT_NAME}}", productName)
+                    .replace("{{PRODUCT_SKU}}", sku);
+            send(toEmail, "Your product is under review — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier product under review email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendSupplierProductApprovedEmail(String toEmail, String supplierName, String productName, String sku) {
+        try {
+            String template = loadTemplate("static/supplier-product-approved.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{PRODUCT_NAME}}", productName)
+                    .replace("{{PRODUCT_SKU}}", sku);
+            send(toEmail, "Your product is now live on Buyology!", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier product approved email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendSupplierProductRejectedEmail(String toEmail, String supplierName, String productName, String reason) {
+        try {
+            String template = loadTemplate("static/supplier-product-rejected.html");
+            String html = template
+                    .replace("{{SUPPLIER_NAME}}", supplierName)
+                    .replace("{{PRODUCT_NAME}}", productName)
+                    .replace("{{REJECTION_REASON}}", reason);
+            send(toEmail, "Action required: product review update — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send supplier product rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Scheduled cleanup ────────────────────────────────────────────────────
 
     /**

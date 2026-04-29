@@ -245,6 +245,7 @@ public class OrderService {
             item.setQuantity(cartItem.getQuantity());
             item.setUnitPrice(cartItem.getUnitPrice());
             item.setTotalPrice(cartItem.getTotalPrice());
+            item.setSupplierId(cartItem.getProduct().getSupplierId());
             order.getItems().add(item);
         }
 

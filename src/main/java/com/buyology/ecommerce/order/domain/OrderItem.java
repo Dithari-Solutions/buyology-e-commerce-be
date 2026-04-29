@@ -37,6 +37,10 @@ public class OrderItem {
     @Column(name = "store_id")
     private UUID storeId;
 
+    // Stamped from Product.supplierId at order creation time for reliable revenue tracking
+    @Column(name = "supplier_id")
+    private UUID supplierId;
+
     @Column(name = "product_sku", length = 255)
     private String productSku;
 
@@ -81,6 +85,9 @@ public class OrderItem {
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
+    public UUID getSupplierId() { return supplierId; }
+    public void setSupplierId(UUID supplierId) { this.supplierId = supplierId; }
 
     public String getProductSku() { return productSku; }
     public void setProductSku(String productSku) { this.productSku = productSku; }

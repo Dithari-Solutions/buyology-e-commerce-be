@@ -42,4 +42,16 @@ public final class PermissionConstants {
     public static final String STORE_ADMIN_ASSIGN   = "store:admin:assign";
     public static final String STORE_ADMIN_UPDATE   = "store:admin:update";
     public static final String STORE_ADMIN_REMOVE   = "store:admin:remove";
+
+    // ── Supplier — Admin ──────────────────────────────────────────────────────
+    public static final String SUPPLIER_APPLICATION_READ   = "supplier:application:read";
+    public static final String SUPPLIER_APPLICATION_REVIEW = "supplier:application:review";
+    public static final String SUPPLIER_PRODUCT_APPROVE    = "supplier:product:approve";
+
+    // ── Supplier — Portal (self-service) ─────────────────────────────────────
+    public static final String SUPPLIER_PRODUCT_CREATE  = "supplier:product:create";
+    public static final String SUPPLIER_PRODUCT_READ    = "supplier:product:read";
+    public static final String SUPPLIER_PRODUCT_UPDATE  = "supplier:product:update";
+    public static final String SUPPLIER_ANALYTICS_READ  = "supplier:analytics:read";
+    public static final String SUPPLIER_STORE_READ      = "supplier:store:read";
 }

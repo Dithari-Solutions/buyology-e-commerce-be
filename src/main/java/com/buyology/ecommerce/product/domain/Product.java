@@ -49,6 +49,17 @@ public class Product {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
+    // Supplier product fields (null for admin-created products)
+    @Column(name = "supplier_id")
+    private UUID supplierId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "supplier_status", length = 20)
+    private SupplierStatus supplierStatus;
+
+    @Column(name = "supplier_rejection_reason", columnDefinition = "TEXT")
+    private String supplierRejectionReason;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
@@ -81,6 +92,10 @@ public class Product {
     public enum DiscountType {
         FIXED,
         PERCENTAGE
+    }
+
+    public enum SupplierStatus {
+        PENDING_REVIEW, APPROVED, REJECTED
     }
 
     // Constructors
@@ -232,4 +247,13 @@ public class Product {
     public void setIsLimitedStock(Boolean isLimitedStock) {
         this.isLimitedStock = isLimitedStock;
     }
+
+    public UUID getSupplierId() { return supplierId; }
+    public void setSupplierId(UUID supplierId) { this.supplierId = supplierId; }
+
+    public SupplierStatus getSupplierStatus() { return supplierStatus; }
+    public void setSupplierStatus(SupplierStatus supplierStatus) { this.supplierStatus = supplierStatus; }
+
+    public String getSupplierRejectionReason() { return supplierRejectionReason; }
+    public void setSupplierRejectionReason(String supplierRejectionReason) { this.supplierRejectionReason = supplierRejectionReason; }
 }
