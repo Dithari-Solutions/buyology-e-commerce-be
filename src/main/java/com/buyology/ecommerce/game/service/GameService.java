@@ -4,6 +4,7 @@ import com.buyology.ecommerce.game.domain.*;
 import com.buyology.ecommerce.game.dto.*;
 import com.buyology.ecommerce.game.enums.GameType;
 import com.buyology.ecommerce.game.repository.*;
+import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -84,40 +85,83 @@ public class GameService {
                 .orElse(GameType.MINI_GAME); // Default
     }
 
+    /**
+     * Rich daily-game status used by the mobile app's CHOICE screen:
+     * which game today, whether the current user already played it, their
+     * total tokens, and current streak.
+     */
+    public DailyGameStatusResponse getDailyGameStatus() {
+        Users user = getCurrentUser();
+        LocalDate today = LocalDate.now();
+        GameType gameType = getDailyGameType();
+
+        boolean played = hasPlayedToday(user, today);
+
+        int tokens = userProfilesRepository.findByUser(user)
+                .map(UserProfiles::getTokens)
+                .orElse(0);
+
+        int streak = userStreakRepository.findByUser(user)
+                .map(UserStreak::getCurrentStreak)
+                .orElse(0);
+
+        return new DailyGameStatusResponse(gameType, played, tokens, streak);
+    }
+
     public List<QuizQuestionResponse> getActiveQuizQuestions() {
         return quizQuestionRepository.findByIsActiveTrue().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Tokens awarded for a successful daily game.
+     * Flat 10 for now; structured as a method so we can scale by score/time later
+     * without touching call sites.
+     */
+    private static final int TOKENS_PER_WIN = 10;
+
+    private int computeTokensEarned(GameSubmissionRequest request) {
+        return request.isSuccess() ? TOKENS_PER_WIN : 0;
+    }
+
     @Transactional
-    public void submitResult(GameSubmissionRequest request) {
+    public GameSubmissionResponse submitResult(GameSubmissionRequest request) {
         Users user = getCurrentUser();
         LocalDateTime now = LocalDateTime.now();
         LocalDate today = now.toLocalDate();
 
-        // Check if already played today
-        LocalDateTime startOfDay = today.atStartOfDay();
-        LocalDateTime endOfDay = today.atTime(LocalTime.MAX);
-        
-        if (gameResultRepository.findByUserAndPlayedDate(user, startOfDay, endOfDay).isPresent()) {
-            throw new RuntimeException("Already played today");
+        // Daily-limit guard — backend is the source of truth, regardless of what
+        // the client sends. Mobile/web should also gate their UI but we don't trust them.
+        if (hasPlayedToday(user, today)) {
+            throw new AlreadyPlayedException("Already played today");
         }
 
         GameResult result = new GameResult(user, request.getGameType(), request.getScore(), request.isSuccess(), now);
         gameResultRepository.save(result);
 
-        if (request.isSuccess()) {
-            userProfilesRepository.findByUser(user).ifPresent(profile -> {
-                profile.setTokens(profile.getTokens() + 10);
-                userProfilesRepository.save(profile);
-            });
-        }
+        int tokensEarned = computeTokensEarned(request);
+        int newTotalTokens = userProfilesRepository.findByUser(user)
+                .map(profile -> {
+                    int updated = profile.getTokens() + tokensEarned;
+                    profile.setTokens(updated);
+                    userProfilesRepository.save(profile);
+                    return updated;
+                })
+                .orElse(tokensEarned);
 
-        updateStreak(user, today);
+        UserStreak streak = updateStreak(user, today);
+
+        return new GameSubmissionResponse(tokensEarned, streak.getCurrentStreak(), newTotalTokens);
     }
 
-    private void updateStreak(Users user, LocalDate today) {
+    private boolean hasPlayedToday(Users user, LocalDate today) {
+        LocalDateTime startOfDay = today.atStartOfDay();
+        LocalDateTime endOfDay = today.atTime(LocalTime.MAX);
+        return gameResultRepository.findByUserAndPlayedDate(user, startOfDay, endOfDay).isPresent();
+    }
+
+    private UserStreak updateStreak(Users user, LocalDate today) {
         UserStreak streak = userStreakRepository.findByUser(user)
                 .orElse(new UserStreak(user));
 
@@ -134,7 +178,7 @@ public class GameService {
         }
 
         streak.setLastPlayedDate(today);
-        userStreakRepository.save(streak);
+        return userStreakRepository.save(streak);
     }
 
     public List<LeaderboardResponse> getDailyLeaderboard() {

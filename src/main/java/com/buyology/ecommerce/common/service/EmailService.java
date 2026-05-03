@@ -1,21 +1,22 @@
 package com.buyology.ecommerce.common.service;
 
-import com.sendgrid.Method;
-import com.sendgrid.Request;
-import com.sendgrid.Response;
-import com.sendgrid.SendGrid;
-import com.sendgrid.helpers.mail.Mail;
-import com.sendgrid.helpers.mail.objects.Content;
-import com.sendgrid.helpers.mail.objects.Email;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import software.amazon.awssdk.services.sesv2.SesV2Client;
+import software.amazon.awssdk.services.sesv2.model.Body;
+import software.amazon.awssdk.services.sesv2.model.Content;
+import software.amazon.awssdk.services.sesv2.model.Destination;
+import software.amazon.awssdk.services.sesv2.model.EmailContent;
+import software.amazon.awssdk.services.sesv2.model.Message;
+import software.amazon.awssdk.services.sesv2.model.SendEmailRequest;
+import software.amazon.awssdk.services.sesv2.model.SesV2Exception;
 
 import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
+import com.buyology.ecommerce.infrastructure.config.AwsSesProperties;
 import com.buyology.ecommerce.infrastructure.config.OtpProperties;
-import com.buyology.ecommerce.infrastructure.config.TwilioSendGridProperties;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,23 +28,23 @@ public class EmailService {
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
     private final EmailOtpRepository emailOtpRepository;
-    private final TwilioSendGridProperties sendGridProps;
+    private final AwsSesProperties sesProps;
     private final OtpProperties otpProps;
+    private final SesV2Client sesClient;
 
     public EmailService(
             EmailOtpRepository emailOtpRepository,
-            TwilioSendGridProperties sendGridProps,
-            OtpProperties otpProps) {
+            AwsSesProperties sesProps,
+            OtpProperties otpProps,
+            SesV2Client sesClient) {
         this.emailOtpRepository = emailOtpRepository;
-        this.sendGridProps = sendGridProps;
+        this.sesProps = sesProps;
         this.otpProps = otpProps;
+        this.sesClient = sesClient;
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
 
-    /**
-     * Send a 6-digit OTP verification email via Twilio SendGrid.
-     */
     public void sendOtpEmail(String toEmail, String otpCode) {
         try {
             String htmlBody = buildOtpEmailHtml(otpCode);
@@ -51,15 +52,10 @@ public class EmailService {
             log.info("OTP email sent to {}", toEmail);
         } catch (IOException e) {
             log.error("Failed to send OTP email to {}: {}", toEmail, e.getMessage());
-            // Preserve the original SendGrid error so callers can surface it
             throw new RuntimeException(e.getMessage(), e);
         }
     }
 
-    /**
-     * Send a 6-digit OTP for the forgot-password flow.
-     * Uses the same OTP template as signup but with a different subject line.
-     */
     public void sendPasswordResetOtpEmail(String toEmail, String otpCode) {
         try {
             String htmlBody = buildOtpEmailHtml(otpCode);
@@ -139,16 +135,12 @@ public class EmailService {
         }
     }
 
-    /**
-     * Send the registration success email after OTP verification.
-     */
     public void sendRegistrationSuccessEmail(String toEmail) {
         try {
             String htmlBody = loadTemplate("static/email.html");
             send(toEmail, "Welcome to Buyology!", htmlBody);
             log.info("Registration success email sent to {}", toEmail);
         } catch (IOException e) {
-            // Non-critical — log and continue; the user is already registered
             log.warn("Could not send registration success email to {}: {}", toEmail, e.getMessage());
         }
     }
@@ -245,9 +237,6 @@ public class EmailService {
 
     // ── Scheduled cleanup ────────────────────────────────────────────────────
 
-    /**
-     * Delete expired OTP records every hour to keep the table lean.
-     */
     @Scheduled(cron = "0 0 * * * ?")
     public void cleanupExpiredOtps() {
         int deleted = emailOtpRepository.deleteExpiredBefore(Instant.now());
@@ -259,25 +248,33 @@ public class EmailService {
     // ── Private helpers ──────────────────────────────────────────────────────
 
     private void send(String toEmail, String subject, String htmlBody) throws IOException {
-        Email from    = new Email(sendGridProps.getFromEmail(), sendGridProps.getFromName());
-        Email to      = new Email(toEmail);
-        Content content = new Content("text/html", htmlBody);
-        Mail mail     = new Mail(from, subject, to, content);
+        String fromAddress = (sesProps.getFromName() != null && !sesProps.getFromName().isBlank())
+                ? sesProps.getFromName() + " <" + sesProps.getFromEmail() + ">"
+                : sesProps.getFromEmail();
 
-        SendGrid sg = new SendGrid(sendGridProps.getApiKey());
-        Request request = new Request();
-        request.setMethod(Method.POST);
-        request.setEndpoint("mail/send");
-        request.setBody(mail.build());
+        EmailContent content = EmailContent.builder()
+                .simple(Message.builder()
+                        .subject(Content.builder().data(subject).charset("UTF-8").build())
+                        .body(Body.builder()
+                                .html(Content.builder().data(htmlBody).charset("UTF-8").build())
+                                .build())
+                        .build())
+                .build();
 
-        Response response = sg.api(request);
+        SendEmailRequest.Builder req = SendEmailRequest.builder()
+                .fromEmailAddress(fromAddress)
+                .destination(Destination.builder().toAddresses(toEmail).build())
+                .content(content);
 
-        if (response.getStatusCode() >= 400) {
-            String body = response.getBody();
-            log.error("SendGrid error {} sending to {}: {}", response.getStatusCode(), toEmail, body);
-            throw new IOException(
-                "SendGrid returned HTTP " + response.getStatusCode() + ": " + body
-            );
+        if (sesProps.getConfigurationSet() != null && !sesProps.getConfigurationSet().isBlank()) {
+            req.configurationSetName(sesProps.getConfigurationSet());
+        }
+
+        try {
+            sesClient.sendEmail(req.build());
+        } catch (SesV2Exception ex) {
+            log.error("SES error sending to {}: {}", toEmail, ex.awsErrorDetails().errorMessage());
+            throw new IOException("SES returned error: " + ex.awsErrorDetails().errorMessage(), ex);
         }
     }
 

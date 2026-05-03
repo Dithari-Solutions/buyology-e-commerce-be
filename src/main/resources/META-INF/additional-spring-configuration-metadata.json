@@ -111,20 +111,35 @@
       "description": "OAuth2 redirect URI registered in Apple Developer account."
     },
     {
-      "name": "twilio.sendgrid.api-key",
+      "name": "aws.ses.region",
       "type": "java.lang.String",
-      "description": "Twilio SendGrid API key used to send transactional emails."
+      "description": "AWS region where SES is configured (e.g. eu-west-1, us-east-1)."
     },
     {
-      "name": "twilio.sendgrid.from-email",
+      "name": "aws.ses.access-key",
       "type": "java.lang.String",
-      "description": "Verified sender email address used as the From address for all outgoing emails."
+      "description": "AWS access key ID with ses:SendEmail permission. Leave blank to use the default credentials provider chain (recommended on AWS infrastructure)."
     },
     {
-      "name": "twilio.sendgrid.from-name",
+      "name": "aws.ses.secret-key",
+      "type": "java.lang.String",
+      "description": "AWS secret access key paired with aws.ses.access-key. Leave blank when using the default credentials provider chain."
+    },
+    {
+      "name": "aws.ses.from-email",
+      "type": "java.lang.String",
+      "description": "Verified SES sender email or domain identity used as the From address for all outgoing emails."
+    },
+    {
+      "name": "aws.ses.from-name",
       "type": "java.lang.String",
       "description": "Display name shown alongside the from email address.",
       "defaultValue": "Buyology"
+    },
+    {
+      "name": "aws.ses.configuration-set",
+      "type": "java.lang.String",
+      "description": "Optional SES configuration set name to attach to outgoing emails (used for event publishing, dedicated IPs, etc.)."
     },
     {
       "name": "twilio.account-sid",

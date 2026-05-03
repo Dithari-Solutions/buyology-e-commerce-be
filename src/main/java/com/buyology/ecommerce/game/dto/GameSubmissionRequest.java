@@ -12,6 +12,9 @@ public class GameSubmissionRequest {
 
     private int score;
 
+    /** Time taken in milliseconds (mini-games). Null for quizzes. */
+    private Integer time;
+
     public GameType getGameType() {
         return gameType;
     }
@@ -34,5 +37,13 @@ public class GameSubmissionRequest {
 
     public void setScore(int score) {
         this.score = score;
+    }
+
+    public Integer getTime() {
+        return time;
+    }
+
+    public void setTime(Integer time) {
+        this.time = time;
     }
 }

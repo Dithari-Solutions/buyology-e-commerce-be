@@ -1,10 +1,12 @@
 package com.buyology.ecommerce.game.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.game.dto.AlreadyPlayedException;
+import com.buyology.ecommerce.game.dto.DailyGameStatusResponse;
 import com.buyology.ecommerce.game.dto.GameSubmissionRequest;
+import com.buyology.ecommerce.game.dto.GameSubmissionResponse;
 import com.buyology.ecommerce.game.dto.LeaderboardResponse;
 import com.buyology.ecommerce.game.dto.QuizQuestionResponse;
-import com.buyology.ecommerce.game.enums.GameType;
 import com.buyology.ecommerce.game.service.GameService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,11 +28,17 @@ public class GameController {
         this.gameService = gameService;
     }
 
-    @Operation(summary = "Get current daily game type")
+    @Operation(summary = "Get current daily game status (type + played + tokens + streak)")
     @GetMapping("/daily")
-    public ResponseEntity<ApiResponse<GameType>> getDailyGameType() {
-        GameType gameType = gameService.getDailyGameType();
-        return ApiResponse.success(gameType, "Daily game type retrieved");
+    public ResponseEntity<ApiResponse<DailyGameStatusResponse>> getDailyGameStatus() {
+        DailyGameStatusResponse status = gameService.getDailyGameStatus();
+        return ApiResponse.success(status, "Daily game status retrieved");
+    }
+
+    @Operation(summary = "Get current daily game type only")
+    @GetMapping("/daily-type")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.game.enums.GameType>> getDailyGameType() {
+        return ApiResponse.success(gameService.getDailyGameType(), "Daily game type retrieved");
     }
 
     @Operation(summary = "Get active quiz questions")
@@ -42,10 +50,14 @@ public class GameController {
 
     @Operation(summary = "Submit game/quiz result")
     @PostMapping("/submit")
-    public ResponseEntity<ApiResponse<String>> submitResult(@Valid @RequestBody GameSubmissionRequest request) {
+    public ResponseEntity<ApiResponse<GameSubmissionResponse>> submitResult(@Valid @RequestBody GameSubmissionRequest request) {
         try {
-            gameService.submitResult(request);
-            return ApiResponse.success("OK", "Result submitted successfully");
+            GameSubmissionResponse result = gameService.submitResult(request);
+            return ApiResponse.success(result, "Result submitted successfully");
+        } catch (AlreadyPlayedException e) {
+            // 409 — distinguishes "you've used your daily allowance" from generic 400s
+            // so clients can show a friendly message instead of a generic error.
+            return ApiResponse.failure(HttpStatus.CONFLICT, e.getMessage());
         } catch (RuntimeException e) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         }
