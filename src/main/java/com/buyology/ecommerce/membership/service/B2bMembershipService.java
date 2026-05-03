@@ -51,6 +51,25 @@ public class B2bMembershipService {
 
     @Transactional
     public MembershipApplicationResponse submitApplication(MembershipApplicationRequest req, UUID userId) {
+        String email = req.getContactEmail() == null ? null : req.getContactEmail().trim().toLowerCase();
+
+        if (userId != null && membershipRepo.existsByUserId(userId)) {
+            throw new IllegalStateException("This account already has an active B2B membership");
+        }
+        if (userId != null) {
+            Optional<B2bMembershipApplication> existing = appRepo.findByUserId(userId);
+            if (existing.isPresent()
+                    && existing.get().getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
+                throw new IllegalStateException(
+                        "A B2B membership application already exists for this account (status: "
+                                + existing.get().getStatus() + ")");
+            }
+        }
+        if (email != null && !email.isBlank()
+                && appRepo.existsByContactEmailAndStatusNot(email, B2bMembershipApplication.ApplicationStatus.REJECTED)) {
+            throw new IllegalStateException("A B2B membership application already exists for this email");
+        }
+
         B2bMembershipApplication app = new B2bMembershipApplication();
         app.setUserId(userId);
         app.setCompanyName(req.getCompanyName());
@@ -62,7 +81,7 @@ public class B2bMembershipService {
         app.setWebsite(req.getWebsite());
         app.setContactFullName(req.getContactFullName());
         app.setContactDesignation(req.getContactDesignation());
-        app.setContactEmail(req.getContactEmail());
+        app.setContactEmail(email);
         app.setContactMobile(req.getContactMobile());
         app.setTermsAccepted(req.isTermsAccepted());
         if (req.getBusinessNeeds() != null) {

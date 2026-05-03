@@ -71,11 +71,13 @@ public class SupplierApplicationService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email address is not valid");
         }
 
-        boolean alreadyApproved = applicationRepository
-                .existsByEmailAndStatusNot(request.getEmail(), ApplicationStatus.REJECTED);
-        if (alreadyApproved) {
+        String email = request.getEmail().trim().toLowerCase();
+
+        boolean alreadyExists = applicationRepository
+                .existsByEmailAndStatusNot(email, ApplicationStatus.REJECTED);
+        if (alreadyExists) {
             return ApiResponse.failure(HttpStatus.CONFLICT,
-                    "An application with this email already exists");
+                    "A supplier application with this email already exists");
         }
 
 /*
@@ -92,7 +94,7 @@ public class SupplierApplicationService {
         app.setSellerType(request.getSellerType());
         app.setCountry(request.getCountry());
         app.setCity(request.getCity());
-        app.setEmail(request.getEmail());
+        app.setEmail(email);
         app.setPhoneNumber(request.getPhoneNumber());
         app.setPreferredContact(request.getPreferredContact());
         app.setOtpVerified(true);
