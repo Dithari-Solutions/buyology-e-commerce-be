@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -102,5 +103,21 @@ public class AdminOrderController {
         return ApiResponse.success(
                 orderService.adminAddTracking(orderId, adminUserId, request),
                 "Tracking updated successfully");
+    }
+
+    /**
+     * Upload a pickup or drop-off proof photo. {@code type} must be PICKUP or DROPOFF.
+     * Multipart form: field {@code file} carries the image.
+     */
+    @PostMapping(value = "/{orderId}/proof/{type}", consumes = "multipart/form-data")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<OrderAdminResponse>> uploadProof(
+            @AuthenticationPrincipal UUID adminUserId,
+            @PathVariable UUID orderId,
+            @PathVariable OrderService.ProofType type,
+            @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(
+                orderService.adminUploadProof(orderId, adminUserId, type, file),
+                type.name() + " proof uploaded successfully");
     }
 }

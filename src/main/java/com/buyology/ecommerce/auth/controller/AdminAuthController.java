@@ -2,6 +2,7 @@ package com.buyology.ecommerce.auth.controller;
 
 import com.buyology.ecommerce.auth.dto.AdminSignUpRequest;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
+import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.common.response.ApiResponse;
@@ -49,5 +50,16 @@ public class AdminAuthController {
             @RequestBody OtpVerifyRequest request,
             HttpServletRequest httpRequest) {
         return authService.adminVerifyOtp(request, httpRequest);
+    }
+
+    @Operation(
+        summary = "Admin signin",
+        description = "Authenticates a user as ADMIN. Returns 403 if the credentials belong to a non-admin account."
+    )
+    @PostMapping("/signin")
+    public ResponseEntity<ApiResponse<SignInResponse>> adminSignin(
+            @RequestBody SignInRequest request,
+            HttpServletRequest httpRequest) {
+        return authService.adminSignin(request, httpRequest);
     }
 }

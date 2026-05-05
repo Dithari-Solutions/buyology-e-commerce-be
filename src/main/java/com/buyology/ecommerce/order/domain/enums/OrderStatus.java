@@ -1,15 +1,13 @@
 package com.buyology.ecommerce.order.domain.enums;
 
 /**
- * Unified order status that covers both express and regular delivery flows.
+ * Unified order status. New flow (admin-managed, no courier backend):
+ *   PENDING_PAYMENT → PAID → PACKAGING → IN_COURIER → IN_TRANSIT → DELIVERED
+ *                                                                ↘ CANCELLED / FAILED
  *
- * Express Delivery flow:
- *   PENDING_PAYMENT → PAID → COURIER_ASSIGNED → PICKED_UP → IN_TRANSIT → DELIVERED / FAILED
- *
- * Regular Order flow:
- *   PENDING_PAYMENT → PAID → PROCESSING → SHIPPED → IN_TRANSIT → DELIVERED / FAILED
- *
- * Both flows allow CANCELLED from PENDING_PAYMENT or PAID.
+ * Legacy values (PROCESSING / COURIER_ASSIGNED / PICKED_UP / SHIPPED) are
+ * preserved for historical orders created before the courier-backend was
+ * disabled. New orders should not use them.
  */
 public enum OrderStatus {
 
@@ -19,27 +17,39 @@ public enum OrderStatus {
     /** Payment confirmed (set automatically via PaymentSucceededEvent). */
     PAID,
 
-    /** Admin has acknowledged the regular order and is preparing shipment. */
-    PROCESSING,
+    /** Admin is preparing/packaging the order. */
+    PACKAGING,
 
-    /** A local courier has been assigned to deliver the order. */
-    COURIER_ASSIGNED,
+    /** Order has been handed over to a courier (admin uploads pickup photo here). */
+    IN_COURIER,
 
-    /** Local courier has picked up the order from the store. */
-    PICKED_UP,
-
-    /** Admin has dispatched the regular order and set the tracking code. */
-    SHIPPED,
-
-    /** Order is on its way to the customer (local or regular). */
+    /** Order is on its way to the customer. */
     IN_TRANSIT,
 
-    /** Order has been successfully delivered to the customer. */
+    /** Order has been successfully delivered to the customer (admin uploads dropoff photo). */
     DELIVERED,
 
-    /** Order was cancelled before delivery. */
+    /** Order was cancelled (reason captured from customer or admin). */
     CANCELLED,
 
     /** Delivery attempt failed (e.g., customer unreachable, address invalid). */
-    FAILED
+    FAILED,
+
+    // ── Legacy values (kept for historical orders) ────────────────────────────
+
+    /** @deprecated Replaced by {@link #PACKAGING}. */
+    @Deprecated
+    PROCESSING,
+
+    /** @deprecated Courier-backend integration has been disabled. */
+    @Deprecated
+    COURIER_ASSIGNED,
+
+    /** @deprecated Courier-backend integration has been disabled. */
+    @Deprecated
+    PICKED_UP,
+
+    /** @deprecated Replaced by {@link #IN_COURIER}. */
+    @Deprecated
+    SHIPPED
 }

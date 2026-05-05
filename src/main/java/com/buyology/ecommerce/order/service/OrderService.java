@@ -36,8 +36,6 @@ import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.buyology.ecommerce.common.outbox.OutboxStatus;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -51,7 +49,6 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -298,10 +295,11 @@ public class OrderService {
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
 
-                    // Push EXPRESS orders to courier backend automatically
-                    if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
-                        pushToCourier(order);
-                    }
+                    // Courier-backend integration disabled — orders are now managed
+                    // entirely by admin from the dashboard.
+                    // if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
+                    //     pushToCourier(order);
+                    // }
 
                     // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
@@ -405,10 +403,11 @@ public class OrderService {
             tx.setAppOrderId(orderResponse.getId());
             paymentTransactionRepo.save(tx);
 
-            // Push EXPRESS orders to courier backend automatically
-            if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
-                pushToCourier(order);
-            }
+            // Courier-backend integration disabled — orders are now managed
+            // entirely by admin from the dashboard.
+            // if (order != null && order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
+            //     pushToCourier(order);
+            // }
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
             clearCartItemsSafely(cart.getId());
@@ -443,6 +442,7 @@ public class OrderService {
         });
     }
 
+    @SuppressWarnings("unused") // kept for future re-enable of courier-backend integration
     private void pushToCourier(Order order) {
         if (order == null) return;
         
@@ -555,8 +555,20 @@ public class OrderService {
 
         OrderAdminResponse res = toAdminOrderResponse(order);
 
-        // If it's an EXPRESS order with a deliveryOrderId, fetch proof from courier service
-        if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS && order.getDeliveryOrderId() != null) {
+        // Prefer admin-uploaded proof images (new flow). Fall back to courier-backend
+        // proof only for legacy orders that have a deliveryOrderId set.
+        if (order.getPickupProofImageKey() != null) {
+            res.setPickupProofImageUrl(contaboObjectService.getPresignedUrl(order.getPickupProofImageKey()));
+            res.setPickupProofTakenAt(order.getPickupProofTakenAt());
+        }
+        if (order.getDropoffProofImageKey() != null) {
+            res.setDeliveryProofImageUrl(contaboObjectService.getPresignedUrl(order.getDropoffProofImageKey()));
+            res.setDeliveryProofTakenAt(order.getDropoffProofTakenAt());
+        }
+
+        boolean adminProofPresent = order.getPickupProofImageKey() != null || order.getDropoffProofImageKey() != null;
+
+        if (!adminProofPresent && order.getDeliveryMethod() == DeliveryMethod.EXPRESS && order.getDeliveryOrderId() != null) {
             try {
                 org.springframework.http.ResponseEntity<String> proofRes =
                         courierServiceClient.getDeliveryProof(order.getDeliveryOrderId(), adminUserId.toString());
@@ -601,9 +613,14 @@ public class OrderService {
 
         validateTransition(order.getStatus(), req.getStatus());
 
-        // Assign courier when moving to COURIER_ASSIGNED
+        // Assign courier when moving to COURIER_ASSIGNED (legacy flow)
         if (req.getStatus() == OrderStatus.COURIER_ASSIGNED && req.getCourierUserId() != null) {
             order.setCourierUserId(req.getCourierUserId());
+        }
+
+        // Capture cancellation reason from admin/customer
+        if (req.getStatus() == OrderStatus.CANCELLED && req.getCancellationReason() != null) {
+            order.setCancellationReason(req.getCancellationReason());
         }
 
         applyMilestoneTimestamp(order, req.getStatus());
@@ -615,16 +632,17 @@ public class OrderService {
         Order saved = orderRepo.save(order);
         broadcastStatusUpdate(saved, null);
 
-        // Notify courier backend to cancel the in-flight delivery
-        if (req.getStatus() == OrderStatus.CANCELLED
-                && order.getDeliveryMethod() == DeliveryMethod.EXPRESS
-                && order.getDeliveryOrderId() != null) {
-            publishOrderCancelledEvent(order.getId(), req.getNotes());
-        }
+        // Courier-backend integration disabled — admin manages cancellations directly.
+        // if (req.getStatus() == OrderStatus.CANCELLED
+        //         && order.getDeliveryMethod() == DeliveryMethod.EXPRESS
+        //         && order.getDeliveryOrderId() != null) {
+        //     publishOrderCancelledEvent(order.getId(), req.getNotes());
+        // }
 
         return toOrderResponse(saved);
     }
 
+    @SuppressWarnings("unused") // kept for future re-enable of courier-backend integration
     private void publishOrderCancelledEvent(UUID orderId, String reason) {
         OrderCancelledEvent event = new OrderCancelledEvent(orderId, reason, Instant.now());
         try {
@@ -667,6 +685,76 @@ public class OrderService {
 
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, req.getLocationDescription(), adminUserId, "ADMIN");
+
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, null);
+        return toOrderResponse(saved);
+    }
+
+    // =========================================================================
+    // Admin proof uploads (pickup / dropoff photos)
+    // =========================================================================
+
+    public enum ProofType { PICKUP, DROPOFF }
+
+    /**
+     * Stores a pickup or drop-off proof photo for an order. Admin uploads only.
+     * Returns the updated admin response with a fresh presigned URL.
+     */
+    @Transactional
+    public OrderAdminResponse adminUploadProof(UUID orderId, UUID adminUserId,
+                                                ProofType type,
+                                                org.springframework.web.multipart.MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Proof image file is required");
+        }
+
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        String objectKey = String.format("orders/%s/%s-%s",
+                order.getId(),
+                type.name().toLowerCase(),
+                UUID.randomUUID());
+        contaboObjectService.uploadFile(objectKey, file);
+
+        Instant now = Instant.now();
+        if (type == ProofType.PICKUP) {
+            order.setPickupProofImageKey(objectKey);
+            order.setPickupProofTakenAt(now);
+        } else {
+            order.setDropoffProofImageKey(objectKey);
+            order.setDropoffProofTakenAt(now);
+        }
+
+        appendTrackingEvent(order, order.getStatus(),
+                type == ProofType.PICKUP ? "Pickup proof uploaded" : "Drop-off proof uploaded",
+                null, null, null, objectKey, adminUserId, "ADMIN");
+
+        Order saved = orderRepo.save(order);
+        return getOrderWithProofForAdmin(saved.getId(), adminUserId);
+    }
+
+    // =========================================================================
+    // Customer order cancellation
+    // =========================================================================
+
+    /**
+     * Allows a customer to cancel their own order while it is still cancellable.
+     */
+    @Transactional
+    public OrderResponse customerCancelOrder(UUID orderId, UUID userId, String reason) {
+        Order order = orderRepo.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        validateTransition(order.getStatus(), OrderStatus.CANCELLED);
+
+        order.setCancellationReason(reason);
+        applyMilestoneTimestamp(order, OrderStatus.CANCELLED);
+        order.setStatus(OrderStatus.CANCELLED);
+        appendTrackingEvent(order, OrderStatus.CANCELLED,
+                reason != null ? reason : "Cancelled by customer",
+                null, null, null, userId, "CUSTOMER");
 
         Order saved = orderRepo.save(order);
         broadcastStatusUpdate(saved, null);
@@ -758,6 +846,7 @@ public class OrderService {
      * ecommerce {@link OrderStatus} and persists it. No-op for unknown statuses
      * or orders already in a terminal state.
      */
+    @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
     @Transactional
     public void syncStatusFromCourier(UUID ecommerceOrderId, String deliveryStatus, String proofImageUrl) {
         log.info("[ORDER-DEBUG] syncStatusFromCourier start: orderId={} status={} proof={}", 
@@ -823,46 +912,36 @@ public class OrderService {
      * pushed to the courier backend (no pending or published outbox event found).
      * Runs every 5 minutes.
      */
-    @Scheduled(fixedDelayString = "${order.reconciliation-interval-ms:300000}")
-    @Transactional
-    public void reconcilePaidOrders() {
-        log.info("[RECONCILE] Checking for stuck PAID EXPRESS orders...");
-
-        // Find PAID EXPRESS orders
-        List<Order> stuckOrders = orderRepo.findAllByStatusAndDeliveryMethod(
-                OrderStatus.PAID, DeliveryMethod.EXPRESS, PageRequest.of(0, 50)).getContent();
-
-        if (stuckOrders.isEmpty()) return;
-
-        Instant cutoff = Instant.now().minus(Duration.ofMinutes(15));
-
-        for (Order order : stuckOrders) {
-            // Skip recently-paid orders to give the normal flow time to complete
-            if (order.getPaidAt() != null && order.getPaidAt().isAfter(cutoff)) {
-                continue;
-            }
-
-            // If the courier already acknowledged this order (deliveryOrderId is set), nothing to do
-            if (order.getDeliveryOrderId() != null) {
-                continue;
-            }
-
-            // Re-push if there is no pending outbox event (covers FAILED/missing events).
-            // PUBLISHED events are no longer treated as definitive — the message may have
-            // been nacked and routed to the DLQ without the courier ever processing it.
-            boolean pendingExists = outboxEventRepository.existsByPayloadContainingAndStatusIn(
-                    order.getId().toString(),
-                    List.of(OutboxStatus.PENDING)
-            );
-
-            if (!pendingExists) {
-                log.warn("[RECONCILE] Found stuck order {} (PAID {}m ago, no deliveryOrderId, no pending outbox event). Re-pushing to courier...",
-                        order.getId(),
-                        order.getPaidAt() != null ? Duration.between(order.getPaidAt(), Instant.now()).toMinutes() : "?");
-                pushToCourier(order);
-            }
-        }
-    }
+    // Courier-backend integration disabled — reconciliation no longer needed.
+    // @Scheduled(fixedDelayString = "${order.reconciliation-interval-ms:300000}")
+    // @Transactional
+    // public void reconcilePaidOrders() {
+    //     log.info("[RECONCILE] Checking for stuck PAID EXPRESS orders...");
+    //
+    //     List<Order> stuckOrders = orderRepo.findAllByStatusAndDeliveryMethod(
+    //             OrderStatus.PAID, DeliveryMethod.EXPRESS, PageRequest.of(0, 50)).getContent();
+    //
+    //     if (stuckOrders.isEmpty()) return;
+    //
+    //     Instant cutoff = Instant.now().minus(Duration.ofMinutes(15));
+    //
+    //     for (Order order : stuckOrders) {
+    //         if (order.getPaidAt() != null && order.getPaidAt().isAfter(cutoff)) {
+    //             continue;
+    //         }
+    //         if (order.getDeliveryOrderId() != null) {
+    //             continue;
+    //         }
+    //         boolean pendingExists = outboxEventRepository.existsByPayloadContainingAndStatusIn(
+    //                 order.getId().toString(),
+    //                 List.of(OutboxStatus.PENDING)
+    //         );
+    //         if (!pendingExists) {
+    //             log.warn("[RECONCILE] Found stuck order {}", order.getId());
+    //             pushToCourier(order);
+    //         }
+    //     }
+    // }
 
     // =========================================================================
     // Private helpers
@@ -872,17 +951,20 @@ public class OrderService {
      * Validates that the requested status transition is allowed.
      * Throws IllegalStateException for illegal transitions (→ HTTP 409 via GlobalExceptionHandler).
      */
+    @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
     private void validateTransition(OrderStatus current, OrderStatus next) {
         boolean allowed = switch (current) {
+            // ── New admin-managed flow ────────────────────────────────────────
             case PENDING_PAYMENT  -> next == OrderStatus.PAID || next == OrderStatus.CANCELLED;
-            case PAID             -> next == OrderStatus.PROCESSING
-                                     || next == OrderStatus.COURIER_ASSIGNED
-                                     || next == OrderStatus.CANCELLED;
+            case PAID             -> next == OrderStatus.PACKAGING || next == OrderStatus.CANCELLED;
+            case PACKAGING        -> next == OrderStatus.IN_COURIER || next == OrderStatus.CANCELLED;
+            case IN_COURIER       -> next == OrderStatus.IN_TRANSIT || next == OrderStatus.CANCELLED || next == OrderStatus.FAILED;
+            case IN_TRANSIT       -> next == OrderStatus.DELIVERED || next == OrderStatus.FAILED || next == OrderStatus.CANCELLED;
+            // ── Legacy flow (historical orders only) ──────────────────────────
             case PROCESSING       -> next == OrderStatus.SHIPPED || next == OrderStatus.CANCELLED;
             case COURIER_ASSIGNED -> next == OrderStatus.PICKED_UP || next == OrderStatus.CANCELLED;
             case PICKED_UP        -> next == OrderStatus.IN_TRANSIT;
             case SHIPPED          -> next == OrderStatus.IN_TRANSIT;
-            case IN_TRANSIT       -> next == OrderStatus.DELIVERED || next == OrderStatus.FAILED;
             default               -> false; // DELIVERED, CANCELLED, FAILED are terminal
         };
 
@@ -892,14 +974,16 @@ public class OrderService {
         }
     }
 
+    @SuppressWarnings("deprecation") // SHIPPED kept for legacy orders
     private void applyMilestoneTimestamp(Order order, OrderStatus next) {
         Instant now = Instant.now();
         switch (next) {
-            case PAID      -> order.setPaidAt(now);
-            case SHIPPED   -> order.setShippedAt(now);
-            case DELIVERED -> order.setDeliveredAt(now);
-            case CANCELLED -> order.setCancelledAt(now);
-            default        -> { /* no milestone for other statuses */ }
+            case PAID       -> order.setPaidAt(now);
+            case IN_COURIER -> order.setShippedAt(now);
+            case SHIPPED    -> order.setShippedAt(now);
+            case DELIVERED  -> order.setDeliveredAt(now);
+            case CANCELLED  -> order.setCancelledAt(now);
+            default         -> { /* no milestone for other statuses */ }
         }
     }
 
@@ -967,6 +1051,7 @@ public class OrderService {
         res.setShippedAt(o.getShippedAt());
         res.setDeliveredAt(o.getDeliveredAt());
         res.setCancelledAt(o.getCancelledAt());
+        res.setCancellationReason(o.getCancellationReason());
         res.setCreatedAt(o.getCreatedAt());
         res.setUpdatedAt(o.getUpdatedAt());
 
@@ -1026,6 +1111,7 @@ public class OrderService {
         res.setShippedAt(base.getShippedAt());
         res.setDeliveredAt(base.getDeliveredAt());
         res.setCancelledAt(base.getCancelledAt());
+        res.setCancellationReason(base.getCancellationReason());
         res.setCreatedAt(base.getCreatedAt());
         res.setUpdatedAt(base.getUpdatedAt());
         res.setItems(base.getItems());

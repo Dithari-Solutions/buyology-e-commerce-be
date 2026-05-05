@@ -375,6 +375,52 @@ public class AuthService {
         }
     }
 
+    // ── Admin signin (rejects non-ADMIN users) ───────────────────────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<SignInResponse>> adminSignin(
+            SignInRequest request, HttpServletRequest httpRequest) {
+        try {
+            if (!EmailValidation.isValid(request.getEmail())) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+            }
+
+            Optional<AuthCredentials> existing = authCredentialRepository
+                    .findByEmailAndProvider(request.getEmail(), "LOCAL");
+            if (existing.isEmpty()) {
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+
+            AuthCredentials authCredentials = existing.get();
+
+            if (!PasswordUtils.verifyPassword(request.getPassword(), authCredentials.getPasswordHash())) {
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+
+            Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
+            if (user == null) {
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+
+            if (user.getUserType() != Users.UserType.ADMIN) {
+                // Vague message — don't reveal that the customer account exists
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "This account is not authorized to access the admin dashboard.");
+            }
+
+            if ("SUSPENDED".equals(user.getStatus())) {
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "Your account has been suspended. Please contact support.");
+            }
+
+            return buildSigninResponse(authCredentials, httpRequest);
+
+        } catch (Exception e) {
+            log.error("Admin signin failed for {}: {}", request.getEmail(), e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during signin");
+        }
+    }
+
     // ── Forgot Password — Step 1: Send reset OTP ─────────────────────────────
 
     @Transactional

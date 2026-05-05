@@ -15,6 +15,9 @@ public class AdminStatusUpdateRequest {
     /** For EXPRESS: assign a courier when moving to COURIER_ASSIGNED. */
     private UUID courierUserId;
 
+    /** Reason supplied when status is CANCELLED (admin or customer-originated). */
+    private String cancellationReason;
+
     // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public OrderStatus getStatus() { return status; }
@@ -25,4 +28,7 @@ public class AdminStatusUpdateRequest {
 
     public UUID getCourierUserId() { return courierUserId; }
     public void setCourierUserId(UUID courierUserId) { this.courierUserId = courierUserId; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
 }

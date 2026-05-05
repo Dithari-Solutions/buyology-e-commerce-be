@@ -60,6 +60,7 @@ public class OrderResponse {
     private Instant shippedAt;
     private Instant deliveredAt;
     private Instant cancelledAt;
+    private String cancellationReason;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -181,6 +182,9 @@ public class OrderResponse {
 
     public Instant getCancelledAt() { return cancelledAt; }
     public void setCancelledAt(Instant cancelledAt) { this.cancelledAt = cancelledAt; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

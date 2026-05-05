@@ -70,4 +70,21 @@ public class OrderController {
                 orderService.listCustomerOrders(userId, page, size),
                 "Orders fetched successfully");
     }
+
+    /**
+     * Cancel an order placed by the authenticated customer.
+     */
+    @PostMapping("/{orderId}/cancel")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID orderId,
+            @RequestBody(required = false) CancelOrderRequest request) {
+        String reason = request != null ? request.reason() : null;
+        return ApiResponse.success(
+                orderService.customerCancelOrder(orderId, userId, reason),
+                "Order cancelled successfully");
+    }
+
+    public record CancelOrderRequest(String reason) {}
 }

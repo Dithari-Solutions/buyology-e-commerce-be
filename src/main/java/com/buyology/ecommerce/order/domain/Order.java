@@ -153,6 +153,26 @@ public class Order {
     @Column(name = "carrier_name", length = 100)
     private String carrierName;
 
+    // ── Admin-uploaded delivery proofs (Contabo object keys) ─────────────────
+
+    /** Object key for the pickup photo uploaded by admin when handing to courier. */
+    @Column(name = "pickup_proof_image_key", length = 500)
+    private String pickupProofImageKey;
+
+    @Column(name = "pickup_proof_taken_at")
+    private Instant pickupProofTakenAt;
+
+    /** Object key for the drop-off photo uploaded by admin on delivery. */
+    @Column(name = "dropoff_proof_image_key", length = 500)
+    private String dropoffProofImageKey;
+
+    @Column(name = "dropoff_proof_taken_at")
+    private Instant dropoffProofTakenAt;
+
+    /** Free-form cancellation reason (set by admin or customer on CANCELLED). */
+    @Column(name = "cancellation_reason", length = 1000)
+    private String cancellationReason;
+
     // ── Milestone timestamps ──────────────────────────────────────────────────
 
     @Column(name = "paid_at")
@@ -299,6 +319,21 @@ public class Order {
 
     public String getCarrierName() { return carrierName; }
     public void setCarrierName(String carrierName) { this.carrierName = carrierName; }
+
+    public String getPickupProofImageKey() { return pickupProofImageKey; }
+    public void setPickupProofImageKey(String pickupProofImageKey) { this.pickupProofImageKey = pickupProofImageKey; }
+
+    public Instant getPickupProofTakenAt() { return pickupProofTakenAt; }
+    public void setPickupProofTakenAt(Instant pickupProofTakenAt) { this.pickupProofTakenAt = pickupProofTakenAt; }
+
+    public String getDropoffProofImageKey() { return dropoffProofImageKey; }
+    public void setDropoffProofImageKey(String dropoffProofImageKey) { this.dropoffProofImageKey = dropoffProofImageKey; }
+
+    public Instant getDropoffProofTakenAt() { return dropoffProofTakenAt; }
+    public void setDropoffProofTakenAt(Instant dropoffProofTakenAt) { this.dropoffProofTakenAt = dropoffProofTakenAt; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
 
     public Instant getPaidAt() { return paidAt; }
     public void setPaidAt(Instant paidAt) { this.paidAt = paidAt; }
