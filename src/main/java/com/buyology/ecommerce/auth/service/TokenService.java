@@ -80,6 +80,11 @@ public class TokenService {
     // Generate access token (JWT — manual HMAC-SHA256)
     // ---------------------------
     public String generateAccessToken(AuthCredentials authCredentials) {
+        return generateAccessToken(authCredentials, "web");
+    }
+
+    public String generateAccessToken(AuthCredentials authCredentials, String audience) {
+        String safeAudience = (audience == null || audience.isBlank()) ? "web" : audience;
         String header = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
 
@@ -116,8 +121,9 @@ public class TokenService {
                 .collect(Collectors.joining(",", "[", "]"));
 
         String payloadJson = String.format(
-                "{\"iss\":\"%s\",\"sub\":\"%s\",\"uid\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
+                "{\"iss\":\"%s\",\"aud\":\"%s\",\"sub\":\"%s\",\"uid\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
                 issuer,
+                safeAudience,
                 authCredentials.getId(),
                 userId,
                 rolesJson,
@@ -237,6 +243,10 @@ public class TokenService {
      * @throws SecurityException when the token is invalid, expired, or already revoked
      */
     public RotateTokensResult rotateTokens(String refreshTokenValue, String deviceInfo) {
+        return rotateTokens(refreshTokenValue, deviceInfo, "web");
+    }
+
+    public RotateTokensResult rotateTokens(String refreshTokenValue, String deviceInfo, String audience) {
         RefreshToken existing = refreshTokenRepository.findByToken(refreshTokenValue)
                 .orElseThrow(() -> new SecurityException("Invalid refresh token"));
 
@@ -248,7 +258,7 @@ public class TokenService {
         refreshTokenRepository.save(existing);
 
         AuthCredentials creds = existing.getAuthCredential();
-        String newAccessToken = generateAccessToken(creds);
+        String newAccessToken = generateAccessToken(creds, audience);
         RefreshToken newRefreshToken = generateRefreshToken(creds, deviceInfo);
 
         return new RotateTokensResult(

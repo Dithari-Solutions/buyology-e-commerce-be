@@ -38,6 +38,12 @@ public class B2bMembershipApplication {
     @Column(name = "country", nullable = false, length = 100)
     private String country;
 
+    @Column(name = "country_code", length = 2)
+    private String countryCode;
+
+    @Column(name = "currency_code", length = 10)
+    private String currencyCode;
+
     @Column(name = "city", nullable = false, length = 100)
     private String city;
 
@@ -127,6 +133,10 @@ public class B2bMembershipApplication {
     public void setNumberOfEmployees(int numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
+    public String getCurrencyCode() { return currencyCode; }
+    public void setCurrencyCode(String currencyCode) { this.currencyCode = currencyCode; }
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
     public String getWebsite() { return website; }

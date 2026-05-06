@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.order.dto.CreateOrderRequest;
 import com.buyology.ecommerce.order.dto.OrderResponse;
 import com.buyology.ecommerce.order.dto.OrderSummaryResponse;
+import com.buyology.ecommerce.membership.service.B2bCreditOrderService;
 import com.buyology.ecommerce.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -12,6 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -23,9 +25,12 @@ import java.util.UUID;
 public class OrderController {
 
     private final OrderService orderService;
+    private final B2bCreditOrderService b2bCreditOrderService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService,
+                           B2bCreditOrderService b2bCreditOrderService) {
         this.orderService = orderService;
+        this.b2bCreditOrderService = b2bCreditOrderService;
     }
 
     /**
@@ -74,6 +79,18 @@ public class OrderController {
     /**
      * Cancel an order placed by the authenticated customer.
      */
+    /**
+     * Settle a pending order using the customer's B2B credit balance.
+     * Requires an active B2B membership and an order total of at least AED 20,000 (live FX).
+     */
+    @PostMapping("/{orderId}/pay-with-credit")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> payWithCredit(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID orderId) {
+        return b2bCreditOrderService.payOrderWithCredit(userId, orderId);
+    }
+
     @PostMapping("/{orderId}/cancel")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(

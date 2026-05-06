@@ -10,6 +10,8 @@ public class WalletResponse {
     private UUID userId;
     private BigDecimal balance;
     private String currency;
+    private String countryCode;
+    private BigDecimal creditLimit;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -21,6 +23,10 @@ public class WalletResponse {
     public void setBalance(BigDecimal balance) { this.balance = balance; }
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
+    public BigDecimal getCreditLimit() { return creditLimit; }
+    public void setCreditLimit(BigDecimal creditLimit) { this.creditLimit = creditLimit; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -12,7 +12,7 @@ import java.util.UUID;
 public class Supplier {
 
     public enum SupplierStatus {
-        ACTIVE, SUSPENDED
+        ACTIVE, SUSPENDED, TRASHED
     }
 
     @Id
@@ -51,6 +51,15 @@ public class Supplier {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Column(name = "deleted_by", length = 200)
+    private String deletedBy;
+
+    @Column(name = "frozen_at")
+    private Instant frozenAt;
+
+    @Column(name = "frozen_by", length = 200)
+    private String frozenBy;
+
     @PrePersist
     protected void onCreate() {
         Instant now = Instant.now();
@@ -84,4 +93,10 @@ public class Supplier {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getDeletedAt() { return deletedAt; }
     public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    public String getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(String deletedBy) { this.deletedBy = deletedBy; }
+    public Instant getFrozenAt() { return frozenAt; }
+    public void setFrozenAt(Instant frozenAt) { this.frozenAt = frozenAt; }
+    public String getFrozenBy() { return frozenBy; }
+    public void setFrozenBy(String frozenBy) { this.frozenBy = frozenBy; }
 }

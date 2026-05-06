@@ -102,6 +102,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 2. Add ROLE_ authorities from assigned roles + collect role IDs for permission lookup
         List<UUID> roleIds = userRoleRepository.findRoleIdsByUserId(userId);
         List<String> roleNames = userRoleRepository.findRoleNamesByUserId(userId);
+
+        // Enforce: SUPPLIER role tokens are only valid with audience "dashboard"
+        boolean isSupplier = roleNames.stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
+        if (isSupplier) {
+            String audience = extractAudience(token);
+            if (!"dashboard".equals(audience)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+        }
+
         roleNames.forEach(name -> authorities.add(new SimpleGrantedAuthority("ROLE_" + name)));
 
         // 3. Add permission codes derived from roles
@@ -138,6 +149,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return UUID.fromString(sub);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private String extractAudience(String token) {
+        try {
+            String[] parts = token.split("\\.");
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            if (!payloadJson.contains("\"aud\"")) return "web";
+            return payloadJson.replaceAll(".*\"aud\":\"([^\"]+)\".*", "$1");
+        } catch (Exception e) {
+            return "web";
         }
     }
 }

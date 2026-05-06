@@ -6,12 +6,14 @@ import com.buyology.ecommerce.supplier.dto.SupplierApplicationResponse;
 import com.buyology.ecommerce.supplier.dto.SupplierApproveRequest;
 import com.buyology.ecommerce.supplier.dto.SupplierRejectRequest;
 import com.buyology.ecommerce.supplier.service.AdminSupplierService;
+import com.buyology.ecommerce.supplier.service.SupplierLifecycleService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -21,9 +23,12 @@ import java.util.UUID;
 public class AdminSupplierController {
 
     private final AdminSupplierService adminSupplierService;
+    private final SupplierLifecycleService lifecycleService;
 
-    public AdminSupplierController(AdminSupplierService adminSupplierService) {
+    public AdminSupplierController(AdminSupplierService adminSupplierService,
+                                   SupplierLifecycleService lifecycleService) {
         this.adminSupplierService = adminSupplierService;
+        this.lifecycleService = lifecycleService;
     }
 
     @GetMapping
@@ -54,5 +59,39 @@ public class AdminSupplierController {
             @PathVariable UUID id,
             @Valid @RequestBody SupplierRejectRequest request) {
         return adminSupplierService.rejectApplication(id, request.getReason());
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/freeze")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<String>> freezeSupplier(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminFreeze(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @PostMapping("/{id}/unfreeze")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<String>> unfreezeSupplier(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminUnfreeze(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<String>> trashSupplier(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminSoftDelete(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @PostMapping("/{id}/restore")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<String>> restoreSupplier(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminRestore(id, actorId != null ? "admin:" + actorId : "admin");
     }
 }

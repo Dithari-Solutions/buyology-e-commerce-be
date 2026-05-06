@@ -12,7 +12,7 @@ import java.util.UUID;
 })
 public class B2bMembership {
 
-    public enum MembershipStatus { ACTIVE, SUSPENDED, EXPIRED }
+    public enum MembershipStatus { ACTIVE, SUSPENDED, EXPIRED, TRASHED }
     public enum MembershipTier { PREMIUM }
 
     @Id
@@ -45,6 +45,18 @@ public class B2bMembership {
 
     @Column(name = "valid_until")
     private Instant validUntil;
+
+    @Column(name = "frozen_at")
+    private Instant frozenAt;
+
+    @Column(name = "frozen_by", length = 200)
+    private String frozenBy;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by", length = 200)
+    private String deletedBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -81,6 +93,14 @@ public class B2bMembership {
     public void setTier(MembershipTier tier) { this.tier = tier; }
     public Instant getValidUntil() { return validUntil; }
     public void setValidUntil(Instant validUntil) { this.validUntil = validUntil; }
+    public Instant getFrozenAt() { return frozenAt; }
+    public void setFrozenAt(Instant frozenAt) { this.frozenAt = frozenAt; }
+    public String getFrozenBy() { return frozenBy; }
+    public void setFrozenBy(String frozenBy) { this.frozenBy = frozenBy; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    public String getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(String deletedBy) { this.deletedBy = deletedBy; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

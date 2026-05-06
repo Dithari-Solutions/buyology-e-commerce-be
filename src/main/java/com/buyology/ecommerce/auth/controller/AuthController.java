@@ -125,7 +125,14 @@ public class AuthController {
 
         try {
             String deviceInfo = httpRequest.getHeader("User-Agent");
-            RotateTokensResult result = tokenService.rotateTokens(refreshToken, deviceInfo);
+            String audienceHeader = httpRequest.getHeader("X-Client-Type");
+            String audience = (audienceHeader == null || audienceHeader.isBlank())
+                    ? "web"
+                    : switch (audienceHeader.trim().toLowerCase()) {
+                        case "dashboard", "web", "mobile" -> audienceHeader.trim().toLowerCase();
+                        default -> "web";
+                    };
+            RotateTokensResult result = tokenService.rotateTokens(refreshToken, deviceInfo, audience);
 
             return ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, result.refreshCookieHeader())

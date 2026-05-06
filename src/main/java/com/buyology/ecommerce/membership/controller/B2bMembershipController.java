@@ -2,10 +2,12 @@ package com.buyology.ecommerce.membership.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.membership.dto.*;
+import com.buyology.ecommerce.membership.service.B2bMembershipLifecycleService;
 import com.buyology.ecommerce.membership.service.B2bMembershipService;
 import com.buyology.ecommerce.membership.service.WalletService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,10 +19,14 @@ public class B2bMembershipController {
 
     private final B2bMembershipService membershipService;
     private final WalletService walletService;
+    private final B2bMembershipLifecycleService lifecycleService;
 
-    public B2bMembershipController(B2bMembershipService membershipService, WalletService walletService) {
+    public B2bMembershipController(B2bMembershipService membershipService,
+                                   WalletService walletService,
+                                   B2bMembershipLifecycleService lifecycleService) {
         this.membershipService = membershipService;
         this.walletService = walletService;
+        this.lifecycleService = lifecycleService;
     }
 
     @PostMapping("/apply")
@@ -53,5 +59,25 @@ public class B2bMembershipController {
     public ResponseEntity<ApiResponse<List<WalletTransactionResponse>>> getTransactions(
             @RequestParam UUID userId) {
         return ApiResponse.success(walletService.getTransactions(userId), "Transactions fetched");
+    }
+
+    // ── Self lifecycle ─────────────────────────────────────────────────────
+
+    @PostMapping("/freeze")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<String>> freezeMyMembership() {
+        return lifecycleService.selfFreeze();
+    }
+
+    @PostMapping("/unfreeze")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<String>> unfreezeMyMembership() {
+        return lifecycleService.selfUnfreeze();
+    }
+
+    @DeleteMapping
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<String>> deleteMyMembership() {
+        return lifecycleService.selfDelete();
     }
 }

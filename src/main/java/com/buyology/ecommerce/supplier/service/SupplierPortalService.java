@@ -14,6 +14,7 @@ import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.supplier.domain.Supplier;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierStoreAssignmentRepository;
+import com.buyology.ecommerce.product.service.ProductService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -39,6 +40,7 @@ public class SupplierPortalService {
     private final ProductRepository productRepository;
     private final ProductCategoryRepository productCategoryRepository;
     private final EmailService emailService;
+    private final ProductService productService;
 
     public SupplierPortalService(
             SupplierRepository supplierRepository,
@@ -47,7 +49,8 @@ public class SupplierPortalService {
             StoreProductRepository storeProductRepository,
             ProductRepository productRepository,
             ProductCategoryRepository productCategoryRepository,
-            EmailService emailService) {
+            EmailService emailService,
+            ProductService productService) {
         this.supplierRepository = supplierRepository;
         this.storeAssignmentRepository = storeAssignmentRepository;
         this.storeRepository = storeRepository;
@@ -55,6 +58,7 @@ public class SupplierPortalService {
         this.productRepository = productRepository;
         this.productCategoryRepository = productCategoryRepository;
         this.emailService = emailService;
+        this.productService = productService;
     }
 
     // ── Assigned stores ──────────────────────────────────────────────────────
@@ -120,6 +124,7 @@ public class SupplierPortalService {
         product.setCategory(category);
         product.setSku(sku);
         product.setStatus("INACTIVE");
+        product.setIsActive(false);
         product.setSupplierId(supplier.getId());
         product.setSupplierStatus(SupplierStatus.PENDING_REVIEW);
         product.setAvailabilityStatus(Product.AvailabilityStatus.PRE_ORDER);
@@ -154,10 +159,8 @@ public class SupplierPortalService {
         product.setSupplierRejectionReason(null);
         productRepository.save(product);
 
-        storeProductRepository.findByProduct_Id(productId).ifPresent(sp -> {
-            sp.setIsActive(true);
-            storeProductRepository.save(sp);
-        });
+        // Approval no longer auto-publishes; the supplier must call /publish
+        // (toggles Product.isActive + StoreProduct.isActive) to make the product visible.
 
         Supplier supplier = supplierRepository.findById(product.getSupplierId()).orElse(null);
         if (supplier != null) {
@@ -168,7 +171,7 @@ public class SupplierPortalService {
                     product.getSku());
         }
 
-        return ApiResponse.success("approved", "Product approved and now live");
+        return ApiResponse.success("approved", "Product approved; ready for supplier to publish");
     }
 
     // ── Admin: reject supplier product ───────────────────────────────────────
@@ -210,6 +213,98 @@ public class SupplierPortalService {
             page = productRepository.findBySupplierIdIsNotNull(pageable);
         }
         return ApiResponse.success(page, "Supplier products");
+    }
+
+    // ── Supplier draft/publish toggle ────────────────────────────────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> publishProduct(UUID productId) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+
+        Product product = productRepository.findById(productId).orElse(null);
+        if (product == null || !supplier.getId().equals(product.getSupplierId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
+        }
+        if ("DELETED".equals(product.getStatus())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Product is in trash; restore first");
+        }
+        if (product.getSupplierStatus() != SupplierStatus.APPROVED) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Product must be approved by admin before publishing");
+        }
+        product.setIsActive(true);
+        productRepository.save(product);
+
+        storeProductRepository.findByProduct_Id(productId).ifPresent(sp -> {
+            sp.setIsActive(true);
+            storeProductRepository.save(sp);
+        });
+        return ApiResponse.success("published", "Product published");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> draftProduct(UUID productId) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+
+        Product product = productRepository.findById(productId).orElse(null);
+        if (product == null || !supplier.getId().equals(product.getSupplierId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
+        }
+        product.setIsActive(false);
+        productRepository.save(product);
+
+        storeProductRepository.findByProduct_Id(productId).ifPresent(sp -> {
+            sp.setIsActive(false);
+            storeProductRepository.save(sp);
+        });
+        return ApiResponse.success("drafted", "Product moved to draft");
+    }
+
+    // ── Supplier soft-delete / trash / restore ───────────────────────────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> softDeleteOwnProduct(UUID productId) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+
+        Product product = productRepository.findById(productId).orElse(null);
+        if (product == null || !supplier.getId().equals(product.getSupplierId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
+        }
+        return productService.softDeleteProduct(productId);
+    }
+
+    public ResponseEntity<ApiResponse<Page<Product>>> listOwnTrash(Pageable pageable) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+
+        Page<Product> all = productRepository.findBySupplierId(supplier.getId(), pageable);
+        List<Product> trashed = all.getContent().stream()
+                .filter(p -> "DELETED".equals(p.getStatus()))
+                .toList();
+        Page<Product> page = new org.springframework.data.domain.PageImpl<>(
+                trashed, pageable, trashed.size());
+        return ApiResponse.success(page, "Trashed products");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> restoreOwnProduct(UUID productId) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+
+        Product product = productRepository.findById(productId).orElse(null);
+        if (product == null || !supplier.getId().equals(product.getSupplierId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
+        }
+        if (!"DELETED".equals(product.getStatus())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Product is not in trash");
+        }
+        product.setStatus("INACTIVE");
+        product.setDeletedAt(null);
+        product.setIsActive(false);
+        productRepository.save(product);
+        return ApiResponse.success("restored", "Product restored to draft");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

@@ -2,11 +2,13 @@ package com.buyology.ecommerce.membership.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.membership.dto.*;
+import com.buyology.ecommerce.membership.service.B2bMembershipLifecycleService;
 import com.buyology.ecommerce.membership.service.B2bMembershipService;
 import com.buyology.ecommerce.membership.service.WalletService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,10 +21,14 @@ public class AdminB2bMembershipController {
 
     private final B2bMembershipService membershipService;
     private final WalletService walletService;
+    private final B2bMembershipLifecycleService lifecycleService;
 
-    public AdminB2bMembershipController(B2bMembershipService membershipService, WalletService walletService) {
+    public AdminB2bMembershipController(B2bMembershipService membershipService,
+                                        WalletService walletService,
+                                        B2bMembershipLifecycleService lifecycleService) {
         this.membershipService = membershipService;
         this.walletService = walletService;
+        this.lifecycleService = lifecycleService;
     }
 
     // ── Applications ──────────────────────────────────────────────────────────
@@ -84,5 +90,35 @@ public class AdminB2bMembershipController {
     public ResponseEntity<ApiResponse<List<WalletTransactionResponse>>> getTransactions(
             @PathVariable UUID userId) {
         return ApiResponse.success(walletService.getTransactions(userId), "Transactions fetched");
+    }
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────
+
+    @PostMapping("/memberships/{id}/freeze")
+    public ResponseEntity<ApiResponse<String>> freeze(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminFreeze(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @PostMapping("/memberships/{id}/unfreeze")
+    public ResponseEntity<ApiResponse<String>> unfreeze(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminUnfreeze(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @DeleteMapping("/memberships/{id}")
+    public ResponseEntity<ApiResponse<String>> trash(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminDelete(id, actorId != null ? "admin:" + actorId : "admin");
+    }
+
+    @PostMapping("/memberships/{id}/restore")
+    public ResponseEntity<ApiResponse<String>> restore(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UUID actorId) {
+        return lifecycleService.adminRestore(id, actorId != null ? "admin:" + actorId : "admin");
     }
 }

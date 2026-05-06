@@ -49,6 +49,9 @@ public class Product {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
+    @Column(name = "is_active")
+    private Boolean isActive = true;
+
     // Supplier product fields (null for admin-created products)
     @Column(name = "supplier_id")
     private UUID supplierId;
@@ -198,6 +201,14 @@ public class Product {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Boolean getIsActive() {
+        return isActive;
+    }
+
+    public void setIsActive(Boolean isActive) {
+        this.isActive = isActive;
     }
 
     public Instant getDeletedAt() {

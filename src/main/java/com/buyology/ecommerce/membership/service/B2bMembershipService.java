@@ -1,10 +1,12 @@
 package com.buyology.ecommerce.membership.service;
 
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.membership.domain.B2bCountry;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
 import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
 import com.buyology.ecommerce.membership.domain.Wallet;
 import com.buyology.ecommerce.membership.dto.*;
+import com.buyology.ecommerce.membership.repository.B2bCountryRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.membership.repository.WalletRepository;
@@ -34,17 +36,20 @@ public class B2bMembershipService {
     private final WalletRepository walletRepo;
     private final WalletService walletService;
     private final EmailService emailService;
+    private final B2bCountryRepository countryRepo;
 
     public B2bMembershipService(B2bMembershipApplicationRepository appRepo,
                                  B2bMembershipRepository membershipRepo,
                                  WalletRepository walletRepo,
                                  WalletService walletService,
-                                 EmailService emailService) {
+                                 EmailService emailService,
+                                 B2bCountryRepository countryRepo) {
         this.appRepo = appRepo;
         this.membershipRepo = membershipRepo;
         this.walletRepo = walletRepo;
         this.walletService = walletService;
         this.emailService = emailService;
+        this.countryRepo = countryRepo;
     }
 
     // ── Customer endpoints ───────────────────────────────────────────────────
@@ -77,6 +82,19 @@ public class B2bMembershipService {
         app.setIndustryType(req.getIndustryType());
         app.setNumberOfEmployees(req.getNumberOfEmployees());
         app.setCountry(req.getCountry());
+
+        // Resolve B2B country / currency by ISO code (admin-managed via /admin/b2b/countries)
+        if (req.getCountryCode() != null && !req.getCountryCode().isBlank()) {
+            String cc = req.getCountryCode().trim().toUpperCase();
+            B2bCountry country = countryRepo.findByCountryCode(cc)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "B2B membership is not available in this country yet"));
+            if (!country.isEnabled()) {
+                throw new IllegalStateException("B2B membership is not available in this country yet");
+            }
+            app.setCountryCode(country.getCountryCode());
+            app.setCurrencyCode(country.getCurrencyCode());
+        }
         app.setCity(req.getCity());
         app.setWebsite(req.getWebsite());
         app.setContactFullName(req.getContactFullName());
@@ -188,7 +206,11 @@ public class B2bMembershipService {
             membershipRepo.save(membership);
         }
 
-        walletService.addInitialCredit(app.getUserId(), performedBy);
+        walletService.addInitialCredit(
+                app.getUserId(),
+                performedBy,
+                app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED",
+                app.getCountryCode());
 
         try {
             emailService.sendB2bInquiryNotification(

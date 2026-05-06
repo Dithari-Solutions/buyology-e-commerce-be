@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.membership.service;
 
+import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.membership.domain.Wallet;
 import com.buyology.ecommerce.membership.domain.WalletTransaction;
 import com.buyology.ecommerce.membership.dto.WalletResponse;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -18,32 +20,69 @@ import java.util.stream.Collectors;
 @Service
 public class WalletService {
 
-    private static final BigDecimal INITIAL_CREDIT = new BigDecimal("5000.00");
+    public static final BigDecimal INITIAL_CREDIT_AED = new BigDecimal("5000.00");
+    public static final BigDecimal B2B_MIN_ORDER_AED = new BigDecimal("20000.00");
+    private static final String BASE_CURRENCY = "AED";
 
     private final WalletRepository walletRepo;
     private final WalletTransactionRepository txRepo;
+    private final CurrencyExchangeService currencyExchangeService;
 
-    public WalletService(WalletRepository walletRepo, WalletTransactionRepository txRepo) {
+    public WalletService(WalletRepository walletRepo,
+                         WalletTransactionRepository txRepo,
+                         CurrencyExchangeService currencyExchangeService) {
         this.walletRepo = walletRepo;
         this.txRepo = txRepo;
+        this.currencyExchangeService = currencyExchangeService;
     }
 
     @Transactional
     public Wallet createWallet(UUID userId) {
+        return createWallet(userId, BASE_CURRENCY, null);
+    }
+
+    @Transactional
+    public Wallet createWallet(UUID userId, String currency, String countryCode) {
         if (walletRepo.existsByUserId(userId)) {
             return walletRepo.findByUserId(userId).orElseThrow();
         }
         Wallet wallet = new Wallet();
         wallet.setUserId(userId);
         wallet.setBalance(BigDecimal.ZERO);
-        wallet.setCurrency("AED");
+        wallet.setCurrency(currency != null ? currency : BASE_CURRENCY);
+        wallet.setCountryCode(countryCode);
         return walletRepo.save(wallet);
     }
 
     @Transactional
     public WalletResponse addInitialCredit(UUID userId, String performedBy) {
-        walletRepo.findByUserId(userId).orElseGet(() -> createWallet(userId));
-        return addCredit(userId, INITIAL_CREDIT, "Welcome credit for B2B Premium membership", performedBy);
+        return addInitialCredit(userId, performedBy, BASE_CURRENCY, null);
+    }
+
+    @Transactional
+    public WalletResponse addInitialCredit(UUID userId, String performedBy,
+                                           String currency, String countryCode) {
+        Wallet wallet = walletRepo.findByUserId(userId)
+                .orElseGet(() -> createWallet(userId, currency, countryCode));
+
+        // Lock wallet currency to membership's currency at activation time
+        if (currency != null && !currency.equals(wallet.getCurrency())) {
+            wallet.setCurrency(currency);
+            wallet.setCountryCode(countryCode);
+            walletRepo.save(wallet);
+        }
+
+        BigDecimal creditInWalletCurrency = BASE_CURRENCY.equals(wallet.getCurrency())
+                ? INITIAL_CREDIT_AED
+                : currencyExchangeService.convert(INITIAL_CREDIT_AED, BASE_CURRENCY, wallet.getCurrency())
+                    .setScale(2, RoundingMode.HALF_UP);
+
+        // Persist credit limit so it doesn't drift with later FX moves
+        wallet.setCreditLimit(creditInWalletCurrency);
+        walletRepo.save(wallet);
+
+        return addCredit(userId, creditInWalletCurrency,
+                "Welcome credit for B2B Premium membership", performedBy);
     }
 
     @Transactional
@@ -124,6 +163,8 @@ public class WalletService {
         r.setUserId(w.getUserId());
         r.setBalance(w.getBalance());
         r.setCurrency(w.getCurrency());
+        r.setCountryCode(w.getCountryCode());
+        r.setCreditLimit(w.getCreditLimit());
         r.setCreatedAt(w.getCreatedAt());
         r.setUpdatedAt(w.getUpdatedAt());
         return r;

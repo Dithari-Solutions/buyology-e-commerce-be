@@ -21,6 +21,9 @@ public class MembershipApplicationRequest {
     @NotBlank @Size(max = 100)
     private String country;
 
+    @Size(max = 2)
+    private String countryCode;
+
     @NotBlank @Size(max = 100)
     private String city;
 
@@ -56,6 +59,8 @@ public class MembershipApplicationRequest {
     public void setNumberOfEmployees(int numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
     public String getWebsite() { return website; }

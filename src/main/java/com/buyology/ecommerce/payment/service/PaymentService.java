@@ -46,6 +46,7 @@ public class PaymentService {
     private final ApplicationEventPublisher eventPublisher;
     private final CurrencyExchangeService currencyExchangeService;
     private final com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties;
+    private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -59,7 +60,8 @@ public class PaymentService {
             UserAddressRepository addressRepo,
             ApplicationEventPublisher eventPublisher,
             CurrencyExchangeService currencyExchangeService,
-            com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties) {
+            com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties,
+            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.transactionRepo = transactionRepo;
@@ -72,6 +74,7 @@ public class PaymentService {
         this.eventPublisher = eventPublisher;
         this.currencyExchangeService = currencyExchangeService;
         this.paymobProperties = paymobProperties;
+        this.creditPaybackProvider = creditPaybackProvider;
     }
 
     // =========================================================================
@@ -212,6 +215,38 @@ public class PaymentService {
         JsonNode obj = root.has("obj") ? root.get("obj") : root;
         String providerTxnIdStr = obj.has("id") ? obj.get("id").asText() : null;
         Long providerTxnId = (providerTxnIdStr != null) ? Long.valueOf(providerTxnIdStr) : null;
+
+        // 0. B2B credit payback short-circuit
+        // CreditPaybackService creates Paymob intentions with merchant_order_id="CRED-<usageId>"
+        // and does NOT create a PaymentTransaction row. Detect that and route to the payback flow.
+        String maybeMoid = null;
+        if (obj.has("order") && obj.get("order").has("merchant_order_id")) {
+            maybeMoid = obj.get("order").get("merchant_order_id").asText();
+        }
+        if (maybeMoid != null && maybeMoid.startsWith(
+                com.buyology.ecommerce.membership.service.CreditPaybackService.MERCHANT_ID_PREFIX)) {
+            if (!hmacValid) {
+                log.warn("[WEBHOOK][CRED] Invalid HMAC for {}", maybeMoid);
+                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, "Invalid HMAC (CRED)");
+                return;
+            }
+            boolean success = obj.has("success") && obj.get("success").asBoolean();
+            if (!success) {
+                log.info("[WEBHOOK][CRED] Non-success webhook for {}, skipping", maybeMoid);
+                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, "non-success");
+                return;
+            }
+            long amountCents = obj.has("amount_cents") ? obj.get("amount_cents").asLong() : 0L;
+            BigDecimal amountAed = BigDecimal.valueOf(amountCents).movePointLeft(2);
+            try {
+                creditPaybackProvider.getObject().markPaid(maybeMoid, amountAed);
+                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, null);
+            } catch (Exception e) {
+                log.error("[WEBHOOK][CRED] markPaid failed for {}", maybeMoid, e);
+                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, e.getMessage());
+            }
+            return;
+        }
 
         // 1. Robust Idempotency check using numeric paymob_transaction_id
         if (providerTxnId != null) {

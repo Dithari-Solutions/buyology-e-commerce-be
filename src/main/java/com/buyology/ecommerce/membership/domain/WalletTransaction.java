@@ -13,7 +13,7 @@ import java.util.UUID;
 })
 public class WalletTransaction {
 
-    public enum TransactionType { CREDIT, DEBIT, REFUND, ADJUSTMENT }
+    public enum TransactionType { CREDIT, DEBIT, REFUND, ADJUSTMENT, REPAYMENT }
 
     @Id
     @GeneratedValue

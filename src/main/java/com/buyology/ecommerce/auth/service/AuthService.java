@@ -27,6 +27,7 @@ import com.buyology.ecommerce.auth.dto.SignUpRequest;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.auth.repository.EmailOtpRepository;
 import com.buyology.ecommerce.auth.repository.RefreshTokenRepository;
+import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
@@ -50,6 +51,9 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final EmailService emailService;
     private final OtpProperties otpProperties;
+    private final UserRoleRepository userRoleRepository;
+    private final LoginAttemptService loginAttemptService;
+    private final com.buyology.ecommerce.common.audit.AuditService auditService;
 
     public AuthService(
             TokenService tokenService,
@@ -58,7 +62,10 @@ public class AuthService {
             EmailOtpRepository emailOtpRepository,
             RefreshTokenRepository refreshTokenRepository,
             EmailService emailService,
-            OtpProperties otpProperties) {
+            OtpProperties otpProperties,
+            UserRoleRepository userRoleRepository,
+            LoginAttemptService loginAttemptService,
+            com.buyology.ecommerce.common.audit.AuditService auditService) {
         this.tokenService = tokenService;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -66,6 +73,9 @@ public class AuthService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.emailService = emailService;
         this.otpProperties = otpProperties;
+        this.userRoleRepository = userRoleRepository;
+        this.loginAttemptService = loginAttemptService;
+        this.auditService = auditService;
     }
 
     // ── Step 1: Initiate signup ───────────────────────────────────────────────
@@ -349,15 +359,25 @@ public class AuthService {
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
             }
 
+            if (loginAttemptService.isLockedOut(request.getEmail())) {
+                return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                        "Too many failed attempts. Try again in "
+                                + loginAttemptService.lockoutDuration().toMinutes() + " minutes.");
+            }
+
             Optional<AuthCredentials> existing = authCredentialRepository
                     .findByEmailAndProvider(request.getEmail(), "LOCAL");
             if (existing.isEmpty()) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
             AuthCredentials authCredentials = existing.get();
 
             if (!PasswordUtils.verifyPassword(request.getPassword(), authCredentials.getPasswordHash())) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
@@ -367,6 +387,8 @@ public class AuthService {
                         "Your account has been suspended. Please contact support.");
             }
 
+            loginAttemptService.recordSuccess(request.getEmail());
+            auditService.logSuccess("AUTH_LOGIN", "AuthCredentials", authCredentials.getId().toString());
             return buildSigninResponse(authCredentials, httpRequest);
 
         } catch (Exception e) {
@@ -385,17 +407,28 @@ public class AuthService {
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
             }
 
+            if (loginAttemptService.isLockedOut(request.getEmail())) {
+                return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                        "Too many failed attempts. Try again in "
+                                + loginAttemptService.lockoutDuration().toMinutes() + " minutes.");
+            }
+
             Optional<AuthCredentials> existing = authCredentialRepository
                     .findByEmailAndProvider(request.getEmail(), "LOCAL");
             if (existing.isEmpty()) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
 
             AuthCredentials authCredentials = existing.get();
 
             if (!PasswordUtils.verifyPassword(request.getPassword(), authCredentials.getPasswordHash())) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
                 return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
             }
+            loginAttemptService.recordSuccess(request.getEmail());
 
             Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
             if (user == null) {
@@ -564,12 +597,22 @@ public class AuthService {
     public ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
             AuthCredentials credentials, HttpServletRequest httpRequest) {
 
+        String audience = extractAudience(httpRequest);
+
+        // Suppliers may only sign in via the dashboard.
+        boolean isSupplier = userRoleRepository.findRoleNamesByUserId(credentials.getUserId())
+                .stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
+        if (isSupplier && !"dashboard".equals(audience)) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                    "Supplier accounts may only sign in from the dashboard");
+        }
+
         userRepository.findById(credentials.getUserId()).ifPresent(user -> {
             user.setLastLoginAt(Instant.now());
             userRepository.save(user);
         });
 
-        String accessToken = tokenService.generateAccessToken(credentials);
+        String accessToken = tokenService.generateAccessToken(credentials, audience);
         var refreshToken = tokenService.generateRefreshToken(credentials, extractDeviceInfo(httpRequest));
         String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.getToken());
 
@@ -578,6 +621,17 @@ public class AuthService {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieHeader)
                 .body(new ApiResponse<>(200, "Signin successful", body));
+    }
+
+    private String extractAudience(HttpServletRequest request) {
+        if (request == null) return "web";
+        String header = request.getHeader("X-Client-Type");
+        if (header == null || header.isBlank()) return "web";
+        String normalized = header.trim().toLowerCase();
+        return switch (normalized) {
+            case "dashboard", "web", "mobile" -> normalized;
+            default -> "web";
+        };
     }
 
     public String extractDeviceInfo(HttpServletRequest request) {
