@@ -7,6 +7,7 @@ import com.buyology.ecommerce.role.repository.RolePermissionRepository;
 import com.buyology.ecommerce.role.repository.UserPermissionRepository;
 import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -22,6 +23,9 @@ import java.util.List;
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:8080}")
+    private String allowedOriginsCsv;
 
     private final TokenService tokenService;
     private final AuthCredentialRepository authCredentialRepository;
@@ -115,19 +119,13 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Explicit allowlist — no wildcards. The mobile app is served via WebView/native HTTP
-        // and does not enforce CORS, so it doesn't need an entry here.
-        configuration.setAllowedOrigins(List.of(
-                "https://dev-dithari.com",
-                "https://admin.dev.dithari.com",
-                "https://buyology.online",
-                "https://admin.buyology.online",
-                "https://supplier.buyology.online",
-                // Keep localhost during local development; remove for prod-only build if desired.
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "http://localhost:8080"
-        ));
+        // Explicit allowlist — no wildcards. Driven by app.cors.allowed-origins
+        // (env var CORS_ALLOWED_ORIGINS in CI/CD). Defaults to localhost for dev.
+        List<String> allowed = java.util.Arrays.stream(allowedOriginsCsv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        configuration.setAllowedOrigins(allowed);
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of(
