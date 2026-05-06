@@ -153,6 +153,50 @@ public class EmailService {
         }
     }
 
+    public void sendB2bApplicationReceivedEmail(String toEmail, String memberName, String companyName) {
+        try {
+            String template = loadTemplate("static/b2b-application-received.html");
+            String html = template
+                    .replace("{{MEMBER_NAME}}", memberName == null ? "" : memberName)
+                    .replace("{{COMPANY_NAME}}", companyName == null ? "" : companyName)
+                    .replace("{{APPLICATION_DATE}}", java.time.LocalDate.now().toString());
+            send(toEmail, "Your B2B membership request is under review — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send B2B application received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendB2bMembershipApprovedEmail(String toEmail, String memberName, String companyName,
+                                               String membershipId, String creditAmount, String currency,
+                                               String setupLink) {
+        try {
+            String template = loadTemplate("static/b2b-membership-approved.html");
+            String html = template
+                    .replace("{{MEMBER_NAME}}", memberName == null ? "" : memberName)
+                    .replace("{{COMPANY_NAME}}", companyName == null ? "" : companyName)
+                    .replace("{{MEMBERSHIP_ID}}", membershipId == null ? "" : membershipId)
+                    .replace("{{CREDIT_AMOUNT}}", creditAmount == null ? "" : creditAmount)
+                    .replace("{{CURRENCY}}", currency == null ? "" : currency)
+                    .replace("{{SETUP_LINK}}", setupLink == null ? "" : setupLink);
+            send(toEmail, "Your Buyology B2B Premium membership is approved!", html);
+        } catch (Exception e) {
+            log.warn("Could not send B2B approved email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendB2bMembershipRejectedEmail(String toEmail, String memberName, String companyName, String reason) {
+        try {
+            String template = loadTemplate("static/b2b-membership-rejected.html");
+            String html = template
+                    .replace("{{MEMBER_NAME}}", memberName == null ? "" : memberName)
+                    .replace("{{COMPANY_NAME}}", companyName == null ? "" : companyName)
+                    .replace("{{REASON}}", reason == null ? "" : reason);
+            send(toEmail, "Update on your Buyology B2B membership application", html);
+        } catch (Exception e) {
+            log.warn("Could not send B2B rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     public void sendSupplierApplicationReceivedEmail(String toEmail, String supplierName, String businessName) {
         try {
             String template = loadTemplate("static/supplier-application-received.html");

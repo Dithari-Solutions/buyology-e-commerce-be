@@ -599,12 +599,20 @@ public class AuthService {
 
         String audience = extractAudience(httpRequest);
 
-        // Suppliers may only sign in via the dashboard.
-        boolean isSupplier = userRoleRepository.findRoleNamesByUserId(credentials.getUserId())
-                .stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
-        if (isSupplier && !"dashboard".equals(audience)) {
+        // Privileged accounts (admins, suppliers) may only sign in from the dashboard.
+        // ADMIN userType OR any of the {SUPPLIER, ADMIN, SUPERADMIN, CUSTOMER_SUPPORT} roles.
+        var userOpt = userRepository.findById(credentials.getUserId());
+        boolean isAdminUserType = userOpt.isPresent()
+                && userOpt.get().getUserType() == Users.UserType.ADMIN;
+        var roleNames = userRoleRepository.findRoleNamesByUserId(credentials.getUserId());
+        boolean isPrivilegedRole = roleNames.stream().anyMatch(r ->
+                "SUPPLIER".equalsIgnoreCase(r)
+                        || "ADMIN".equalsIgnoreCase(r)
+                        || "SUPERADMIN".equalsIgnoreCase(r)
+                        || "CUSTOMER_SUPPORT".equalsIgnoreCase(r));
+        if ((isAdminUserType || isPrivilegedRole) && !"dashboard".equals(audience)) {
             return ApiResponse.failure(HttpStatus.FORBIDDEN,
-                    "Supplier accounts may only sign in from the dashboard");
+                    "This account may only sign in from the admin dashboard");
         }
 
         userRepository.findById(credentials.getUserId()).ifPresent(user -> {

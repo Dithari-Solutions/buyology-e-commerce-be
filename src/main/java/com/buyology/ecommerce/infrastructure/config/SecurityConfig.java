@@ -101,6 +101,8 @@ public class SecurityConfig {
                         // Supplier registration and password-setup endpoints are public
                         .requestMatchers("/api/supplier/apply/**").permitAll()
                         .requestMatchers("/api/supplier/auth/**").permitAll()
+                        // B2B membership password-setup endpoints are public (token-gated)
+                        .requestMatchers("/api/membership/auth/**").permitAll()
                         // Admin API requires authentication; method-level @PreAuthorize handles role checks
                         .requestMatchers("/api/admin/**").authenticated()
                         .requestMatchers("/api/stores/**").authenticated()

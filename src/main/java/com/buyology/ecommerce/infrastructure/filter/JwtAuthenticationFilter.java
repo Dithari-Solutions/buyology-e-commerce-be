@@ -103,9 +103,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         List<UUID> roleIds = userRoleRepository.findRoleIdsByUserId(userId);
         List<String> roleNames = userRoleRepository.findRoleNamesByUserId(userId);
 
-        // Enforce: SUPPLIER role tokens are only valid with audience "dashboard"
-        boolean isSupplier = roleNames.stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
-        if (isSupplier) {
+        // Enforce: privileged-account tokens are only valid with audience "dashboard".
+        // Covers SUPPLIER, ADMIN, SUPERADMIN, CUSTOMER_SUPPORT roles AND ADMIN userType.
+        boolean isAdminUserType = userOpt.get().getUserType() == com.buyology.ecommerce.user.domain.Users.UserType.ADMIN;
+        boolean isPrivilegedRole = roleNames.stream().anyMatch(r ->
+                "SUPPLIER".equalsIgnoreCase(r)
+                        || "ADMIN".equalsIgnoreCase(r)
+                        || "SUPERADMIN".equalsIgnoreCase(r)
+                        || "CUSTOMER_SUPPORT".equalsIgnoreCase(r));
+        if (isAdminUserType || isPrivilegedRole) {
             String audience = extractAudience(token);
             if (!"dashboard".equals(audience)) {
                 filterChain.doFilter(request, response);

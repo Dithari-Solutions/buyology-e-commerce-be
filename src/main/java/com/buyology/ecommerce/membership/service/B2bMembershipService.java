@@ -1,15 +1,22 @@
 package com.buyology.ecommerce.membership.service;
 
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.membership.domain.B2bCountry;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
 import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
+import com.buyology.ecommerce.membership.domain.B2bSetupToken;
 import com.buyology.ecommerce.membership.domain.Wallet;
 import com.buyology.ecommerce.membership.dto.*;
 import com.buyology.ecommerce.membership.repository.B2bCountryRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
+import com.buyology.ecommerce.membership.repository.B2bSetupTokenRepository;
 import com.buyology.ecommerce.membership.repository.WalletRepository;
+import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,19 +44,31 @@ public class B2bMembershipService {
     private final WalletService walletService;
     private final EmailService emailService;
     private final B2bCountryRepository countryRepo;
+    private final B2bSetupTokenRepository setupTokenRepo;
+    private final UserRepository userRepository;
+    private final AuthCredentialRepository authCredentialRepository;
+
+    @Value("${app.web-base-url:https://buyology.online}")
+    private String webBaseUrl;
 
     public B2bMembershipService(B2bMembershipApplicationRepository appRepo,
                                  B2bMembershipRepository membershipRepo,
                                  WalletRepository walletRepo,
                                  WalletService walletService,
                                  EmailService emailService,
-                                 B2bCountryRepository countryRepo) {
+                                 B2bCountryRepository countryRepo,
+                                 B2bSetupTokenRepository setupTokenRepo,
+                                 UserRepository userRepository,
+                                 AuthCredentialRepository authCredentialRepository) {
         this.appRepo = appRepo;
         this.membershipRepo = membershipRepo;
         this.walletRepo = walletRepo;
         this.walletService = walletService;
         this.emailService = emailService;
         this.countryRepo = countryRepo;
+        this.setupTokenRepo = setupTokenRepo;
+        this.userRepository = userRepository;
+        this.authCredentialRepository = authCredentialRepository;
     }
 
     // ── Customer endpoints ───────────────────────────────────────────────────
@@ -107,6 +126,7 @@ public class B2bMembershipService {
         }
         app = appRepo.save(app);
 
+        // Internal notification to ops
         try {
             emailService.sendB2bInquiryNotification(
                     "firdovsirz@gmail.com",
@@ -115,6 +135,16 @@ public class B2bMembershipService {
                     0, "B2B Membership Application submitted - Status: PENDING");
         } catch (Exception e) {
             log.warn("Admin notification failed: {}", e.getMessage());
+        }
+
+        // Confirmation email to the applicant — "received, under review (1–5 business days)"
+        try {
+            emailService.sendB2bApplicationReceivedEmail(
+                    app.getContactEmail(),
+                    app.getContactFullName(),
+                    app.getCompanyName());
+        } catch (Exception e) {
+            log.warn("Applicant confirmation email failed for {}: {}", app.getContactEmail(), e.getMessage());
         }
 
         return toAppResponse(app);
@@ -192,32 +222,75 @@ public class B2bMembershipService {
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private void activateMembership(B2bMembershipApplication app, String performedBy) {
-        if (app.getUserId() == null) return;
+        // If the applicant didn't have a user account yet (anonymous apply),
+        // create a shell User + AuthCredentials so they can sign in after
+        // setting their password via the setup link in the approval email.
+        UUID userId = app.getUserId();
+        if (userId == null) {
+            Users user = new Users();
+            String[] nameParts = app.getContactFullName() == null
+                    ? new String[]{"B2B", "Member"}
+                    : app.getContactFullName().trim().split("\\s+", 2);
+            user.setFirstName(nameParts[0]);
+            user.setLastName(nameParts.length > 1 ? nameParts[1] : "");
+            user.setUserType(Users.UserType.CUSTOMER);
+            user.setIsGuest(false);
+            user.setStatus("ACTIVE");
+            userRepository.save(user);
+            userId = user.getId();
+            app.setUserId(userId);
+            appRepo.save(app);
 
-        if (!membershipRepo.existsByUserId(app.getUserId())) {
-            B2bMembership membership = new B2bMembership();
+            AuthCredentials credentials = new AuthCredentials();
+            credentials.setUserId(userId);
+            credentials.setEmail(app.getContactEmail());
+            credentials.setProvider("LOCAL");
+            credentials.setIsActive(true);
+            credentials.setPhoneVerified(false);
+            authCredentialRepository.save(credentials);
+        }
+
+        B2bMembership membership;
+        if (membershipRepo.existsByUserId(userId)) {
+            membership = membershipRepo.findByUserId(userId).orElseThrow();
+        } else {
+            membership = new B2bMembership();
             membership.setMembershipId(generateMembershipId());
-            membership.setUserId(app.getUserId());
+            membership.setUserId(userId);
             membership.setApplicationId(app.getId());
             membership.setCompanyName(app.getCompanyName());
             membership.setMemberName(app.getContactFullName());
             membership.setStatus(B2bMembership.MembershipStatus.ACTIVE);
             membership.setTier(B2bMembership.MembershipTier.PREMIUM);
-            membershipRepo.save(membership);
+            membership = membershipRepo.save(membership);
         }
 
-        walletService.addInitialCredit(
-                app.getUserId(),
+        WalletResponse wallet = walletService.addInitialCredit(
+                userId,
                 performedBy,
                 app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED",
                 app.getCountryCode());
 
+        // Setup token (24h TTL) — included in the approval email so the new
+        // member can set a password and sign in.
+        B2bSetupToken token = new B2bSetupToken();
+        token.setMembershipId(membership.getId());
+        token.setToken(UUID.randomUUID().toString());
+        token.setExpiresAt(Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS));
+        setupTokenRepo.save(token);
+        String setupLink = webBaseUrl + "/b2b/set-password?token=" + token.getToken();
+
         try {
-            emailService.sendB2bInquiryNotification(
+            emailService.sendB2bMembershipApprovedEmail(
                     app.getContactEmail(),
-                    app.getCompanyName(), app.getContactFullName(),
-                    app.getContactEmail(), app.getContactMobile(),
-                    0, "Congratulations! Your B2B Premium membership has been approved. You have received AED 5,000 wallet credit.");
+                    app.getContactFullName(),
+                    app.getCompanyName(),
+                    membership.getMembershipId(),
+                    wallet.getCreditLimit() != null
+                            ? wallet.getCreditLimit().toPlainString()
+                            : "5000",
+                    wallet.getCurrency(),
+                    setupLink);
         } catch (Exception e) {
             log.warn("Approval email failed: {}", e.getMessage());
         }
@@ -225,11 +298,11 @@ public class B2bMembershipService {
 
     private void sendRejectionEmail(B2bMembershipApplication app) {
         try {
-            emailService.sendB2bInquiryNotification(
+            emailService.sendB2bMembershipRejectedEmail(
                     app.getContactEmail(),
-                    app.getCompanyName(), app.getContactFullName(),
-                    app.getContactEmail(), app.getContactMobile(),
-                    0, "Your B2B membership application has been reviewed. Reason: " + app.getRejectionReason());
+                    app.getContactFullName(),
+                    app.getCompanyName(),
+                    app.getRejectionReason());
         } catch (Exception e) {
             log.warn("Rejection email failed: {}", e.getMessage());
         }
