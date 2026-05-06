@@ -225,29 +225,40 @@ public class B2bMembershipService {
         // If the applicant didn't have a user account yet (anonymous apply),
         // create a shell User + AuthCredentials so they can sign in after
         // setting their password via the setup link in the approval email.
+        // If an AuthCredentials with the same email already exists (e.g. user
+        // signed up as a customer first), reuse it to avoid duplicate accounts.
         UUID userId = app.getUserId();
         if (userId == null) {
-            Users user = new Users();
-            String[] nameParts = app.getContactFullName() == null
-                    ? new String[]{"B2B", "Member"}
-                    : app.getContactFullName().trim().split("\\s+", 2);
-            user.setFirstName(nameParts[0]);
-            user.setLastName(nameParts.length > 1 ? nameParts[1] : "");
-            user.setUserType(Users.UserType.CUSTOMER);
-            user.setIsGuest(false);
-            user.setStatus("ACTIVE");
-            userRepository.save(user);
-            userId = user.getId();
-            app.setUserId(userId);
-            appRepo.save(app);
+            AuthCredentials existingCreds = authCredentialRepository
+                    .findByEmailAndProvider(app.getContactEmail(), "LOCAL")
+                    .orElse(null);
+            if (existingCreds != null) {
+                userId = existingCreds.getUserId();
+                app.setUserId(userId);
+                appRepo.save(app);
+            } else {
+                Users user = new Users();
+                String[] nameParts = app.getContactFullName() == null
+                        ? new String[]{"B2B", "Member"}
+                        : app.getContactFullName().trim().split("\\s+", 2);
+                user.setFirstName(nameParts[0]);
+                user.setLastName(nameParts.length > 1 ? nameParts[1] : "");
+                user.setUserType(Users.UserType.CUSTOMER);
+                user.setIsGuest(false);
+                user.setStatus("ACTIVE");
+                userRepository.save(user);
+                userId = user.getId();
+                app.setUserId(userId);
+                appRepo.save(app);
 
-            AuthCredentials credentials = new AuthCredentials();
-            credentials.setUserId(userId);
-            credentials.setEmail(app.getContactEmail());
-            credentials.setProvider("LOCAL");
-            credentials.setIsActive(true);
-            credentials.setPhoneVerified(false);
-            authCredentialRepository.save(credentials);
+                AuthCredentials credentials = new AuthCredentials();
+                credentials.setUserId(userId);
+                credentials.setEmail(app.getContactEmail());
+                credentials.setProvider("LOCAL");
+                credentials.setIsActive(true);
+                credentials.setPhoneVerified(false);
+                authCredentialRepository.save(credentials);
+            }
         }
 
         B2bMembership membership;
@@ -270,6 +281,14 @@ public class B2bMembershipService {
                 performedBy,
                 app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED",
                 app.getCountryCode());
+
+        // Invalidate any prior unused setup tokens for this membership so the
+        // approval email always contains the only valid link (re-approval flow).
+        var oldTokens = setupTokenRepo.findByMembershipIdAndUsedFalse(membership.getId());
+        for (B2bSetupToken old : oldTokens) {
+            old.setUsed(true);
+            setupTokenRepo.save(old);
+        }
 
         // Setup token (24h TTL) — included in the approval email so the new
         // member can set a password and sign in.
@@ -309,7 +328,17 @@ public class B2bMembershipService {
     }
 
     private String generateMembershipId() {
-        return "BUY-" + Year.now().getValue() + "-" + SEQ.getAndIncrement();
+        // DB-aware to survive server restarts. Tries the in-memory sequence first
+        // (fast path) then bumps until an unused value is found.
+        int year = Year.now().getValue();
+        for (int attempts = 0; attempts < 1000; attempts++) {
+            String candidate = "BUY-" + year + "-" + SEQ.getAndIncrement();
+            if (membershipRepo.findByMembershipId(candidate).isEmpty()) {
+                return candidate;
+            }
+        }
+        // Fallback — extremely unlikely. Use a UUID suffix to guarantee uniqueness.
+        return "BUY-" + year + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     // ── Mappers ───────────────────────────────────────────────────────────────
