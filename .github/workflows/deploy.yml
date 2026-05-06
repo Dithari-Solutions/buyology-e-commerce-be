@@ -129,53 +129,32 @@ jobs:
             mkdir -p /opt/buyology/firebase
             printf '%s' "${FIREBASE_SERVICE_ACCOUNT_KEY}" | base64 -d > /opt/buyology/firebase/service-account.json
 
-            # ── Write .env from shell env vars ────────────────────────────────
-            # APPLE_PRIVATE_KEY and COURIER_SERVICE_PRIVATE_KEY are excluded —
-            # both are multi-line PEM keys that break .env file parsing.
-            # They are already exported in the shell environment via envs above
-            # and Docker Compose reads them from there directly.
-            cat > .env.tmp << ENVEOF
-            DOCKER_USERNAME=${DOCKER_USERNAME}
-            IMAGE_TAG=${IMAGE_TAG}
-            DB_URL=${DB_URL}
-            DB_USERNAME=${DB_USERNAME}
-            DB_PASSWORD=${DB_PASSWORD}
-            JWT_SECRET=${JWT_SECRET}
-            CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-            SENDGRID_API_KEY=${SENDGRID_API_KEY}
-            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-            GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
-            APPLE_TEAM_ID=${APPLE_TEAM_ID}
-            APPLE_CLIENT_ID=${APPLE_CLIENT_ID}
-            APPLE_KEY_ID=${APPLE_KEY_ID}
-            APPLE_REDIRECT_URI=${APPLE_REDIRECT_URI}
-            REDIS_HOST=redis
-            REDIS_PORT=6379
-            PAYMOB_API_KEY=${PAYMOB_API_KEY}
-            PAYMOB_SECRET_KEY=${PAYMOB_SECRET_KEY}
-            PAYMOB_PUBLIC_KEY=${PAYMOB_PUBLIC_KEY}
-            PAYMOB_HMAC_SECRET=${PAYMOB_HMAC_SECRET}
-            PAYMOB_NOTIFICATION_URL=${PAYMOB_NOTIFICATION_URL}
-            PAYMOB_REDIRECTION_URL=${PAYMOB_REDIRECTION_URL}
-            PAYMOB_BASE_URL=https://uae.paymob.com
-            PAYMOB_CARD_INTEGRATION_ID=${PAYMOB_CARD_INTEGRATION_ID}
-            PAYMOB_CARD_IFRAME_ID=${PAYMOB_CARD_IFRAME_ID}
-            PAYMOB_TABBY_INTEGRATION_ID=${PAYMOB_TABBY_INTEGRATION_ID}
-            PAYMOB_TAMARA_INTEGRATION_ID=${PAYMOB_TAMARA_INTEGRATION_ID}
-            TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
-            TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-            TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
-            CONTABO_S3_ENDPOINT=${CONTABO_S3_ENDPOINT}
-            CONTABO_S3_ACCESS_KEY=${CONTABO_S3_ACCESS_KEY}
-            CONTABO_S3_SECRET_KEY=${CONTABO_S3_SECRET_KEY}
-            CONTABO_S3_BUCKET_NAME=${CONTABO_S3_BUCKET_NAME}
-            CONTABO_S3_PUBLIC_URL=${CONTABO_S3_PUBLIC_URL}
-            RABBITMQ_USERNAME=${RABBITMQ_USERNAME}
-            RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
-            ENVEOF
-            mv .env.tmp .env
-            chmod 600 .env
+            # ── Pass GitHub Secrets straight through to Docker Compose ─────────
+            # Secrets arrive in the SSH session via the ssh-action `envs:` directive
+            # above. We `export` them so Docker Compose's variable substitution
+            # (${VAR} in docker-compose.yml) picks them up from the parent shell.
+            # No .env file is written — secrets never touch the disk on the VPS.
+            # Statics that aren't secrets are set inline below.
+            export DOCKER_USERNAME IMAGE_TAG DB_URL DB_USERNAME DB_PASSWORD \
+                   JWT_SECRET CORS_ALLOWED_ORIGINS SENDGRID_API_KEY \
+                   GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI \
+                   APPLE_TEAM_ID APPLE_CLIENT_ID APPLE_KEY_ID APPLE_PRIVATE_KEY APPLE_REDIRECT_URI \
+                   PAYMOB_API_KEY PAYMOB_SECRET_KEY PAYMOB_PUBLIC_KEY PAYMOB_HMAC_SECRET \
+                   PAYMOB_NOTIFICATION_URL PAYMOB_REDIRECTION_URL \
+                   PAYMOB_CARD_INTEGRATION_ID PAYMOB_CARD_IFRAME_ID \
+                   PAYMOB_TABBY_INTEGRATION_ID PAYMOB_TAMARA_INTEGRATION_ID \
+                   TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_PHONE_NUMBER \
+                   COURIER_SERVICE_PRIVATE_KEY \
+                   CONTABO_S3_ENDPOINT CONTABO_S3_ACCESS_KEY CONTABO_S3_SECRET_KEY \
+                   CONTABO_S3_BUCKET_NAME CONTABO_S3_PUBLIC_URL \
+                   RABBITMQ_USERNAME RABBITMQ_PASSWORD
+            export REDIS_HOST=redis
+            export REDIS_PORT=6379
+            export PAYMOB_BASE_URL=https://uae.paymob.com
+
+            # Wipe any old .env left from previous deploys so docker compose
+            # cannot accidentally read stale values.
+            rm -f .env
 
             # ── Login and pull new image ───────────────────────────────────────
             printf '%s' "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
