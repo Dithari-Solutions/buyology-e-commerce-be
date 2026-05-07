@@ -121,4 +121,20 @@ public class AdminB2bMembershipController {
             @AuthenticationPrincipal UUID actorId) {
         return lifecycleService.adminRestore(id, actorId != null ? "admin:" + actorId : "admin");
     }
+
+    /**
+     * Re-send the set-password email to a member who hasn't completed setup.
+     * Errors with 409 if the member already has a password.
+     */
+    @PostMapping("/memberships/{id}/resend-setup")
+    public ResponseEntity<ApiResponse<String>> resendSetup(@PathVariable UUID id) {
+        try {
+            membershipService.resendSetupEmail(id);
+            return ApiResponse.success("sent", "Set-password email re-sent");
+        } catch (IllegalStateException e) {
+            return ApiResponse.failure(org.springframework.http.HttpStatus.CONFLICT, e.getMessage());
+        } catch (java.util.NoSuchElementException e) {
+            return ApiResponse.failure(org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
 }

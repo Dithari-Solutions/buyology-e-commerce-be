@@ -85,21 +85,29 @@ public class AdminSupplierService {
         Page<SupplierApplication> page = (status != null)
                 ? applicationRepository.findByStatus(status, pageable)
                 : applicationRepository.findAll(pageable);
-        return page.map(app -> SupplierApplicationResponse.from(
-                app,
-                getDocumentUrl(app.getTradeLicenseKey()),
-                supplierRepository.findByApplicationId(app.getId()).map(s -> s.getId()).orElse(null)));
+        return page.map(app -> {
+            Supplier supplier = supplierRepository.findByApplicationId(app.getId()).orElse(null);
+            return SupplierApplicationResponse.from(
+                    app,
+                    getDocumentUrl(app.getTradeLicenseKey()),
+                    supplier != null ? supplier.getId() : null,
+                    supplier != null ? hasLocalPassword(supplier.getUserId()) : null);
+        });
     }
 
     public ResponseEntity<ApiResponse<SupplierApplicationResponse>> getApplication(UUID id) {
-        return applicationRepository.findByIdAndDeletedAtIsNull(id)
-                .map(app -> ApiResponse.success(
-                        SupplierApplicationResponse.from(
-                                app,
-                                getDocumentUrl(app.getTradeLicenseKey()),
-                                supplierRepository.findByApplicationId(app.getId()).map(s -> s.getId()).orElse(null)),
-                        "Application found"))
-                .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Application not found"));
+        SupplierApplication app = applicationRepository.findByIdAndDeletedAtIsNull(id).orElse(null);
+        if (app == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Application not found");
+        }
+        Supplier supplier = supplierRepository.findByApplicationId(app.getId()).orElse(null);
+        return ApiResponse.success(
+                SupplierApplicationResponse.from(
+                        app,
+                        getDocumentUrl(app.getTradeLicenseKey()),
+                        supplier != null ? supplier.getId() : null,
+                        supplier != null ? hasLocalPassword(supplier.getUserId()) : null),
+                "Application found");
     }
 
     // ── Approve ──────────────────────────────────────────────────────────────
@@ -213,7 +221,74 @@ public class AdminSupplierService {
         return ApiResponse.success("rejected", "Application rejected");
     }
 
+    // ── Resend setup email ──────────────────────────────────────────────────
+
+    /**
+     * Re-issue the password-setup email for an approved supplier who hasn't
+     * completed setup yet. Invalidates any prior unused tokens, mints a fresh
+     * one, and re-sends the approval email. Refuses if the supplier already
+     * has a LOCAL password.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<String>> resendSetupEmail(UUID supplierId) {
+        Supplier supplier = supplierRepository.findById(supplierId).orElse(null);
+        if (supplier == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier not found");
+        }
+        if (hasLocalPassword(supplier.getUserId())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Supplier has already set a password");
+        }
+
+        String email = supplier.getContactEmail();
+        if (email == null || email.isBlank()) {
+            email = authCredentialRepository.findByUserId(supplier.getUserId()).stream()
+                    .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                    .map(AuthCredentials::getEmail)
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (email == null || email.isBlank()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "No contact email on file for this supplier");
+        }
+
+        // Invalidate any prior unused tokens.
+        for (SupplierSetupToken old : setupTokenRepository.findBySupplierIdAndUsedFalse(supplier.getId())) {
+            old.setUsed(true);
+            setupTokenRepository.save(old);
+        }
+
+        SupplierSetupToken token = new SupplierSetupToken();
+        token.setSupplierId(supplier.getId());
+        token.setToken(UUID.randomUUID().toString());
+        token.setExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
+        setupTokenRepository.save(token);
+
+        String setupLink = dashboardBaseUrl + "/supplier/set-password?token=" + token.getToken();
+        try {
+            String memberName = supplier.getBusinessName();
+            emailService.sendSupplierApprovedEmail(
+                    email,
+                    memberName,
+                    supplier.getBusinessName(),
+                    setupLink);
+        } catch (Exception e) {
+            log.warn("Resend supplier setup email failed for {}: {}", supplierId, e.getMessage());
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to send email: " + e.getMessage());
+        }
+
+        return ApiResponse.success("sent", "Set-password email re-sent");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private boolean hasLocalPassword(UUID userId) {
+        if (userId == null) return false;
+        return authCredentialRepository.findByUserId(userId).stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .anyMatch(c -> c.getPasswordHash() != null && !c.getPasswordHash().isBlank());
+    }
 
     private String getDocumentUrl(String key) {
         if (key == null || key.isBlank()) return null;

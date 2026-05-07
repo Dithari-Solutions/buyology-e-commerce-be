@@ -19,6 +19,11 @@ public class MembershipCardResponse {
     private Instant validUntil;
     private Instant createdAt;
     private String qrCodePlaceholder;
+    /** Whether this member has set a sign-in password (admin uses this to gate the resend-setup button). */
+    private boolean passwordSet;
+
+    public boolean isPasswordSet() { return passwordSet; }
+    public void setPasswordSet(boolean passwordSet) { this.passwordSet = passwordSet; }
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }

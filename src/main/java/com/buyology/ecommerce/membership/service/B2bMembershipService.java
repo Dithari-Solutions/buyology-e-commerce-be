@@ -416,10 +416,92 @@ public class B2bMembershipService {
         r.setValidUntil(m.getValidUntil());
         r.setCreatedAt(m.getCreatedAt());
         r.setQrCodePlaceholder("QR:" + m.getMembershipId());
+        r.setPasswordSet(hasLocalPassword(m.getUserId()));
         if (wallet != null) {
             r.setWalletBalance(wallet.getBalance());
             r.setWalletCurrency(wallet.getCurrency());
         }
         return r;
+    }
+
+    private boolean hasLocalPassword(UUID userId) {
+        if (userId == null) return false;
+        return authCredentialRepository.findByUserId(userId).stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .anyMatch(c -> c.getPasswordHash() != null && !c.getPasswordHash().isBlank());
+    }
+
+    /**
+     * Re-issue the password-setup email for a member who hasn't completed
+     * setup yet. Invalidates any prior unused tokens, mints a fresh one,
+     * and re-sends the approval email. Refuses if the member already has a
+     * LOCAL password.
+     */
+    @Transactional
+    public void resendSetupEmail(UUID membershipId) {
+        B2bMembership membership = membershipRepo.findById(membershipId)
+                .orElseThrow(() -> new NoSuchElementException("Membership not found"));
+        if (membership.getStatus() != B2bMembership.MembershipStatus.ACTIVE) {
+            throw new IllegalStateException(
+                    "Membership is not active (status: " + membership.getStatus() + ")");
+        }
+        if (hasLocalPassword(membership.getUserId())) {
+            throw new IllegalStateException("Member has already set a password");
+        }
+
+        B2bMembershipApplication app = membership.getApplicationId() == null
+                ? null
+                : appRepo.findById(membership.getApplicationId()).orElse(null);
+
+        String email = app != null ? app.getContactEmail() : null;
+        if (email == null) {
+            email = authCredentialRepository.findByUserId(membership.getUserId()).stream()
+                    .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                    .map(AuthCredentials::getEmail)
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (email == null || email.isBlank()) {
+            throw new IllegalStateException("No contact email on file for this member");
+        }
+
+        // Invalidate any prior unused setup tokens so only the new one is valid.
+        var oldTokens = setupTokenRepo.findByMembershipIdAndUsedFalse(membership.getId());
+        for (B2bSetupToken old : oldTokens) {
+            old.setUsed(true);
+            setupTokenRepo.save(old);
+        }
+
+        B2bSetupToken token = new B2bSetupToken();
+        token.setMembershipId(membership.getId());
+        token.setToken(UUID.randomUUID().toString());
+        token.setExpiresAt(Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS));
+        setupTokenRepo.save(token);
+
+        Wallet wallet = walletRepo.findByUserId(membership.getUserId()).orElse(null);
+        String creditLimit = wallet != null && wallet.getCreditLimit() != null
+                ? wallet.getCreditLimit().toPlainString()
+                : "5000";
+        String currency = wallet != null && wallet.getCurrency() != null
+                ? wallet.getCurrency()
+                : (app != null && app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED");
+
+        String setupLink = webBaseUrl + "/b2b/set-password?token=" + token.getToken();
+        try {
+            emailService.sendB2bMembershipApprovedEmail(
+                    email,
+                    membership.getMemberName() != null
+                            ? membership.getMemberName()
+                            : (app != null ? app.getContactFullName() : "Member"),
+                    membership.getCompanyName(),
+                    membership.getMembershipId(),
+                    creditLimit,
+                    currency,
+                    setupLink);
+        } catch (Exception e) {
+            log.warn("Resend setup email failed for membershipId={}: {}", membershipId, e.getMessage());
+            throw new IllegalStateException("Failed to send email: " + e.getMessage());
+        }
     }
 }

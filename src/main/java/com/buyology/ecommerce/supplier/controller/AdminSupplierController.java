@@ -94,4 +94,15 @@ public class AdminSupplierController {
             @AuthenticationPrincipal UUID actorId) {
         return lifecycleService.adminRestore(id, actorId != null ? "admin:" + actorId : "admin");
     }
+
+    /**
+     * Re-send the set-password email to an approved supplier who hasn't
+     * completed setup yet. Errors with 409 if the supplier already has a
+     * password.
+     */
+    @PostMapping("/{id}/resend-setup")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<String>> resendSetup(@PathVariable UUID id) {
+        return adminSupplierService.resendSetupEmail(id);
+    }
 }

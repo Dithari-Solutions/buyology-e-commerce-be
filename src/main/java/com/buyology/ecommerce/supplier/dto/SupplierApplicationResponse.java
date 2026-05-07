@@ -34,12 +34,22 @@ public class SupplierApplicationResponse {
     private Instant createdAt;
     /** Set once the application has been approved and a Supplier entity exists. */
     private UUID supplierId;
+    /** Whether the approved supplier has set their sign-in password. Null when not approved yet. */
+    private Boolean passwordSet;
 
     public static SupplierApplicationResponse from(SupplierApplication app, String tradeLicenseUrl) {
         return from(app, tradeLicenseUrl, null);
     }
 
     public static SupplierApplicationResponse from(SupplierApplication app, String tradeLicenseUrl, UUID supplierId) {
+        return from(app, tradeLicenseUrl, supplierId, null);
+    }
+
+    public static SupplierApplicationResponse from(
+            SupplierApplication app,
+            String tradeLicenseUrl,
+            UUID supplierId,
+            Boolean passwordSet) {
         SupplierApplicationResponse r = new SupplierApplicationResponse();
         r.supplierId = supplierId;
         r.id = app.getId();
@@ -68,6 +78,7 @@ public class SupplierApplicationResponse {
         r.status = app.getStatus().name();
         r.rejectionReason = app.getRejectionReason();
         r.createdAt = app.getCreatedAt();
+        r.passwordSet = passwordSet;
         return r;
     }
 
@@ -98,4 +109,5 @@ public class SupplierApplicationResponse {
     public String getRejectionReason() { return rejectionReason; }
     public Instant getCreatedAt() { return createdAt; }
     public UUID getSupplierId() { return supplierId; }
+    public Boolean getPasswordSet() { return passwordSet; }
 }
