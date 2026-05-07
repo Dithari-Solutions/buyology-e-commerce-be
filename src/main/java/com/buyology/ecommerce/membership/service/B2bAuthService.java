@@ -13,6 +13,8 @@ import com.buyology.ecommerce.membership.dto.B2bSetPasswordRequest;
 import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.membership.repository.B2bSetupTokenRepository;
+import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class B2bAuthService {
@@ -28,48 +31,89 @@ public class B2bAuthService {
     private final B2bMembershipRepository membershipRepository;
     private final B2bMembershipApplicationRepository applicationRepository;
     private final AuthCredentialRepository authCredentialRepository;
+    private final UserRepository userRepository;
     private final AuthService authService;
 
     public B2bAuthService(B2bSetupTokenRepository setupTokenRepository,
                           B2bMembershipRepository membershipRepository,
                           B2bMembershipApplicationRepository applicationRepository,
                           AuthCredentialRepository authCredentialRepository,
+                          UserRepository userRepository,
                           AuthService authService) {
         this.setupTokenRepository = setupTokenRepository;
         this.membershipRepository = membershipRepository;
         this.applicationRepository = applicationRepository;
         this.authCredentialRepository = authCredentialRepository;
+        this.userRepository = userRepository;
         this.authService = authService;
     }
 
     /**
-     * Returns the LOCAL credential for this membership's user.
-     * Self-heals: if the membership has no LOCAL credential yet (e.g. it was
-     * activated via an older code path that skipped credential creation, or
-     * the applicant only had OAuth credentials), create one now using the
-     * email from the application.
+     * Returns the LOCAL credential for this membership's user, healing any
+     * inconsistencies along the way:
+     *   1. If membership.userId points to a deleted/missing Users row, recreate
+     *      a Users row (so JWT-authenticated requests can resolve a profile).
+     *   2. If the credential exists but its user_id points at a missing Users
+     *      row, repair that link.
+     *   3. If no LOCAL credential exists, create one.
      */
     private AuthCredentials resolveOrCreateLocalCredentials(B2bMembership membership) {
-        AuthCredentials local = authCredentialRepository.findByUserId(membership.getUserId())
-                .stream()
+        B2bMembershipApplication app = applicationRepository.findById(membership.getApplicationId())
+                .orElse(null);
+        String email = app != null ? app.getContactEmail() : null;
+        String fullName = app != null ? app.getContactFullName() : null;
+
+        // Step 1: ensure Users row for membership.userId exists.
+        UUID userId = membership.getUserId();
+        Users user = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        if (user == null) {
+            user = new Users();
+            String[] nameParts = fullName == null
+                    ? new String[]{"B2B", "Member"}
+                    : fullName.trim().split("\\s+", 2);
+            user.setFirstName(nameParts[0]);
+            user.setLastName(nameParts.length > 1 ? nameParts[1] : "");
+            user.setUserType(Users.UserType.CUSTOMER);
+            user.setIsGuest(false);
+            user.setStatus("ACTIVE");
+            userRepository.save(user);
+            // Update the membership to point at the new user
+            membership.setUserId(user.getId());
+            membershipRepository.save(membership);
+            userId = user.getId();
+        }
+
+        // Step 2: find LOCAL credential — by user first, then by email as a fallback.
+        final UUID finalUserId = userId;
+        AuthCredentials local = authCredentialRepository.findByUserId(finalUserId).stream()
                 .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
                 .findFirst()
                 .orElse(null);
-        if (local != null) return local;
+        if (local == null && email != null && !email.isBlank()) {
+            local = authCredentialRepository.findByEmailAndProvider(email, "LOCAL").orElse(null);
+            if (local != null && !finalUserId.equals(local.getUserId())) {
+                // Found by email but linked to a different (probably orphan) userId — repair.
+                local.setUserId(finalUserId);
+                authCredentialRepository.save(local);
+            }
+        }
 
-        // Recover the email from the application this membership was created from.
-        String email = applicationRepository.findById(membership.getApplicationId())
-                .map(B2bMembershipApplication::getContactEmail)
-                .orElse(null);
-        if (email == null || email.isBlank()) return null;
-
-        AuthCredentials created = new AuthCredentials();
-        created.setUserId(membership.getUserId());
-        created.setEmail(email);
-        created.setProvider("LOCAL");
-        created.setIsActive(true);
-        created.setPhoneVerified(false);
-        return authCredentialRepository.save(created);
+        // Step 3: still nothing — create.
+        if (local == null) {
+            if (email == null || email.isBlank()) return null;
+            local = new AuthCredentials();
+            local.setUserId(finalUserId);
+            local.setEmail(email);
+            local.setProvider("LOCAL");
+            local.setIsActive(true);
+            local.setPhoneVerified(false);
+            local = authCredentialRepository.save(local);
+        } else if (!userRepository.existsById(local.getUserId())) {
+            // Credential exists but its user_id points nowhere — repair.
+            local.setUserId(finalUserId);
+            authCredentialRepository.save(local);
+        }
+        return local;
     }
 
     public ResponseEntity<ApiResponse<Map<String, Object>>> validateToken(String token) {
