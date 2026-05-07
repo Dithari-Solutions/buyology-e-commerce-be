@@ -80,15 +80,23 @@ public class OrderController {
      * Cancel an order placed by the authenticated customer.
      */
     /**
-     * Settle a pending order using the customer's B2B credit balance.
-     * Requires an active B2B membership and an order total of at least AED 20,000 (live FX).
+     * Apply B2B credit to a pending order.
+     *
+     * Body: {@code { "amount": optional decimal in wallet currency }}.
+     * If {@code amount} is null/omitted, applies the full order total (capped at the wallet balance).
+     * Otherwise applies that amount (capped at order total + wallet balance), and the order
+     * remains in PENDING_PAYMENT for the remainder, which the frontend then settles via Paymob.
      */
+    public record PayWithCreditRequest(java.math.BigDecimal amount) {}
+
     @PostMapping("/{orderId}/pay-with-credit")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> payWithCredit(
             @AuthenticationPrincipal UUID userId,
-            @PathVariable UUID orderId) {
-        return b2bCreditOrderService.payOrderWithCredit(userId, orderId);
+            @PathVariable UUID orderId,
+            @RequestBody(required = false) PayWithCreditRequest body) {
+        return b2bCreditOrderService.payOrderWithCredit(
+                userId, orderId, body == null ? null : body.amount());
     }
 
     @PostMapping("/{orderId}/cancel")

@@ -47,6 +47,7 @@ public class PaymentService {
     private final CurrencyExchangeService currencyExchangeService;
     private final com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties;
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -61,7 +62,8 @@ public class PaymentService {
             ApplicationEventPublisher eventPublisher,
             CurrencyExchangeService currencyExchangeService,
             com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties,
-            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider) {
+            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider,
+            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.transactionRepo = transactionRepo;
@@ -75,6 +77,7 @@ public class PaymentService {
         this.currencyExchangeService = currencyExchangeService;
         this.paymobProperties = paymobProperties;
         this.creditPaybackProvider = creditPaybackProvider;
+        this.orderRepoProvider = orderRepoProvider;
     }
 
     // =========================================================================
@@ -94,7 +97,34 @@ public class PaymentService {
                         "No active config for method: " + req.getMethodType()));
 
         String targetCurrency = "AED";
-        BigDecimal convertedAmount = currencyExchangeService.convert(req.getAmount(), req.getCurrency(), targetCurrency);
+
+        // If the order has already had B2B credit applied, charge only the remainder.
+        BigDecimal effectiveAmount = req.getAmount();
+        if (req.getAppOrderId() != null) {
+            var order = orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null);
+            if (order != null && order.getCreditApplied() != null
+                    && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal creditInRequestCcy = order.getCreditCurrency() != null
+                        && order.getCreditCurrency().equalsIgnoreCase(req.getCurrency())
+                        ? order.getCreditApplied()
+                        : currencyExchangeService.convert(order.getCreditApplied(),
+                                order.getCreditCurrency(), req.getCurrency());
+                effectiveAmount = req.getAmount()
+                        .subtract(creditInRequestCcy)
+                        .max(BigDecimal.ZERO)
+                        .setScale(2, java.math.RoundingMode.HALF_UP);
+                if (effectiveAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalStateException(
+                            "Order is already fully settled by B2B credit; nothing to charge");
+                }
+                log.info("[PAYMENT] Credit-applied order {}: charging {} {} (was {} {} before credit of {} {})",
+                        req.getAppOrderId(), effectiveAmount, req.getCurrency(),
+                        req.getAmount(), req.getCurrency(),
+                        order.getCreditApplied(), order.getCreditCurrency());
+            }
+        }
+
+        BigDecimal convertedAmount = currencyExchangeService.convert(effectiveAmount, req.getCurrency(), targetCurrency);
 
         long amountCents = convertedAmount
                 .multiply(BigDecimal.valueOf(100))

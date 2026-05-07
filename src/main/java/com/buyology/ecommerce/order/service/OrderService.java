@@ -1043,6 +1043,8 @@ public class OrderService {
         res.setDiscount(o.getDiscount());
         res.setTotalAmount(o.getTotalAmount());
         res.setCurrency(o.getCurrency());
+        res.setCreditApplied(o.getCreditApplied());
+        res.setCreditCurrency(o.getCreditCurrency());
         res.setCountryCode(o.getCountryCode());
         res.setCouponCode(o.getCouponCode());
         res.setTrackingCode(o.getTrackingCode());

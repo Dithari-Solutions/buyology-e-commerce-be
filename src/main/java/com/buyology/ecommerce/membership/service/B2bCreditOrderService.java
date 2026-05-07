@@ -3,9 +3,11 @@ package com.buyology.ecommerce.membership.service;
 import com.buyology.ecommerce.common.config.PlatformConfigService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
+import com.buyology.ecommerce.membership.domain.B2bCountry;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
 import com.buyology.ecommerce.membership.domain.CreditUsage;
 import com.buyology.ecommerce.membership.domain.Wallet;
+import com.buyology.ecommerce.membership.repository.B2bCountryRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.membership.repository.CreditUsageRepository;
 import com.buyology.ecommerce.membership.repository.WalletRepository;
@@ -35,6 +37,7 @@ public class B2bCreditOrderService {
 
     private final OrderRepository orderRepository;
     private final B2bMembershipRepository membershipRepository;
+    private final B2bCountryRepository countryRepository;
     private final WalletRepository walletRepository;
     private final WalletService walletService;
     private final CreditUsageRepository creditUsageRepository;
@@ -44,6 +47,7 @@ public class B2bCreditOrderService {
     public B2bCreditOrderService(
             OrderRepository orderRepository,
             B2bMembershipRepository membershipRepository,
+            B2bCountryRepository countryRepository,
             WalletRepository walletRepository,
             WalletService walletService,
             CreditUsageRepository creditUsageRepository,
@@ -51,6 +55,7 @@ public class B2bCreditOrderService {
             PlatformConfigService platformConfigService) {
         this.orderRepository = orderRepository;
         this.membershipRepository = membershipRepository;
+        this.countryRepository = countryRepository;
         this.walletRepository = walletRepository;
         this.walletService = walletService;
         this.creditUsageRepository = creditUsageRepository;
@@ -58,8 +63,16 @@ public class B2bCreditOrderService {
         this.platformConfigService = platformConfigService;
     }
 
+    /**
+     * Pay (fully or partially) for an order using B2B credit.
+     *
+     * @param requestedAmount amount of credit to apply (in wallet currency).
+     *                        If null, applies the lesser of the order total and the wallet balance.
+     */
     @Transactional
-    public ResponseEntity<ApiResponse<Map<String, Object>>> payOrderWithCredit(UUID userId, UUID orderId) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> payOrderWithCredit(
+            UUID userId, UUID orderId, BigDecimal requestedAmount) {
+
         Order order = orderRepository.findByIdAndUserId(orderId, userId).orElse(null);
         if (order == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Order not found");
@@ -67,6 +80,9 @@ public class B2bCreditOrderService {
         if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
             return ApiResponse.failure(HttpStatus.CONFLICT,
                     "Order is not awaiting payment (status: " + order.getStatus() + ")");
+        }
+        if (order.getCreditApplied() != null && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Credit has already been applied to this order");
         }
 
         B2bMembership membership = membershipRepository.findByUserId(userId).orElse(null);
@@ -78,42 +94,58 @@ public class B2bCreditOrderService {
                     "Membership is not active (status: " + membership.getStatus() + ")");
         }
 
-        // Min-order check: convert order total to AED, must be >= 20K
-        BigDecimal totalInAed = BASE_CURRENCY.equalsIgnoreCase(order.getCurrency())
-                ? order.getTotalAmount()
-                : currencyExchangeService.convert(order.getTotalAmount(), order.getCurrency(), BASE_CURRENCY);
-        if (totalInAed.compareTo(WalletService.B2B_MIN_ORDER_AED) < 0) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
-                    "B2B credit can only be used on orders of AED 20,000 or more (this order: AED "
-                            + totalInAed.setScale(2, RoundingMode.HALF_UP) + ")");
-        }
-
-        // Convert order total to wallet currency for deduction + ledger
         Wallet wallet = walletRepository.findByUserId(userId).orElse(null);
         if (wallet == null) {
             return ApiResponse.failure(HttpStatus.CONFLICT, "Wallet not found for member");
         }
-        BigDecimal amountInWalletCurrency = wallet.getCurrency().equalsIgnoreCase(order.getCurrency())
-                ? order.getTotalAmount()
-                : currencyExchangeService.convert(order.getTotalAmount(), order.getCurrency(), wallet.getCurrency())
-                    .setScale(2, RoundingMode.HALF_UP);
+        if (wallet.getBalance() == null || wallet.getBalance().compareTo(BigDecimal.ZERO) <= 0) {
+            return ApiResponse.failure(HttpStatus.PAYMENT_REQUIRED, "No credit available");
+        }
 
-        if (wallet.getBalance().compareTo(amountInWalletCurrency) < 0) {
-            return ApiResponse.failure(HttpStatus.PAYMENT_REQUIRED,
-                    "Insufficient credit. Available: " + wallet.getBalance() + " " + wallet.getCurrency());
+        // Order total expressed in the wallet's currency
+        BigDecimal orderTotalInWalletCcy = wallet.getCurrency().equalsIgnoreCase(order.getCurrency())
+                ? order.getTotalAmount()
+                : currencyExchangeService
+                        .convert(order.getTotalAmount(), order.getCurrency(), wallet.getCurrency())
+                        .setScale(2, RoundingMode.HALF_UP);
+
+        // Min-order check — per-country threshold first, AED equivalent fallback
+        ResponseEntity<ApiResponse<Map<String, Object>>> rejected =
+                checkMinOrder(wallet, order, orderTotalInWalletCcy);
+        if (rejected != null) return rejected;
+
+        // Resolve how much credit to apply:
+        //  - requested = null  → apply min(orderTotal, balance)  (full)
+        //  - requested > 0     → apply min(requested, orderTotal, balance)
+        BigDecimal creditToApply;
+        if (requestedAmount == null || requestedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            creditToApply = orderTotalInWalletCcy.min(wallet.getBalance());
+        } else {
+            creditToApply = requestedAmount
+                    .min(orderTotalInWalletCcy)
+                    .min(wallet.getBalance());
+        }
+        creditToApply = creditToApply.setScale(2, RoundingMode.HALF_UP);
+
+        if (creditToApply.compareTo(BigDecimal.ZERO) <= 0) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Credit amount must be greater than zero");
         }
 
         // Deduct + ledger entry
-        walletService.deductCredit(userId, amountInWalletCurrency,
+        walletService.deductCredit(userId, creditToApply,
                 "B2B credit used for order " + orderId, orderId.toString());
 
-        // Create the CreditUsage row that drives the payback flow
+        // Record on the order so checkout / order detail can show creditApplied
+        order.setCreditApplied(creditToApply);
+        order.setCreditCurrency(wallet.getCurrency());
+
+        // Create CreditUsage row (drives payback)
         int paybackDays = platformConfigService.getPaybackDays();
         CreditUsage usage = new CreditUsage();
         usage.setUserId(userId);
         usage.setMembershipId(membership.getId());
         usage.setOrderId(orderId);
-        usage.setAmount(amountInWalletCurrency);
+        usage.setAmount(creditToApply);
         usage.setCurrency(wallet.getCurrency());
         usage.setStatus(CreditUsage.Status.OUTSTANDING);
         Instant now = Instant.now();
@@ -121,20 +153,73 @@ public class B2bCreditOrderService {
         usage.setDueAt(now.plus(paybackDays, ChronoUnit.DAYS));
         usage = creditUsageRepository.save(usage);
 
-        // Transition order to PAID (no PaymentTransaction — credit settles instantly)
-        order.setStatus(OrderStatus.PAID);
-        order.setPaidAt(Instant.now());
+        // Did credit cover the full order total?
+        boolean fullySettled = creditToApply.compareTo(orderTotalInWalletCcy) >= 0;
+        if (fullySettled) {
+            order.setStatus(OrderStatus.PAID);
+            order.setPaidAt(now);
+        }
+        // else: order stays PENDING_PAYMENT; checkout will charge the remainder via Paymob.
         orderRepository.save(order);
 
-        log.info("[B2B-CREDIT] Order {} settled with credit (usage {}); due in {} days",
-                orderId, usage.getId(), paybackDays);
+        log.info("[B2B-CREDIT] Order {} {} with {} {} (usage {}); due in {} days",
+                orderId,
+                fullySettled ? "fully settled" : "partially credited",
+                creditToApply, wallet.getCurrency(), usage.getId(), paybackDays);
+
+        BigDecimal remainingInWalletCcy = orderTotalInWalletCcy.subtract(creditToApply)
+                .setScale(2, RoundingMode.HALF_UP);
 
         Map<String, Object> body = new HashMap<>();
         body.put("orderId", orderId);
         body.put("creditUsageId", usage.getId());
-        body.put("amount", amountInWalletCurrency);
-        body.put("currency", wallet.getCurrency());
+        body.put("creditApplied", creditToApply);
+        body.put("creditCurrency", wallet.getCurrency());
+        body.put("remainingAmount", remainingInWalletCcy);
+        body.put("orderStatus", order.getStatus().name());
         body.put("dueAt", usage.getDueAt());
-        return ApiResponse.success(body, "Order paid using B2B credit");
+        body.put("fullySettled", fullySettled);
+        return ApiResponse.success(body,
+                fullySettled
+                        ? "Order paid in full using B2B credit"
+                        : "Credit applied; complete the remaining balance via your normal checkout");
+    }
+
+    /**
+     * Returns null if the order qualifies for credit, or a 400 ApiResponse if not.
+     * Per-country threshold (B2bCountry.minOrderAmount in wallet currency) is preferred;
+     * falls back to {@code WalletService.B2B_MIN_ORDER_AED} via live FX.
+     */
+    private ResponseEntity<ApiResponse<Map<String, Object>>> checkMinOrder(
+            Wallet wallet, Order order, BigDecimal orderTotalInWalletCcy) {
+
+        if (wallet.getCountryCode() != null) {
+            B2bCountry country = countryRepository.findByCountryCode(wallet.getCountryCode()).orElse(null);
+            if (country != null && country.getMinOrderAmount() != null) {
+                if (orderTotalInWalletCcy.compareTo(country.getMinOrderAmount()) < 0) {
+                    return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                            "B2B credit requires a minimum order of "
+                                    + country.getMinOrderAmount().setScale(2, RoundingMode.HALF_UP)
+                                    + " " + country.getCurrencyCode()
+                                    + " (this order: "
+                                    + orderTotalInWalletCcy.setScale(2, RoundingMode.HALF_UP)
+                                    + " " + wallet.getCurrency() + ")");
+                }
+                return null; // qualifies via per-country threshold
+            }
+        }
+
+        // Fallback: AED-equivalent must meet B2B_MIN_ORDER_AED
+        BigDecimal totalInAed = BASE_CURRENCY.equalsIgnoreCase(order.getCurrency())
+                ? order.getTotalAmount()
+                : currencyExchangeService.convert(order.getTotalAmount(), order.getCurrency(), BASE_CURRENCY);
+        if (totalInAed.compareTo(WalletService.B2B_MIN_ORDER_AED) < 0) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "B2B credit can only be used on orders of AED "
+                            + WalletService.B2B_MIN_ORDER_AED.setScale(0, RoundingMode.HALF_UP)
+                            + " or more (this order: AED "
+                            + totalInAed.setScale(2, RoundingMode.HALF_UP) + ")");
+        }
+        return null;
     }
 }

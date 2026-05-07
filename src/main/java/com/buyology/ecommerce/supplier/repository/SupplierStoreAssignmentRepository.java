@@ -19,4 +19,8 @@ public interface SupplierStoreAssignmentRepository extends JpaRepository<Supplie
 
     @Query("SELECT a.id.storeId FROM SupplierStoreAssignment a WHERE a.id.supplierId = :supplierId")
     List<UUID> findStoreIdsBySupplierId(@Param("supplierId") UUID supplierId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM SupplierStoreAssignment a WHERE a.id.supplierId = :supplierId AND a.id.storeId = :storeId")
+    int deleteBySupplierIdAndStoreId(@Param("supplierId") UUID supplierId, @Param("storeId") UUID storeId);
 }

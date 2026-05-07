@@ -139,6 +139,14 @@ public class Order {
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
 
+    /** B2B credit applied against this order (in {@link #creditCurrency}). */
+    @Column(name = "credit_applied", precision = 19, scale = 4)
+    private BigDecimal creditApplied;
+
+    /** Currency of the credit applied — matches the wallet currency at time of use. */
+    @Column(name = "credit_currency", length = 10)
+    private String creditCurrency;
+
     @Column(name = "country_code", length = 3)
     private String countryCode;
 
@@ -307,6 +315,12 @@ public class Order {
 
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+
+    public BigDecimal getCreditApplied() { return creditApplied; }
+    public void setCreditApplied(BigDecimal creditApplied) { this.creditApplied = creditApplied; }
+
+    public String getCreditCurrency() { return creditCurrency; }
+    public void setCreditCurrency(String creditCurrency) { this.creditCurrency = creditCurrency; }
 
     public String getCountryCode() { return countryCode; }
     public void setCountryCode(String countryCode) { this.countryCode = countryCode; }

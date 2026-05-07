@@ -32,9 +32,16 @@ public class SupplierApplicationResponse {
     private String status;
     private String rejectionReason;
     private Instant createdAt;
+    /** Set once the application has been approved and a Supplier entity exists. */
+    private UUID supplierId;
 
     public static SupplierApplicationResponse from(SupplierApplication app, String tradeLicenseUrl) {
+        return from(app, tradeLicenseUrl, null);
+    }
+
+    public static SupplierApplicationResponse from(SupplierApplication app, String tradeLicenseUrl, UUID supplierId) {
         SupplierApplicationResponse r = new SupplierApplicationResponse();
+        r.supplierId = supplierId;
         r.id = app.getId();
         r.fullName = app.getFullName();
         r.businessName = app.getBusinessName();
@@ -90,4 +97,5 @@ public class SupplierApplicationResponse {
     public String getStatus() { return status; }
     public String getRejectionReason() { return rejectionReason; }
     public Instant getCreatedAt() { return createdAt; }
+    public UUID getSupplierId() { return supplierId; }
 }

@@ -27,6 +27,13 @@ public class B2bCountry {
     @Column(name = "is_enabled", nullable = false)
     private boolean enabled = true;
 
+    /**
+     * Minimum order total (in {@link #currencyCode}) required to pay with B2B credit.
+     * If null, the system falls back to the AED-equivalent of {@code WalletService.B2B_MIN_ORDER_AED}.
+     */
+    @Column(name = "min_order_amount", precision = 19, scale = 4)
+    private java.math.BigDecimal minOrderAmount;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -54,6 +61,8 @@ public class B2bCountry {
     public void setCurrencyCode(String currencyCode) { this.currencyCode = currencyCode; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public java.math.BigDecimal getMinOrderAmount() { return minOrderAmount; }
+    public void setMinOrderAmount(java.math.BigDecimal minOrderAmount) { this.minOrderAmount = minOrderAmount; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

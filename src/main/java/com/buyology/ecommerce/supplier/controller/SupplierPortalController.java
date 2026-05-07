@@ -7,7 +7,9 @@ import com.buyology.ecommerce.review.domain.ProductReviewStats;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.supplier.service.SupplierLifecycleService;
 import com.buyology.ecommerce.supplier.service.SupplierPortalService;
+import com.buyology.ecommerce.supplier.service.SupplierProductImageService;
 import com.buyology.ecommerce.supplier.service.SupplierReviewService;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -27,13 +29,16 @@ public class SupplierPortalController {
     private final SupplierPortalService supplierPortalService;
     private final SupplierLifecycleService lifecycleService;
     private final SupplierReviewService reviewService;
+    private final SupplierProductImageService imageService;
 
     public SupplierPortalController(SupplierPortalService supplierPortalService,
                                     SupplierLifecycleService lifecycleService,
-                                    SupplierReviewService reviewService) {
+                                    SupplierReviewService reviewService,
+                                    SupplierProductImageService imageService) {
         this.supplierPortalService = supplierPortalService;
         this.lifecycleService = lifecycleService;
         this.reviewService = reviewService;
+        this.imageService = imageService;
     }
 
     @GetMapping("/stores")
@@ -62,6 +67,19 @@ public class SupplierPortalController {
     }
 
     // ── Product draft / publish / trash ──────────────────────────────────────
+
+    /**
+     * Upload product images (multipart). Validates: PNG or WebP, max 5 MB each,
+     * max 8 images total, transparent background heuristic for PNG (rejects
+     * non-bg-removed photos). Saves each to S3 and registers a ProductMedia row.
+     */
+    @PostMapping(value = "/products/{id}/images", consumes = "multipart/form-data")
+    @PreAuthorize("hasAuthority('supplier:product:update')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadProductImages(
+            @PathVariable("id") UUID id,
+            @RequestPart("files") List<MultipartFile> files) {
+        return imageService.uploadImages(id, files);
+    }
 
     @PatchMapping("/products/{id}/publish")
     @PreAuthorize("hasAuthority('supplier:product:update')")

@@ -45,6 +45,9 @@ public class OrderResponse {
     private BigDecimal discount;
     private BigDecimal totalAmount;
     private String currency;
+    /** B2B credit applied to this order, if any. */
+    private BigDecimal creditApplied;
+    private String creditCurrency;
     private String countryCode;
     private String couponCode;
 
@@ -155,6 +158,12 @@ public class OrderResponse {
 
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+
+    public BigDecimal getCreditApplied() { return creditApplied; }
+    public void setCreditApplied(BigDecimal creditApplied) { this.creditApplied = creditApplied; }
+
+    public String getCreditCurrency() { return creditCurrency; }
+    public void setCreditCurrency(String creditCurrency) { this.creditCurrency = creditCurrency; }
 
     public String getCountryCode() { return countryCode; }
     public void setCountryCode(String countryCode) { this.countryCode = countryCode; }

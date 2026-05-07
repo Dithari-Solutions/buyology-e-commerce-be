@@ -85,13 +85,19 @@ public class AdminSupplierService {
         Page<SupplierApplication> page = (status != null)
                 ? applicationRepository.findByStatus(status, pageable)
                 : applicationRepository.findAll(pageable);
-        return page.map(app -> SupplierApplicationResponse.from(app, getDocumentUrl(app.getTradeLicenseKey())));
+        return page.map(app -> SupplierApplicationResponse.from(
+                app,
+                getDocumentUrl(app.getTradeLicenseKey()),
+                supplierRepository.findByApplicationId(app.getId()).map(s -> s.getId()).orElse(null)));
     }
 
     public ResponseEntity<ApiResponse<SupplierApplicationResponse>> getApplication(UUID id) {
         return applicationRepository.findByIdAndDeletedAtIsNull(id)
                 .map(app -> ApiResponse.success(
-                        SupplierApplicationResponse.from(app, getDocumentUrl(app.getTradeLicenseKey())),
+                        SupplierApplicationResponse.from(
+                                app,
+                                getDocumentUrl(app.getTradeLicenseKey()),
+                                supplierRepository.findByApplicationId(app.getId()).map(s -> s.getId()).orElse(null)),
                         "Application found"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Application not found"));
     }

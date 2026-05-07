@@ -33,7 +33,8 @@ public class AdminB2bCountryController {
             @NotBlank @Size(min = 2, max = 2) String countryCode,
             @NotBlank String countryName,
             @NotBlank String currencyCode,
-            Boolean enabled) {}
+            Boolean enabled,
+            java.math.BigDecimal minOrderAmount) {}
 
     @PostMapping
     public ResponseEntity<ApiResponse<B2bCountry>> upsert(@org.springframework.web.bind.annotation.RequestBody CountryRequest req) {
@@ -43,6 +44,7 @@ public class AdminB2bCountryController {
         country.setCountryName(req.countryName());
         country.setCurrencyCode(req.currencyCode().toUpperCase());
         country.setEnabled(req.enabled() == null || req.enabled());
+        country.setMinOrderAmount(req.minOrderAmount());
         return ApiResponse.success(repo.save(country), "Saved");
     }
 
