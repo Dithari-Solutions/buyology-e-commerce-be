@@ -10,6 +10,7 @@ import com.buyology.ecommerce.cart.repository.CartItemRepository;
 import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.CountryCodeUtil;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
@@ -178,18 +179,20 @@ public class CartService {
         UserProfiles userProfile = userProfileRepo.findByUserId(authCredential.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
 
-        if (!itemCountryCode.equalsIgnoreCase(userProfile.getSelectedCountryCode())) {
+        String userCountry = userProfile.getSelectedCountryCode();
+        if (userCountry != null && !userCountry.isBlank()
+                && !CountryCodeUtil.isSameCountry(itemCountryCode, userCountry)) {
             log.warn("addItem rejected — country mismatch storeCountry={} homeCountry={} [authCredentialId={}]",
-                    itemCountryCode, userProfile.getSelectedCountryCode(), authCredentialId);
+                    itemCountryCode, userCountry, authCredentialId);
             return ApiResponse.failure(HttpStatus.FORBIDDEN,
-                    "You can only purchase products from stores in your current country (" + 
-                    userProfile.getSelectedCountryCode() + "). Browsing other countries is allowed, but purchase is restricted.");
+                    "You can only purchase products from stores in your current country (" +
+                    userCountry + "). Browsing other countries is allowed, but purchase is restricted.");
         }
 
         Cart cart = findOrCreateActiveCart(authCredential);
 
         // Enforce single-country carts: once a country is set, all items must match
-        if (cart.getCountryCode() != null && !cart.getCountryCode().equals(itemCountryCode)) {
+        if (cart.getCountryCode() != null && !CountryCodeUtil.isSameCountry(cart.getCountryCode(), itemCountryCode)) {
             log.warn("addItem rejected — country mismatch cartCountry={} itemCountry={} [authCredentialId={} cartId={}]",
                     cart.getCountryCode(), itemCountryCode, authCredentialId, cart.getId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
