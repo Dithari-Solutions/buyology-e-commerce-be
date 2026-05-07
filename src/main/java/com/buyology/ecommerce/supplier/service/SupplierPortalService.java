@@ -61,6 +61,14 @@ public class SupplierPortalService {
         this.productService = productService;
     }
 
+    // ── Current supplier (self) ─────────────────────────────────────────────
+
+    public ResponseEntity<ApiResponse<Supplier>> getCurrentSupplier() {
+        Supplier s = resolveCurrentSupplier();
+        if (s == null) return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier account not found");
+        return ApiResponse.success(s, "Current supplier");
+    }
+
     // ── Assigned stores ──────────────────────────────────────────────────────
 
     public ResponseEntity<ApiResponse<List<Store>>> getAssignedStores() {
@@ -85,6 +93,73 @@ public class SupplierPortalService {
                 ? productRepository.findBySupplierIdAndSupplierStatus(supplier.getId(), supplierStatus, pageable)
                 : productRepository.findBySupplierId(supplier.getId(), pageable);
         return ApiResponse.success(page, "Products");
+    }
+
+    // ── Submit product (FULL — mirrors admin /api/admin/product/create) ──────
+
+    /**
+     * Run the full admin product-creation pipeline (translations, specs, colors,
+     * variants, accessories, media) but tag the resulting product as supplier-
+     * submitted (pending review, draft, hidden) and link it to the chosen store.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.product.dto.ProductResponse>> submitProductFull(
+            com.buyology.ecommerce.product.dto.CreateProductRequest request,
+            java.util.List<org.springframework.web.multipart.MultipartFile> mediaFiles,
+            UUID storeId,
+            BigDecimal storePrice) {
+
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+        }
+        if (storeId == null) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "storeId is required");
+        }
+        if (!storeAssignmentRepository.existsBySupplierIdAndStoreId(supplier.getId(), storeId)) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN, "You are not assigned to this store");
+        }
+
+        Store store = storeRepository.findById(storeId).orElse(null);
+        if (store == null) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Store not found");
+        }
+
+        // Validate uploaded media against the supplier image rules (PNG/WebP, ≤5 MB,
+        // ≤8 images, transparent background heuristic for PNG).
+        if (mediaFiles != null && !mediaFiles.isEmpty()) {
+            try {
+                com.buyology.ecommerce.common.utils.FileValidationUtils.validateSupplierProductImages(mediaFiles);
+            } catch (com.buyology.ecommerce.common.exception.FileValidationException e) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+            }
+        }
+
+        // Force supplier moderation flags regardless of what the client posted.
+        request.setStatus("INACTIVE");
+
+        ResponseEntity<ApiResponse<com.buyology.ecommerce.product.dto.ProductResponse>> resp =
+                productService.createProductForSupplier(request, mediaFiles, supplier.getId());
+        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null
+                || resp.getBody().getData() == null) {
+            return resp;
+        }
+        UUID productId = resp.getBody().getData().getId();
+
+        // Link to the chosen store at the supplier-provided price (hidden until publish).
+        productRepository.findById(productId).ifPresent(p -> {
+            StoreProduct sp = new StoreProduct(store, p, storePrice);
+            sp.setIsActive(false);
+            storeProductRepository.save(sp);
+        });
+
+        emailService.sendSupplierProductUnderReviewEmail(
+                supplier.getContactEmail(),
+                supplier.getBusinessName(),
+                resp.getBody().getData().getSku(),
+                resp.getBody().getData().getSku());
+
+        return resp;
     }
 
     // ── Submit product ───────────────────────────────────────────────────────
@@ -178,12 +253,15 @@ public class SupplierPortalService {
 
     @Transactional
     public ResponseEntity<ApiResponse<String>> rejectProduct(UUID productId, String reason) {
+        if (reason == null || reason.trim().isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Rejection reason is required");
+        }
         Product product = productRepository.findById(productId).orElse(null);
         if (product == null || product.getSupplierId() == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier product not found");
         }
         product.setSupplierStatus(SupplierStatus.REJECTED);
-        product.setSupplierRejectionReason(reason);
+        product.setSupplierRejectionReason(reason.trim());
         productRepository.save(product);
 
         Supplier supplier = supplierRepository.findById(product.getSupplierId()).orElse(null);

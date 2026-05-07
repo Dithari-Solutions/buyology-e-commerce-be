@@ -441,6 +441,14 @@ public class AuthService {
                         "This account is not authorized to access the admin dashboard.");
             }
 
+            // Suppliers must use /auth/supplier/signin; admin endpoint is non-supplier admins only.
+            boolean isSupplier = userRoleRepository.findRoleNamesByUserId(user.getId())
+                    .stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
+            if (isSupplier) {
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "Supplier accounts must sign in via the supplier login.");
+            }
+
             if ("SUSPENDED".equals(user.getStatus())) {
                 return ApiResponse.failure(HttpStatus.FORBIDDEN,
                         "Your account has been suspended. Please contact support.");
@@ -450,6 +458,64 @@ public class AuthService {
 
         } catch (Exception e) {
             log.error("Admin signin failed for {}: {}", request.getEmail(), e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during signin");
+        }
+    }
+
+    // ── Supplier signin (rejects anyone without the SUPPLIER role) ──────────
+
+    @Transactional
+    public ResponseEntity<ApiResponse<SignInResponse>> supplierSignin(
+            SignInRequest request, HttpServletRequest httpRequest) {
+        try {
+            if (!EmailValidation.isValid(request.getEmail())) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
+            }
+
+            if (loginAttemptService.isLockedOut(request.getEmail())) {
+                return ApiResponse.failure(HttpStatus.TOO_MANY_REQUESTS,
+                        "Too many failed attempts. Try again in "
+                                + loginAttemptService.lockoutDuration().toMinutes() + " minutes.");
+            }
+
+            Optional<AuthCredentials> existing = authCredentialRepository
+                    .findByEmailAndProvider(request.getEmail(), "LOCAL");
+            if (existing.isEmpty()) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+
+            AuthCredentials authCredentials = existing.get();
+
+            if (!PasswordUtils.verifyPassword(request.getPassword(), authCredentials.getPasswordHash())) {
+                loginAttemptService.recordFailure(request.getEmail());
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+            loginAttemptService.recordSuccess(request.getEmail());
+
+            Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
+            if (user == null) {
+                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+            }
+
+            boolean isSupplier = userRoleRepository.findRoleNamesByUserId(user.getId())
+                    .stream().anyMatch("SUPPLIER"::equalsIgnoreCase);
+            if (!isSupplier) {
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "This endpoint is for supplier accounts only.");
+            }
+
+            if ("SUSPENDED".equals(user.getStatus())) {
+                return ApiResponse.failure(HttpStatus.FORBIDDEN,
+                        "Your account has been suspended. Please contact support.");
+            }
+
+            return buildSigninResponse(authCredentials, httpRequest);
+
+        } catch (Exception e) {
+            log.error("Supplier signin failed for {}: {}", request.getEmail(), e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during signin");
         }
     }

@@ -164,6 +164,38 @@ public class ProductService {
      * @param mediaFiles flat list of uploaded media files; colors claim files by index
      * @return the created product wrapped in an ApiResponse
      */
+    /**
+     * Supplier-side wrapper around {@link #createProduct} that runs the full admin
+     * product-creation pipeline (translations, specs, colors, media, variants,
+     * accessories) and then stamps supplier-specific moderation flags onto the
+     * resulting product so it stays hidden until admin approves AND the supplier
+     * publishes:
+     *   - supplierId = current supplier
+     *   - supplierStatus = PENDING_REVIEW
+     *   - isActive = false (draft)
+     *   - status = "INACTIVE" (catalog filters skip non-ACTIVE)
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<ProductResponse>> createProductForSupplier(
+            CreateProductRequest request,
+            List<MultipartFile> mediaFiles,
+            java.util.UUID supplierId) {
+        ResponseEntity<ApiResponse<ProductResponse>> resp = createProduct(request, mediaFiles);
+        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null
+                || resp.getBody().getData() == null) {
+            return resp;
+        }
+        java.util.UUID productId = resp.getBody().getData().getId();
+        Product p = productRepository.findById(productId).orElse(null);
+        if (p == null) return resp;
+        p.setSupplierId(supplierId);
+        p.setSupplierStatus(Product.SupplierStatus.PENDING_REVIEW);
+        p.setIsActive(false);
+        p.setStatus("INACTIVE");
+        productRepository.save(p);
+        return resp;
+    }
+
     @Transactional
     public ResponseEntity<ApiResponse<ProductResponse>> createProduct(
             CreateProductRequest request,

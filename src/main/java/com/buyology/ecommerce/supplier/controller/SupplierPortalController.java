@@ -30,21 +30,35 @@ public class SupplierPortalController {
     private final SupplierLifecycleService lifecycleService;
     private final SupplierReviewService reviewService;
     private final SupplierProductImageService imageService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public SupplierPortalController(SupplierPortalService supplierPortalService,
                                     SupplierLifecycleService lifecycleService,
                                     SupplierReviewService reviewService,
-                                    SupplierProductImageService imageService) {
+                                    SupplierProductImageService imageService,
+                                    com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.supplierPortalService = supplierPortalService;
         this.lifecycleService = lifecycleService;
         this.reviewService = reviewService;
         this.imageService = imageService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/stores")
     @PreAuthorize("hasAuthority('supplier:store:read')")
     public ResponseEntity<ApiResponse<List<Store>>> getAssignedStores() {
         return supplierPortalService.getAssignedStores();
+    }
+
+    /**
+     * Returns the currently authenticated supplier's own record (business name,
+     * contact info, status). Used by the dashboard profile page to show
+     * supplier-specific details when the logged-in user has the SUPPLIER role.
+     */
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.supplier.domain.Supplier>> me() {
+        return supplierPortalService.getCurrentSupplier();
     }
 
     @GetMapping("/products")
@@ -64,6 +78,28 @@ public class SupplierPortalController {
             @RequestParam BigDecimal storePrice,
             @RequestParam(required = false) String productJson) {
         return supplierPortalService.submitProduct(categoryId, storeId, sku, storePrice, productJson);
+    }
+
+    /**
+     * Full supplier product creation — mirrors {@code POST /api/admin/product/create}
+     * exactly (translations, specs, color options, variants, accessories, media)
+     * but the result is hidden (status=INACTIVE, isActive=false, supplierStatus=
+     * PENDING_REVIEW) until admin approves and the supplier publishes.
+     */
+    @PostMapping(value = "/products/full", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('supplier:product:create')")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.product.dto.ProductResponse>> submitFullProduct(
+            @RequestPart("request") String requestJson,
+            @RequestPart(value = "files", required = false) java.util.List<MultipartFile> files,
+            @RequestPart("storeId") String storeId,
+            @RequestPart("storePrice") String storePrice) throws Exception {
+        com.buyology.ecommerce.product.dto.CreateProductRequest request =
+                objectMapper.readValue(requestJson, com.buyology.ecommerce.product.dto.CreateProductRequest.class);
+        return supplierPortalService.submitProductFull(
+                request,
+                files,
+                java.util.UUID.fromString(storeId),
+                new java.math.BigDecimal(storePrice));
     }
 
     // ── Product draft / publish / trash ──────────────────────────────────────
