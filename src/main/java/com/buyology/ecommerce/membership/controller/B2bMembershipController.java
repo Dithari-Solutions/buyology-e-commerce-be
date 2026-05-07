@@ -52,13 +52,17 @@ public class B2bMembershipController {
     @GetMapping("/wallet")
     public ResponseEntity<ApiResponse<WalletResponse>> getWallet(
             @RequestParam UUID userId) {
-        return ApiResponse.success(walletService.getWallet(userId), "Wallet fetched");
+        return ApiResponse.success(
+                walletService.getWallet(membershipService.resolveUsersId(userId)),
+                "Wallet fetched");
     }
 
     @GetMapping("/wallet/transactions")
     public ResponseEntity<ApiResponse<List<WalletTransactionResponse>>> getTransactions(
             @RequestParam UUID userId) {
-        return ApiResponse.success(walletService.getTransactions(userId), "Transactions fetched");
+        return ApiResponse.success(
+                walletService.getTransactions(membershipService.resolveUsersId(userId)),
+                "Transactions fetched");
     }
 
     // ── Self lifecycle ─────────────────────────────────────────────────────

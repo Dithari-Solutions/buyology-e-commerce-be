@@ -150,18 +150,35 @@ public class B2bMembershipService {
         return toAppResponse(app);
     }
 
-    public MembershipApplicationResponse getMyApplication(UUID userId) {
-        B2bMembershipApplication app = appRepo.findByUserId(userId)
+    public MembershipApplicationResponse getMyApplication(UUID userOrAuthCredId) {
+        UUID resolved = resolveUsersId(userOrAuthCredId);
+        B2bMembershipApplication app = appRepo.findByUserId(resolved)
                 .orElseThrow(() -> new NoSuchElementException("No application found for user"));
         return toAppResponse(app);
     }
 
-    public MembershipCardResponse getMembershipCard(UUID userId) {
-        B2bMembership membership = membershipRepo.findByUserId(userId)
+    public MembershipCardResponse getMembershipCard(UUID userOrAuthCredId) {
+        UUID resolved = resolveUsersId(userOrAuthCredId);
+        B2bMembership membership = membershipRepo.findByUserId(resolved)
                 .orElseThrow(() -> new NoSuchElementException("No active membership found"));
 
-        Optional<Wallet> wallet = walletRepo.findByUserId(userId);
+        Optional<Wallet> wallet = walletRepo.findByUserId(resolved);
         return toCardResponse(membership, wallet.orElse(null));
+    }
+
+    /**
+     * Membership endpoints historically accepted users.id, but the frontend now sends
+     * either users.id (uid) or auth_credentials.id (sub) depending on the call path.
+     * Resolve to users.id by trying both lookups so both work transparently.
+     */
+    public UUID resolveUsersId(UUID candidate) {
+        if (candidate == null) return null;
+        // Fast path: already a users.id with a membership row.
+        if (membershipRepo.existsByUserId(candidate)) return candidate;
+        // Fallback: maybe it's an auth_credentials.id — resolve via the credentials row.
+        return authCredentialRepository.findById(candidate)
+                .map(c -> c.getUserId())
+                .orElse(candidate);
     }
 
     // ── Admin endpoints ──────────────────────────────────────────────────────
