@@ -222,20 +222,17 @@ public class B2bMembershipService {
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private void activateMembership(B2bMembershipApplication app, String performedBy) {
-        // If the applicant didn't have a user account yet (anonymous apply),
-        // create a shell User + AuthCredentials so they can sign in after
-        // setting their password via the setup link in the approval email.
-        // If an AuthCredentials with the same email already exists (e.g. user
-        // signed up as a customer first), reuse it to avoid duplicate accounts.
+        // Ensure a User + LOCAL AuthCredentials exists for this applicant so they
+        // can sign in via the setup link. Two-pass: first resolve userId, then
+        // unconditionally guarantee a LOCAL credential row exists for that user.
         UUID userId = app.getUserId();
+        String email = app.getContactEmail();
         if (userId == null) {
             AuthCredentials existingCreds = authCredentialRepository
-                    .findByEmailAndProvider(app.getContactEmail(), "LOCAL")
+                    .findByEmailAndProvider(email, "LOCAL")
                     .orElse(null);
             if (existingCreds != null) {
                 userId = existingCreds.getUserId();
-                app.setUserId(userId);
-                appRepo.save(app);
             } else {
                 Users user = new Users();
                 String[] nameParts = app.getContactFullName() == null
@@ -248,17 +245,30 @@ public class B2bMembershipService {
                 user.setStatus("ACTIVE");
                 userRepository.save(user);
                 userId = user.getId();
-                app.setUserId(userId);
-                appRepo.save(app);
-
-                AuthCredentials credentials = new AuthCredentials();
-                credentials.setUserId(userId);
-                credentials.setEmail(app.getContactEmail());
-                credentials.setProvider("LOCAL");
-                credentials.setIsActive(true);
-                credentials.setPhoneVerified(false);
-                authCredentialRepository.save(credentials);
             }
+            app.setUserId(userId);
+            appRepo.save(app);
+        }
+
+        // Guarantee a LOCAL credential exists. Covers cases where:
+        //  - the applicant was logged in as an OAuth-only user when they applied
+        //  - the row was created on an older code path that skipped this step
+        AuthCredentials localCreds = authCredentialRepository.findByUserId(userId).stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .findFirst()
+                .orElse(null);
+        if (localCreds == null) {
+            localCreds = new AuthCredentials();
+            localCreds.setUserId(userId);
+            localCreds.setEmail(email);
+            localCreds.setProvider("LOCAL");
+            localCreds.setIsActive(true);
+            localCreds.setPhoneVerified(false);
+            authCredentialRepository.save(localCreds);
+        } else if ((localCreds.getEmail() == null || localCreds.getEmail().isBlank()) && email != null) {
+            // Backfill missing email so /validate-token can show the account.
+            localCreds.setEmail(email);
+            authCredentialRepository.save(localCreds);
         }
 
         B2bMembership membership;

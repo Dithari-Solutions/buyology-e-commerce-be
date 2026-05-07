@@ -7,11 +7,12 @@ import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
+import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
 import com.buyology.ecommerce.membership.domain.B2bSetupToken;
 import com.buyology.ecommerce.membership.dto.B2bSetPasswordRequest;
+import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.membership.repository.B2bSetupTokenRepository;
-import com.buyology.ecommerce.user.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,20 +26,50 @@ public class B2bAuthService {
 
     private final B2bSetupTokenRepository setupTokenRepository;
     private final B2bMembershipRepository membershipRepository;
-    private final UserRepository userRepository;
+    private final B2bMembershipApplicationRepository applicationRepository;
     private final AuthCredentialRepository authCredentialRepository;
     private final AuthService authService;
 
     public B2bAuthService(B2bSetupTokenRepository setupTokenRepository,
                           B2bMembershipRepository membershipRepository,
-                          UserRepository userRepository,
+                          B2bMembershipApplicationRepository applicationRepository,
                           AuthCredentialRepository authCredentialRepository,
                           AuthService authService) {
         this.setupTokenRepository = setupTokenRepository;
         this.membershipRepository = membershipRepository;
-        this.userRepository = userRepository;
+        this.applicationRepository = applicationRepository;
         this.authCredentialRepository = authCredentialRepository;
         this.authService = authService;
+    }
+
+    /**
+     * Returns the LOCAL credential for this membership's user.
+     * Self-heals: if the membership has no LOCAL credential yet (e.g. it was
+     * activated via an older code path that skipped credential creation, or
+     * the applicant only had OAuth credentials), create one now using the
+     * email from the application.
+     */
+    private AuthCredentials resolveOrCreateLocalCredentials(B2bMembership membership) {
+        AuthCredentials local = authCredentialRepository.findByUserId(membership.getUserId())
+                .stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .findFirst()
+                .orElse(null);
+        if (local != null) return local;
+
+        // Recover the email from the application this membership was created from.
+        String email = applicationRepository.findById(membership.getApplicationId())
+                .map(B2bMembershipApplication::getContactEmail)
+                .orElse(null);
+        if (email == null || email.isBlank()) return null;
+
+        AuthCredentials created = new AuthCredentials();
+        created.setUserId(membership.getUserId());
+        created.setEmail(email);
+        created.setProvider("LOCAL");
+        created.setIsActive(true);
+        created.setPhoneVerified(false);
+        return authCredentialRepository.save(created);
     }
 
     public ResponseEntity<ApiResponse<Map<String, Object>>> validateToken(String token) {
@@ -51,10 +82,11 @@ public class B2bAuthService {
                     if (m == null) {
                         return ApiResponse.<Map<String, Object>>failure(HttpStatus.NOT_FOUND, "Membership not found");
                     }
-                    String email = userRepository.findById(m.getUserId())
-                            .flatMap(u -> authCredentialRepository.findByUserId(u.getId()).stream().findFirst())
-                            .map(AuthCredentials::getEmail)
-                            .orElse(null);
+                    AuthCredentials creds = resolveOrCreateLocalCredentials(m);
+                    String email = creds != null
+                            ? creds.getEmail()
+                            : applicationRepository.findById(m.getApplicationId())
+                                    .map(B2bMembershipApplication::getContactEmail).orElse(null);
                     Map<String, Object> data = Map.of(
                             "valid", true,
                             "memberEmail", email == null ? "" : email,
@@ -92,8 +124,7 @@ public class B2bAuthService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Membership not found");
         }
 
-        AuthCredentials credentials = authCredentialRepository.findByUserId(membership.getUserId())
-                .stream().findFirst().orElse(null);
+        AuthCredentials credentials = resolveOrCreateLocalCredentials(membership);
         if (credentials == null) {
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Account credentials not found. Please contact support.");
