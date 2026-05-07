@@ -53,7 +53,7 @@ public class AdminSupplierService {
     private final EmailService emailService;
     private final ContaboObjectService contaboObjectService;
 
-    @Value("${app.dashboard-base-url:http://localhost:5173}")
+    @Value("${app.dashboard-base-url:https://admin-dev.dithari.com}")
     private String dashboardBaseUrl;
 
     public AdminSupplierService(
