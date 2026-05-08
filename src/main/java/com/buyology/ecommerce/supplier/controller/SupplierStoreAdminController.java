@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -38,13 +39,18 @@ public class SupplierStoreAdminController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('supplier:application:read')")
-    public ResponseEntity<ApiResponse<List<Store>>> list(@PathVariable UUID supplierId) {
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> list(@PathVariable UUID supplierId) {
         if (supplierRepo.findById(supplierId).isEmpty()) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier not found");
         }
         List<UUID> ids = assignmentRepo.findStoreIdsBySupplierId(supplierId);
         List<Store> stores = ids.isEmpty() ? List.of() : storeRepo.findAllById(ids);
-        return ApiResponse.success(stores, "Assigned stores");
+        // Project to a small DTO — Store has a LAZY @ManyToOne to Country which
+        // would trip Jackson with a ByteBuddy proxy if we returned the entity.
+        List<Map<String, Object>> body = stores.stream()
+                .map(s -> Map.<String, Object>of("id", s.getId(), "name", s.getName()))
+                .toList();
+        return ApiResponse.success(body, "Assigned stores");
     }
 
     @PostMapping("/{storeId}")
