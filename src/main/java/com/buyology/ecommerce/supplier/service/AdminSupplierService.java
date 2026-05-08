@@ -16,6 +16,8 @@ import com.buyology.ecommerce.supplier.domain.SupplierApplication.ApplicationSta
 import com.buyology.ecommerce.supplier.domain.SupplierSetupToken;
 import com.buyology.ecommerce.supplier.domain.SupplierStoreAssignment;
 import com.buyology.ecommerce.supplier.dto.SupplierApplicationResponse;
+import com.buyology.ecommerce.supplier.dto.SupplierResponse;
+import com.buyology.ecommerce.supplier.dto.SupplierUpdateRequest;
 import com.buyology.ecommerce.supplier.repository.SupplierApplicationRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierSetupTokenRepository;
@@ -219,6 +221,36 @@ public class AdminSupplierService {
                 reason);
 
         return ApiResponse.success("rejected", "Application rejected");
+    }
+
+    // ── Detail / update ─────────────────────────────────────────────────────
+
+    public ResponseEntity<ApiResponse<SupplierResponse>> getSupplier(UUID supplierId) {
+        Supplier s = supplierRepository.findById(supplierId).orElse(null);
+        if (s == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier not found");
+        }
+        return ApiResponse.success(SupplierResponse.from(s), "Supplier fetched");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<SupplierResponse>> updateSupplier(
+            UUID supplierId, SupplierUpdateRequest req) {
+        Supplier s = supplierRepository.findById(supplierId).orElse(null);
+        if (s == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Supplier not found");
+        }
+        if (req.getBusinessName() != null && !req.getBusinessName().isBlank()) {
+            s.setBusinessName(req.getBusinessName().trim());
+        }
+        if (req.getContactEmail() != null && !req.getContactEmail().isBlank()) {
+            s.setContactEmail(req.getContactEmail().trim());
+        }
+        if (req.getContactPhone() != null && !req.getContactPhone().isBlank()) {
+            s.setContactPhone(req.getContactPhone().trim());
+        }
+        supplierRepository.save(s);
+        return ApiResponse.success(SupplierResponse.from(s), "Supplier updated");
     }
 
     // ── Resend setup email ──────────────────────────────────────────────────

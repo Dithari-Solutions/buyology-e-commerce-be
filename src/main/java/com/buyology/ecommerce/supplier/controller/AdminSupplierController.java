@@ -5,6 +5,8 @@ import com.buyology.ecommerce.supplier.domain.SupplierApplication.ApplicationSta
 import com.buyology.ecommerce.supplier.dto.SupplierApplicationResponse;
 import com.buyology.ecommerce.supplier.dto.SupplierApproveRequest;
 import com.buyology.ecommerce.supplier.dto.SupplierRejectRequest;
+import com.buyology.ecommerce.supplier.dto.SupplierResponse;
+import com.buyology.ecommerce.supplier.dto.SupplierUpdateRequest;
 import com.buyology.ecommerce.supplier.service.AdminSupplierService;
 import com.buyology.ecommerce.supplier.service.SupplierLifecycleService;
 import jakarta.validation.Valid;
@@ -51,6 +53,20 @@ public class AdminSupplierController {
             @PathVariable UUID id,
             @Valid @RequestBody SupplierApproveRequest request) {
         return adminSupplierService.approveApplication(id, request.getStoreIds());
+    }
+
+    @GetMapping("/{id}/detail")
+    @PreAuthorize("hasAuthority('supplier:application:read')")
+    public ResponseEntity<ApiResponse<SupplierResponse>> getSupplier(@PathVariable UUID id) {
+        return adminSupplierService.getSupplier(id);
+    }
+
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('supplier:application:review')")
+    public ResponseEntity<ApiResponse<SupplierResponse>> updateSupplier(
+            @PathVariable UUID id,
+            @Valid @RequestBody SupplierUpdateRequest request) {
+        return adminSupplierService.updateSupplier(id, request);
     }
 
     @PostMapping("/{id}/reject")

@@ -52,6 +52,18 @@ public class AdminB2bMembershipController {
         return ApiResponse.success(membershipService.listAllMemberships(), "Memberships fetched");
     }
 
+    @GetMapping("/memberships/{id}")
+    public ResponseEntity<ApiResponse<B2bMembershipDetailResponse>> getMembership(@PathVariable UUID id) {
+        return ApiResponse.success(membershipService.getMembershipDetail(id), "Membership fetched");
+    }
+
+    @PatchMapping("/memberships/{id}")
+    public ResponseEntity<ApiResponse<MembershipCardResponse>> updateMembership(
+            @PathVariable UUID id,
+            @Valid @RequestBody B2bMembershipUpdateRequest req) {
+        return ApiResponse.success(membershipService.updateMembership(id, req), "Membership updated");
+    }
+
     // ── Wallet Management ─────────────────────────────────────────────────────
 
     @GetMapping("/wallet/{userId}")

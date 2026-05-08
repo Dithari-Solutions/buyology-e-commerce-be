@@ -1,10 +1,12 @@
 package com.buyology.ecommerce.membership.service;
 
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
+import com.buyology.ecommerce.membership.domain.B2bCountry;
 import com.buyology.ecommerce.membership.domain.Wallet;
 import com.buyology.ecommerce.membership.domain.WalletTransaction;
 import com.buyology.ecommerce.membership.dto.WalletResponse;
 import com.buyology.ecommerce.membership.dto.WalletTransactionResponse;
+import com.buyology.ecommerce.membership.repository.B2bCountryRepository;
 import com.buyology.ecommerce.membership.repository.WalletRepository;
 import com.buyology.ecommerce.membership.repository.WalletTransactionRepository;
 import org.springframework.stereotype.Service;
@@ -27,13 +29,16 @@ public class WalletService {
     private final WalletRepository walletRepo;
     private final WalletTransactionRepository txRepo;
     private final CurrencyExchangeService currencyExchangeService;
+    private final B2bCountryRepository countryRepo;
 
     public WalletService(WalletRepository walletRepo,
                          WalletTransactionRepository txRepo,
-                         CurrencyExchangeService currencyExchangeService) {
+                         CurrencyExchangeService currencyExchangeService,
+                         B2bCountryRepository countryRepo) {
         this.walletRepo = walletRepo;
         this.txRepo = txRepo;
         this.currencyExchangeService = currencyExchangeService;
+        this.countryRepo = countryRepo;
     }
 
     @Transactional
@@ -165,9 +170,34 @@ public class WalletService {
         r.setCurrency(w.getCurrency());
         r.setCountryCode(w.getCountryCode());
         r.setCreditLimit(w.getCreditLimit());
+        r.setMinOrderAmount(resolveMinOrderAmount(w));
         r.setCreatedAt(w.getCreatedAt());
         r.setUpdatedAt(w.getUpdatedAt());
         return r;
+    }
+
+    /**
+     * Minimum order amount for this wallet, expressed in the wallet's currency.
+     * Mirrors B2bCreditOrderService#checkMinOrder: per-country threshold first,
+     * else fall back to the AED-equivalent of {@link #B2B_MIN_ORDER_AED}.
+     */
+    private BigDecimal resolveMinOrderAmount(Wallet w) {
+        if (w.getCountryCode() != null) {
+            B2bCountry country = countryRepo.findByCountryCode(w.getCountryCode()).orElse(null);
+            if (country != null && country.getMinOrderAmount() != null) {
+                return country.getMinOrderAmount().setScale(2, RoundingMode.HALF_UP);
+            }
+        }
+        String currency = w.getCurrency() != null ? w.getCurrency() : BASE_CURRENCY;
+        if (BASE_CURRENCY.equalsIgnoreCase(currency)) {
+            return B2B_MIN_ORDER_AED.setScale(2, RoundingMode.HALF_UP);
+        }
+        try {
+            return currencyExchangeService.convert(B2B_MIN_ORDER_AED, BASE_CURRENCY, currency)
+                    .setScale(2, RoundingMode.HALF_UP);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private WalletTransactionResponse toTxResponse(WalletTransaction t) {

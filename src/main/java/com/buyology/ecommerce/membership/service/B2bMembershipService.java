@@ -14,6 +14,7 @@ import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepo
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.membership.repository.B2bSetupTokenRepository;
 import com.buyology.ecommerce.membership.repository.WalletRepository;
+import com.buyology.ecommerce.membership.repository.CreditUsageRepository;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +48,7 @@ public class B2bMembershipService {
     private final B2bSetupTokenRepository setupTokenRepo;
     private final UserRepository userRepository;
     private final AuthCredentialRepository authCredentialRepository;
+    private final CreditUsageRepository creditUsageRepository;
 
     @Value("${app.web-base-url:https://buyology.online}")
     private String webBaseUrl;
@@ -59,7 +61,8 @@ public class B2bMembershipService {
                                  B2bCountryRepository countryRepo,
                                  B2bSetupTokenRepository setupTokenRepo,
                                  UserRepository userRepository,
-                                 AuthCredentialRepository authCredentialRepository) {
+                                 AuthCredentialRepository authCredentialRepository,
+                                 CreditUsageRepository creditUsageRepository) {
         this.appRepo = appRepo;
         this.membershipRepo = membershipRepo;
         this.walletRepo = walletRepo;
@@ -69,6 +72,7 @@ public class B2bMembershipService {
         this.setupTokenRepo = setupTokenRepo;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
+        this.creditUsageRepository = creditUsageRepository;
     }
 
     // ── Customer endpoints ───────────────────────────────────────────────────
@@ -225,6 +229,91 @@ public class B2bMembershipService {
         }
 
         return toAppResponse(app);
+    }
+
+    /**
+     * Full detail view for the admin member-detail page.
+     */
+    public B2bMembershipDetailResponse getMembershipDetail(UUID membershipId) {
+        B2bMembership m = membershipRepo.findById(membershipId)
+                .orElseThrow(() -> new NoSuchElementException("Membership not found: " + membershipId));
+
+        B2bMembershipDetailResponse r = new B2bMembershipDetailResponse();
+        r.setId(m.getId());
+        r.setMembershipId(m.getMembershipId());
+        r.setUserId(m.getUserId());
+        r.setApplicationId(m.getApplicationId());
+        r.setCompanyName(m.getCompanyName());
+        r.setMemberName(m.getMemberName());
+        r.setStatus(m.getStatus());
+        r.setTier(m.getTier());
+        r.setValidUntil(m.getValidUntil());
+        r.setFrozenAt(m.getFrozenAt());
+        r.setFrozenBy(m.getFrozenBy());
+        r.setDeletedAt(m.getDeletedAt());
+        r.setDeletedBy(m.getDeletedBy());
+        r.setCreatedAt(m.getCreatedAt());
+        r.setUpdatedAt(m.getUpdatedAt());
+        r.setPasswordSet(hasLocalPassword(m.getUserId()));
+
+        // Resolve contact info — application is the canonical source
+        B2bMembershipApplication app = m.getApplicationId() == null
+                ? null
+                : appRepo.findById(m.getApplicationId()).orElse(null);
+        if (app != null) {
+            r.setContactEmail(app.getContactEmail());
+            r.setContactPhone(app.getContactMobile());
+        }
+        if (r.getContactEmail() == null) {
+            authCredentialRepository.findByUserId(m.getUserId()).stream()
+                    .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                    .map(AuthCredentials::getEmail)
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst()
+                    .ifPresent(r::setContactEmail);
+        }
+
+        Wallet wallet = walletRepo.findByUserId(m.getUserId()).orElse(null);
+        if (wallet != null) {
+            r.setWallet(walletService.toResponse(wallet));
+        }
+
+        // Recent wallet ledger + credit usage (capped to 20 each — UI shows the head of the list)
+        r.setRecentTransactions(walletService.getTransactions(m.getUserId()).stream()
+                .limit(20).collect(Collectors.toList()));
+        r.setRecentCreditUsages(creditUsageRepository.findByUserIdOrderByUsedAtDesc(m.getUserId()).stream()
+                .limit(20)
+                .map(CreditUsageResponse::from)
+                .collect(Collectors.toList()));
+
+        return r;
+    }
+
+    /**
+     * Apply a partial update to an existing membership. Status changes go through
+     * the lifecycle service; this only handles profile-style fields.
+     */
+    @Transactional
+    public MembershipCardResponse updateMembership(UUID membershipId, B2bMembershipUpdateRequest req) {
+        B2bMembership m = membershipRepo.findById(membershipId)
+                .orElseThrow(() -> new NoSuchElementException("Membership not found: " + membershipId));
+
+        if (req.getCompanyName() != null && !req.getCompanyName().isBlank()) {
+            m.setCompanyName(req.getCompanyName().trim());
+        }
+        if (req.getMemberName() != null && !req.getMemberName().isBlank()) {
+            m.setMemberName(req.getMemberName().trim());
+        }
+        if (req.getTier() != null) {
+            m.setTier(req.getTier());
+        }
+        if (req.getValidUntil() != null) {
+            m.setValidUntil(req.getValidUntil());
+        }
+        m = membershipRepo.save(m);
+
+        Wallet wallet = walletRepo.findByUserId(m.getUserId()).orElse(null);
+        return toCardResponse(m, wallet);
     }
 
     public List<MembershipCardResponse> listAllMemberships() {

@@ -12,6 +12,8 @@ public class WalletResponse {
     private String currency;
     private String countryCode;
     private BigDecimal creditLimit;
+    /** Minimum order total (in {@link #currency}) required to pay with B2B credit. */
+    private BigDecimal minOrderAmount;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -27,6 +29,8 @@ public class WalletResponse {
     public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
     public BigDecimal getCreditLimit() { return creditLimit; }
     public void setCreditLimit(BigDecimal creditLimit) { this.creditLimit = creditLimit; }
+    public BigDecimal getMinOrderAmount() { return minOrderAmount; }
+    public void setMinOrderAmount(BigDecimal minOrderAmount) { this.minOrderAmount = minOrderAmount; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
