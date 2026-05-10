@@ -4,7 +4,6 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.review.domain.ProductReview;
 import com.buyology.ecommerce.review.domain.ProductReviewStats;
-import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.supplier.service.SupplierLifecycleService;
 import com.buyology.ecommerce.supplier.service.SupplierPortalService;
 import com.buyology.ecommerce.supplier.service.SupplierProductImageService;
@@ -46,7 +45,7 @@ public class SupplierPortalController {
 
     @GetMapping("/stores")
     @PreAuthorize("hasAuthority('supplier:store:read')")
-    public ResponseEntity<ApiResponse<List<Store>>> getAssignedStores() {
+    public ResponseEntity<ApiResponse<List<com.buyology.ecommerce.supplier.dto.AssignedStoreResponse>>> getAssignedStores() {
         return supplierPortalService.getAssignedStores();
     }
 

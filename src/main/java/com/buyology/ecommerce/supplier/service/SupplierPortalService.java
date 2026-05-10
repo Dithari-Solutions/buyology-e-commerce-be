@@ -12,6 +12,7 @@ import com.buyology.ecommerce.store.domain.StoreProduct;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.supplier.domain.Supplier;
+import com.buyology.ecommerce.supplier.dto.AssignedStoreResponse;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierStoreAssignmentRepository;
 import com.buyology.ecommerce.product.service.ProductService;
@@ -71,13 +72,20 @@ public class SupplierPortalService {
 
     // ── Assigned stores ──────────────────────────────────────────────────────
 
-    public ResponseEntity<ApiResponse<List<Store>>> getAssignedStores() {
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<List<AssignedStoreResponse>>> getAssignedStores() {
         Supplier supplier = resolveCurrentSupplier();
         if (supplier == null) {
             return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
         }
         List<UUID> storeIds = storeAssignmentRepository.findStoreIdsBySupplierId(supplier.getId());
-        List<Store> stores = storeRepository.findAllById(storeIds);
+        List<AssignedStoreResponse> stores = storeRepository.findAllById(storeIds).stream()
+                .map(s -> new AssignedStoreResponse(
+                        s.getId(),
+                        s.getName(),
+                        s.getSlug(),
+                        s.getStatus() != null ? s.getStatus().name() : null))
+                .toList();
         return ApiResponse.success(stores, "Assigned stores");
     }
 
