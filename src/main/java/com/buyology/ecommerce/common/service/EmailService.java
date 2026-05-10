@@ -275,6 +275,107 @@ public class EmailService {
         }
     }
 
+    // ── Refund emails ────────────────────────────────────────────────────────
+
+    public void sendRefundRequestReceivedEmail(String toEmail, String customerName,
+                                               String orderNumber, String requestId) {
+        try {
+            String html = loadTemplate("static/refund-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId));
+            send(toEmail, "We've received your refund request — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund request received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundApprovedEmail(String toEmail, String customerName, String orderNumber,
+                                        String requestId, String courierFeeLocal) {
+        try {
+            String html = loadTemplate("static/refund-approved.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId))
+                    .replace("{{COURIER_FEE_LOCAL}}", nullToEmpty(courierFeeLocal));
+            send(toEmail, "Your refund request has been approved — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund approved email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundRejectedEmail(String toEmail, String customerName, String orderNumber,
+                                        String requestId, String reason) {
+        try {
+            String html = loadTemplate("static/refund-rejected.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId))
+                    .replace("{{REASON}}", nullToEmpty(reason));
+            send(toEmail, "Update on your refund request — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundMethodConfirmedEmail(String toEmail, String customerName, String orderNumber,
+                                               String requestId, String method, String instructions) {
+        try {
+            String html = loadTemplate("static/refund-method-confirmed.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId))
+                    .replace("{{METHOD}}", nullToEmpty(method))
+                    .replace("{{INSTRUCTIONS}}", nullToEmpty(instructions));
+            send(toEmail, "Return method confirmed — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund method confirmed email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundProductReceivedEmail(String toEmail, String customerName,
+                                               String orderNumber, String requestId) {
+        try {
+            String html = loadTemplate("static/refund-received.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId));
+            send(toEmail, "We've received your product — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund product received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundCompletedEmail(String toEmail, String customerName, String orderNumber,
+                                         String requestId, String amount, String currency) {
+        try {
+            String html = loadTemplate("static/refund-completed.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId))
+                    .replace("{{AMOUNT}}", nullToEmpty(amount))
+                    .replace("{{CURRENCY}}", nullToEmpty(currency));
+            send(toEmail, "Your refund has been processed — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund completed email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    public void sendRefundFailedEmail(String toEmail, String customerName,
+                                      String orderNumber, String requestId) {
+        try {
+            String html = loadTemplate("static/refund-failed.html")
+                    .replace("{{CUSTOMER_NAME}}", nullToEmpty(customerName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{REQUEST_ID}}", nullToEmpty(requestId));
+            send(toEmail, "Issue processing your refund — Buyology", html);
+        } catch (Exception e) {
+            log.warn("Could not send refund failed email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    private static String nullToEmpty(String s) { return s == null ? "" : s; }
+
     // ── Scheduled cleanup ────────────────────────────────────────────────────
 
     @Scheduled(cron = "0 0 * * * ?")
