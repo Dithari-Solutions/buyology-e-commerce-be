@@ -20,10 +20,7 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 import com.buyology.ecommerce.story.repository.StoryRepository;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.dao.DataIntegrityViolationException;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
-import com.buyology.ecommerce.story.domain.StoryLike;
-import com.buyology.ecommerce.story.domain.StoryView;
 import com.buyology.ecommerce.story.dto.StoryLikeResponse;
 import com.buyology.ecommerce.story.dto.StoryViewResponse;
 import com.buyology.ecommerce.story.repository.StoryLikeRepository;
@@ -38,17 +35,20 @@ public class StoryService {
     private final com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository;
     private final StoryViewRepository storyViewRepository;
     private final StoryLikeRepository storyLikeRepository;
+    private final StoryEngagementWriter engagementWriter;
     private final ContaboObjectService contaboObjectService;
 
     public StoryService(StoryRepository storyRepository,
                         com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository,
                         StoryViewRepository storyViewRepository,
                         StoryLikeRepository storyLikeRepository,
+                        StoryEngagementWriter engagementWriter,
                         ContaboObjectService contaboObjectService) {
         this.storyRepository = storyRepository;
         this.storyMediaRepository = storyMediaRepository;
         this.storyViewRepository = storyViewRepository;
         this.storyLikeRepository = storyLikeRepository;
+        this.engagementWriter = engagementWriter;
         this.contaboObjectService = contaboObjectService;
     }
 
@@ -209,7 +209,6 @@ public class StoryService {
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
     }
 
-    @Transactional
     public ResponseEntity<ApiResponse<StoryViewResponse>> recordView(UUID storyId, UUID userId, String viewerHash) {
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
@@ -219,19 +218,11 @@ public class StoryService {
 
         if (userId != null) {
             if (!storyViewRepository.existsByStoryIdAndUserId(storyId, userId)) {
-                try {
-                    storyViewRepository.saveAndFlush(new StoryView(storyId, userId, null));
-                } catch (DataIntegrityViolationException ignored) {
-                    // concurrent insert — treat as already recorded
-                }
+                engagementWriter.insertViewIfAbsent(storyId, userId, null);
             }
         } else if (viewerHash != null && !viewerHash.isBlank()) {
             if (!storyViewRepository.existsByStoryIdAndViewerHash(storyId, viewerHash)) {
-                try {
-                    storyViewRepository.saveAndFlush(new StoryView(storyId, null, viewerHash));
-                } catch (DataIntegrityViolationException ignored) {
-                    // concurrent insert — treat as already recorded
-                }
+                engagementWriter.insertViewIfAbsent(storyId, null, viewerHash);
             }
         } else {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Cannot identify viewer");
@@ -240,7 +231,6 @@ public class StoryService {
         return ApiResponse.success(new StoryViewResponse(count), "View recorded");
     }
 
-    @Transactional
     public ResponseEntity<ApiResponse<StoryLikeResponse>> likeStory(UUID storyId, UUID userId) {
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
@@ -248,11 +238,7 @@ public class StoryService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found.");
         }
         if (!storyLikeRepository.existsByStoryIdAndUserId(storyId, userId)) {
-            try {
-                storyLikeRepository.saveAndFlush(new StoryLike(storyId, userId));
-            } catch (DataIntegrityViolationException ignored) {
-                // concurrent like — already exists
-            }
+            engagementWriter.insertLikeIfAbsent(storyId, userId);
         }
         long count = storyLikeRepository.countByStoryId(storyId);
         return ApiResponse.success(new StoryLikeResponse(true, count), "Liked");
