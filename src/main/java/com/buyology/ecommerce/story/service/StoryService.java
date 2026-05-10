@@ -20,7 +20,13 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 import com.buyology.ecommerce.story.repository.StoryRepository;
 import com.buyology.ecommerce.story.dto.StoryTranslationRequest;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.buyology.ecommerce.story.domain.StoryNotFoundException;
+import com.buyology.ecommerce.story.domain.StoryLike;
+import com.buyology.ecommerce.story.domain.StoryView;
+import com.buyology.ecommerce.story.dto.StoryLikeResponse;
+import com.buyology.ecommerce.story.repository.StoryLikeRepository;
+import com.buyology.ecommerce.story.repository.StoryViewRepository;
 import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 
@@ -29,13 +35,19 @@ public class StoryService {
 
     private final StoryRepository storyRepository;
     private final com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository;
+    private final StoryViewRepository storyViewRepository;
+    private final StoryLikeRepository storyLikeRepository;
     private final ContaboObjectService contaboObjectService;
 
-    public StoryService(StoryRepository storyRepository, 
+    public StoryService(StoryRepository storyRepository,
                         com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository,
+                        StoryViewRepository storyViewRepository,
+                        StoryLikeRepository storyLikeRepository,
                         ContaboObjectService contaboObjectService) {
         this.storyRepository = storyRepository;
         this.storyMediaRepository = storyMediaRepository;
+        this.storyViewRepository = storyViewRepository;
+        this.storyLikeRepository = storyLikeRepository;
         this.contaboObjectService = contaboObjectService;
     }
 
@@ -156,10 +168,10 @@ public class StoryService {
     }
 
     @Transactional(readOnly = true)
-    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getPublicStories(Language language) {
+    public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getPublicStories(Language language, UUID currentUserId) {
         List<StorySummaryResponse> responses = storyRepository.findByStatus(StoryStatus.ACTIVE)
                 .stream()
-                .map(story -> toSummaryResponse(story, language))
+                .map(story -> toSummaryResponse(story, language, currentUserId))
                 .filter(r -> r != null)
                 .toList();
 
@@ -169,10 +181,10 @@ public class StoryService {
     }
 
     @Transactional(readOnly = true)
-    public ResponseEntity<ApiResponse<StoryResponse>> getPublicStoryDetails(Language language, UUID storyId) {
+    public ResponseEntity<ApiResponse<StoryResponse>> getPublicStoryDetails(Language language, UUID storyId, UUID currentUserId) {
         return storyRepository.findById(storyId)
                 .filter(story -> story.getStatus() == StoryStatus.ACTIVE)
-                .map(story -> ApiResponse.success(mapToResponse(story, language), "Story fetched successfully"))
+                .map(story -> ApiResponse.success(mapToResponse(story, language, currentUserId), "Story fetched successfully"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
     }
 
@@ -180,7 +192,7 @@ public class StoryService {
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getAdminStories(Language language) {
         List<StorySummaryResponse> responses = storyRepository.findAll()
                 .stream()
-                .map(story -> toSummaryResponse(story, language))
+                .map(story -> toSummaryResponse(story, language, null))
                 .filter(r -> r != null)
                 .toList();
 
@@ -192,11 +204,71 @@ public class StoryService {
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<StoryResponse>> getAdminStoryDetails(Language language, UUID storyId) {
         return storyRepository.findById(storyId)
-                .map(story -> ApiResponse.success(mapToResponse(story, language), "Story fetched successfully"))
+                .map(story -> ApiResponse.success(mapToResponse(story, language, null), "Story fetched successfully"))
                 .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found."));
     }
 
-    private StorySummaryResponse toSummaryResponse(Story story, Language language) {
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> recordView(UUID storyId, UUID userId, String viewerHash) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+        if (story.getStatus() != StoryStatus.ACTIVE) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found.");
+        }
+
+        if (userId != null) {
+            if (storyViewRepository.existsByStoryIdAndUserId(storyId, userId)) {
+                return ApiResponse.success(null, "View already recorded");
+            }
+            try {
+                storyViewRepository.save(new StoryView(storyId, userId, null));
+            } catch (DataIntegrityViolationException ignored) {
+                // concurrent insert — treat as already recorded
+            }
+        } else if (viewerHash != null && !viewerHash.isBlank()) {
+            if (storyViewRepository.existsByStoryIdAndViewerHash(storyId, viewerHash)) {
+                return ApiResponse.success(null, "View already recorded");
+            }
+            try {
+                storyViewRepository.save(new StoryView(storyId, null, viewerHash));
+            } catch (DataIntegrityViolationException ignored) {
+                // concurrent insert — treat as already recorded
+            }
+        } else {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Cannot identify viewer");
+        }
+        return ApiResponse.success(null, "View recorded");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<StoryLikeResponse>> likeStory(UUID storyId, UUID userId) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+        if (story.getStatus() != StoryStatus.ACTIVE) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Story not found.");
+        }
+        if (!storyLikeRepository.existsByStoryIdAndUserId(storyId, userId)) {
+            try {
+                storyLikeRepository.save(new StoryLike(storyId, userId));
+            } catch (DataIntegrityViolationException ignored) {
+                // concurrent like — already exists
+            }
+        }
+        long count = storyLikeRepository.countByStoryId(storyId);
+        return ApiResponse.success(new StoryLikeResponse(true, count), "Liked");
+    }
+
+    @Transactional
+    public ResponseEntity<ApiResponse<StoryLikeResponse>> unlikeStory(UUID storyId, UUID userId) {
+        if (!storyRepository.existsById(storyId)) {
+            throw new StoryNotFoundException(storyId);
+        }
+        storyLikeRepository.deleteByStoryIdAndUserId(storyId, userId);
+        long count = storyLikeRepository.countByStoryId(storyId);
+        return ApiResponse.success(new StoryLikeResponse(false, count), "Unliked");
+    }
+
+    private StorySummaryResponse toSummaryResponse(Story story, Language language, UUID currentUserId) {
         StoryTranslation translation = story.getTranslations()
                 .stream()
                 .filter(t -> t.getLanguage() == language)
@@ -216,15 +288,23 @@ public class StoryService {
                 .map(this::toMediaItemDto)
                 .toList();
 
+        long viewCount = storyViewRepository.countByStoryId(story.getId());
+        long likeCount = storyLikeRepository.countByStoryId(story.getId());
+        boolean likedByMe = currentUserId != null
+                && storyLikeRepository.existsByStoryIdAndUserId(story.getId(), currentUserId);
+
         return new StorySummaryResponse(
                 story.getId(),
                 translation.getTitle(),
                 contaboObjectService.getPresignedUrl(story.getThumbnailUrl()),
                 story.getStatus().name(),
-                mediaItems);
+                mediaItems,
+                viewCount,
+                likeCount,
+                likedByMe);
     }
 
-    private StoryResponse mapToResponse(Story story, Language language) {
+    private StoryResponse mapToResponse(Story story, Language language, UUID currentUserId) {
         StoryResponse response = new StoryResponse();
         response.setId(story.getId());
         response.setThumbnailUrl(contaboObjectService.getPresignedUrl(story.getThumbnailUrl()));
@@ -247,6 +327,11 @@ public class StoryService {
                     .map(this::toMediaItemDto)
                     .toList());
         }
+
+        response.setViewCount(storyViewRepository.countByStoryId(story.getId()));
+        response.setLikeCount(storyLikeRepository.countByStoryId(story.getId()));
+        response.setLikedByMe(currentUserId != null
+                && storyLikeRepository.existsByStoryIdAndUserId(story.getId(), currentUserId));
 
         return response;
     }

@@ -8,5 +8,8 @@ public record StorySummaryResponse(
         String title,
         String thumbnailUrl,
         String status,
-        List<StoryResponse.MediaItem> media) {
+        List<StoryResponse.MediaItem> media,
+        long viewCount,
+        long likeCount,
+        boolean likedByMe) {
 }

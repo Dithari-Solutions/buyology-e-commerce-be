@@ -17,6 +17,9 @@ public class StoryResponse {
     private String status;
     private List<MediaItem> media;
     private LocalDateTime createdAt;
+    private long viewCount;
+    private long likeCount;
+    private boolean likedByMe;
 
     public StoryResponse() {
     }
@@ -107,6 +110,30 @@ public class StoryResponse {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public long getViewCount() {
+        return viewCount;
+    }
+
+    public void setViewCount(long viewCount) {
+        this.viewCount = viewCount;
+    }
+
+    public long getLikeCount() {
+        return likeCount;
+    }
+
+    public void setLikeCount(long likeCount) {
+        this.likeCount = likeCount;
+    }
+
+    public boolean isLikedByMe() {
+        return likedByMe;
+    }
+
+    public void setLikedByMe(boolean likedByMe) {
+        this.likedByMe = likedByMe;
     }
 
     // ========================
