@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.story.dto.StoryLikeResponse;
+import com.buyology.ecommerce.story.dto.StoryViewResponse;
 import com.buyology.ecommerce.story.dto.StoryResponse;
 import com.buyology.ecommerce.story.service.StoryService;
 import com.buyology.ecommerce.common.response.ApiResponse;
@@ -44,7 +45,7 @@ public class StoryController {
 
     @Operation(summary = "Record a view for a story (authenticated by user-id or hashed IP)")
     @PostMapping("/{storyId}/view")
-    public ResponseEntity<ApiResponse<Void>> recordView(
+    public ResponseEntity<ApiResponse<StoryViewResponse>> recordView(
             @PathVariable UUID storyId,
             HttpServletRequest request) {
         UUID userId = SecurityUtils.currentUserIdOrNull();

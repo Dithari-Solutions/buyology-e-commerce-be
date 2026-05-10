@@ -25,6 +25,7 @@ import com.buyology.ecommerce.story.domain.StoryNotFoundException;
 import com.buyology.ecommerce.story.domain.StoryLike;
 import com.buyology.ecommerce.story.domain.StoryView;
 import com.buyology.ecommerce.story.dto.StoryLikeResponse;
+import com.buyology.ecommerce.story.dto.StoryViewResponse;
 import com.buyology.ecommerce.story.repository.StoryLikeRepository;
 import com.buyology.ecommerce.story.repository.StoryViewRepository;
 import com.buyology.ecommerce.common.utils.FileValidationUtils;
@@ -209,7 +210,7 @@ public class StoryService {
     }
 
     @Transactional
-    public ResponseEntity<ApiResponse<Void>> recordView(UUID storyId, UUID userId, String viewerHash) {
+    public ResponseEntity<ApiResponse<StoryViewResponse>> recordView(UUID storyId, UUID userId, String viewerHash) {
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
         if (story.getStatus() != StoryStatus.ACTIVE) {
@@ -217,27 +218,26 @@ public class StoryService {
         }
 
         if (userId != null) {
-            if (storyViewRepository.existsByStoryIdAndUserId(storyId, userId)) {
-                return ApiResponse.success(null, "View already recorded");
-            }
-            try {
-                storyViewRepository.save(new StoryView(storyId, userId, null));
-            } catch (DataIntegrityViolationException ignored) {
-                // concurrent insert — treat as already recorded
+            if (!storyViewRepository.existsByStoryIdAndUserId(storyId, userId)) {
+                try {
+                    storyViewRepository.saveAndFlush(new StoryView(storyId, userId, null));
+                } catch (DataIntegrityViolationException ignored) {
+                    // concurrent insert — treat as already recorded
+                }
             }
         } else if (viewerHash != null && !viewerHash.isBlank()) {
-            if (storyViewRepository.existsByStoryIdAndViewerHash(storyId, viewerHash)) {
-                return ApiResponse.success(null, "View already recorded");
-            }
-            try {
-                storyViewRepository.save(new StoryView(storyId, null, viewerHash));
-            } catch (DataIntegrityViolationException ignored) {
-                // concurrent insert — treat as already recorded
+            if (!storyViewRepository.existsByStoryIdAndViewerHash(storyId, viewerHash)) {
+                try {
+                    storyViewRepository.saveAndFlush(new StoryView(storyId, null, viewerHash));
+                } catch (DataIntegrityViolationException ignored) {
+                    // concurrent insert — treat as already recorded
+                }
             }
         } else {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Cannot identify viewer");
         }
-        return ApiResponse.success(null, "View recorded");
+        long count = storyViewRepository.countByStoryId(storyId);
+        return ApiResponse.success(new StoryViewResponse(count), "View recorded");
     }
 
     @Transactional
@@ -249,7 +249,7 @@ public class StoryService {
         }
         if (!storyLikeRepository.existsByStoryIdAndUserId(storyId, userId)) {
             try {
-                storyLikeRepository.save(new StoryLike(storyId, userId));
+                storyLikeRepository.saveAndFlush(new StoryLike(storyId, userId));
             } catch (DataIntegrityViolationException ignored) {
                 // concurrent like — already exists
             }
