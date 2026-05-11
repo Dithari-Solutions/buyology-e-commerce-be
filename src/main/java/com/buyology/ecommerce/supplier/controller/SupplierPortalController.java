@@ -151,7 +151,7 @@ public class SupplierPortalController {
 
     @GetMapping("/reviews")
     @PreAuthorize("hasAuthority('supplier:product:read')")
-    public ResponseEntity<ApiResponse<Page<ProductReview>>> listReviews(
+    public ResponseEntity<ApiResponse<Page<com.buyology.ecommerce.supplier.dto.SupplierReviewSummary>>> listReviews(
             @RequestParam(required = false) UUID productId,
             @PageableDefault(size = 20) Pageable pageable) {
         return reviewService.listReviewsForSupplier(productId, pageable);

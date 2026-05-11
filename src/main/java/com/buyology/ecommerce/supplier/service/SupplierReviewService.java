@@ -9,6 +9,7 @@ import com.buyology.ecommerce.review.domain.enums.ModerationStatus;
 import com.buyology.ecommerce.review.repository.ProductReviewRepository;
 import com.buyology.ecommerce.review.repository.ProductReviewStatsRepository;
 import com.buyology.ecommerce.supplier.domain.Supplier;
+import com.buyology.ecommerce.supplier.dto.SupplierReviewSummary;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -17,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -44,7 +46,8 @@ public class SupplierReviewService {
         this.statsRepository = statsRepository;
     }
 
-    public ResponseEntity<ApiResponse<Page<ProductReview>>> listReviewsForSupplier(
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<Page<SupplierReviewSummary>>> listReviewsForSupplier(
             UUID productId, Pageable pageable) {
         Supplier supplier = resolveCurrentSupplier();
         if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
@@ -57,7 +60,7 @@ public class SupplierReviewService {
             }
             Page<ProductReview> page = reviewRepository.findByProductIdAndStatusAndDeletedAtIsNull(
                     productId, ModerationStatus.APPROVED, pageable);
-            return ApiResponse.success(page, "Reviews");
+            return ApiResponse.success(page.map(SupplierReviewSummary::from), "Reviews");
         }
 
         // No productId: aggregate across all supplier products (in-memory, paginated naively)
@@ -73,7 +76,10 @@ public class SupplierReviewService {
         all.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
         int from = (int) Math.min(pageable.getOffset(), all.size());
         int to = Math.min(from + pageable.getPageSize(), all.size());
-        Page<ProductReview> page = new PageImpl<>(all.subList(from, to), pageable, all.size());
+        List<SupplierReviewSummary> mapped = all.subList(from, to).stream()
+                .map(SupplierReviewSummary::from)
+                .toList();
+        Page<SupplierReviewSummary> page = new PageImpl<>(mapped, pageable, all.size());
         return ApiResponse.success(page, "Reviews");
     }
 
