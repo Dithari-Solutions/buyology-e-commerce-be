@@ -62,7 +62,7 @@ public class SupplierPortalController {
 
     @GetMapping("/products")
     @PreAuthorize("hasAuthority('supplier:product:read')")
-    public ResponseEntity<ApiResponse<Page<Product>>> getMyProducts(
+    public ResponseEntity<ApiResponse<Page<com.buyology.ecommerce.supplier.dto.SupplierProductSummary>>> getMyProducts(
             @RequestParam(required = false) Product.SupplierStatus supplierStatus,
             @PageableDefault(size = 20) Pageable pageable) {
         return supplierPortalService.getMyProducts(supplierStatus, pageable);
@@ -136,7 +136,7 @@ public class SupplierPortalController {
 
     @GetMapping("/products/trash")
     @PreAuthorize("hasAuthority('supplier:product:read')")
-    public ResponseEntity<ApiResponse<Page<Product>>> listTrash(
+    public ResponseEntity<ApiResponse<Page<com.buyology.ecommerce.supplier.dto.SupplierProductSummary>>> listTrash(
             @PageableDefault(size = 20) Pageable pageable) {
         return supplierPortalService.listOwnTrash(pageable);
     }

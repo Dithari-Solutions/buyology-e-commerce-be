@@ -26,7 +26,7 @@ public class AdminSupplierProductController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('supplier:product:approve')")
-    public ResponseEntity<ApiResponse<Page<Product>>> listSupplierProducts(
+    public ResponseEntity<ApiResponse<Page<com.buyology.ecommerce.supplier.dto.SupplierProductSummary>>> listSupplierProducts(
             @RequestParam(required = false) Product.SupplierStatus supplierStatus,
             @RequestParam(required = false) UUID supplierId,
             @PageableDefault(size = 20) Pageable pageable) {

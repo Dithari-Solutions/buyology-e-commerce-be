@@ -13,6 +13,7 @@ import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.supplier.domain.Supplier;
 import com.buyology.ecommerce.supplier.dto.AssignedStoreResponse;
+import com.buyology.ecommerce.supplier.dto.SupplierProductSummary;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierStoreAssignmentRepository;
 import com.buyology.ecommerce.product.service.ProductService;
@@ -91,7 +92,8 @@ public class SupplierPortalService {
 
     // ── Supplier products ────────────────────────────────────────────────────
 
-    public ResponseEntity<ApiResponse<Page<Product>>> getMyProducts(
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<Page<SupplierProductSummary>>> getMyProducts(
             SupplierStatus supplierStatus, Pageable pageable) {
         Supplier supplier = resolveCurrentSupplier();
         if (supplier == null) {
@@ -100,7 +102,7 @@ public class SupplierPortalService {
         Page<Product> page = (supplierStatus != null)
                 ? productRepository.findBySupplierIdAndSupplierStatus(supplier.getId(), supplierStatus, pageable)
                 : productRepository.findBySupplierId(supplier.getId(), pageable);
-        return ApiResponse.success(page, "Products");
+        return ApiResponse.success(page.map(SupplierProductSummary::from), "Products");
     }
 
     // ── Submit product (FULL — mirrors admin /api/admin/product/create) ──────
@@ -286,7 +288,8 @@ public class SupplierPortalService {
 
     // ── Admin: list supplier products for review ─────────────────────────────
 
-    public ResponseEntity<ApiResponse<Page<Product>>> listSupplierProductsForAdmin(
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<Page<SupplierProductSummary>>> listSupplierProductsForAdmin(
             SupplierStatus supplierStatus, UUID supplierId, Pageable pageable) {
         Page<Product> page;
         if (supplierId != null && supplierStatus != null) {
@@ -298,7 +301,7 @@ public class SupplierPortalService {
         } else {
             page = productRepository.findBySupplierIdIsNotNull(pageable);
         }
-        return ApiResponse.success(page, "Supplier products");
+        return ApiResponse.success(page.map(SupplierProductSummary::from), "Supplier products");
     }
 
     // ── Supplier draft/publish toggle ────────────────────────────────────────
@@ -361,15 +364,17 @@ public class SupplierPortalService {
         return productService.softDeleteProduct(productId);
     }
 
-    public ResponseEntity<ApiResponse<Page<Product>>> listOwnTrash(Pageable pageable) {
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<Page<SupplierProductSummary>>> listOwnTrash(Pageable pageable) {
         Supplier supplier = resolveCurrentSupplier();
         if (supplier == null) return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
 
         Page<Product> all = productRepository.findBySupplierId(supplier.getId(), pageable);
-        List<Product> trashed = all.getContent().stream()
+        List<SupplierProductSummary> trashed = all.getContent().stream()
                 .filter(p -> "DELETED".equals(p.getStatus()))
+                .map(SupplierProductSummary::from)
                 .toList();
-        Page<Product> page = new org.springframework.data.domain.PageImpl<>(
+        Page<SupplierProductSummary> page = new org.springframework.data.domain.PageImpl<>(
                 trashed, pageable, trashed.size());
         return ApiResponse.success(page, "Trashed products");
     }
