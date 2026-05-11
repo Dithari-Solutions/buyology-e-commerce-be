@@ -241,11 +241,15 @@ public class SupplierPortalService {
         }
         product.setSupplierStatus(SupplierStatus.APPROVED);
         product.setStatus("ACTIVE");
+        product.setIsActive(true);
         product.setSupplierRejectionReason(null);
         productRepository.save(product);
 
-        // Approval no longer auto-publishes; the supplier must call /publish
-        // (toggles Product.isActive + StoreProduct.isActive) to make the product visible.
+        // Approval auto-publishes: flip the linked StoreProduct visible too.
+        storeProductRepository.findByProduct_Id(productId).ifPresent(sp -> {
+            sp.setIsActive(true);
+            storeProductRepository.save(sp);
+        });
 
         Supplier supplier = supplierRepository.findById(product.getSupplierId()).orElse(null);
         if (supplier != null) {
@@ -256,7 +260,7 @@ public class SupplierPortalService {
                     product.getSku());
         }
 
-        return ApiResponse.success("approved", "Product approved; ready for supplier to publish");
+        return ApiResponse.success("approved", "Product approved and published");
     }
 
     // ── Admin: reject supplier product ───────────────────────────────────────
