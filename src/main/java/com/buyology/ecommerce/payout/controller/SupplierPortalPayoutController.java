@@ -10,7 +10,6 @@ import com.buyology.ecommerce.payout.service.PayoutRequestService;
 import com.buyology.ecommerce.payout.service.SupplierPayoutAccountService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -34,9 +33,9 @@ public class SupplierPortalPayoutController {
     @GetMapping("/account")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<SupplierPayoutAccountResponse>> getAccount() {
-        return accountService.getForCurrentSupplier()
-                .map(a -> ApiResponse.success(a, "Payout account fetched"))
-                .orElseGet(() -> ApiResponse.failure(HttpStatus.NOT_FOUND, "No payout account on file"));
+        return ApiResponse.success(
+                accountService.getForCurrentSupplier().orElse(null),
+                "Payout account fetched");
     }
 
     @PutMapping("/account")
