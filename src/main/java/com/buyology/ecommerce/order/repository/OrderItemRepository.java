@@ -45,4 +45,27 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             @Param("supplierId") UUID supplierId,
             @Param("from") Instant from,
             @Param("to") Instant to);
+
+    /**
+     * Items owed to a supplier that are not yet locked into a non-rejected payout
+     * request and whose order has been delivered and is not under an active refund
+     * request. Used to compute the supplier's currently-owed payout amount.
+     */
+    @Query("""
+            SELECT i FROM OrderItem i JOIN i.order o
+            WHERE i.supplierId = :supplierId
+              AND o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.DELIVERED
+              AND NOT EXISTS (
+                  SELECT 1 FROM com.buyology.ecommerce.payout.domain.PayoutRequestOrderItem proi,
+                         com.buyology.ecommerce.payout.domain.PayoutRequest pr
+                  WHERE proi.orderItemId = i.id
+                    AND proi.payoutRequestId = pr.id
+                    AND pr.status <> com.buyology.ecommerce.payout.enums.PayoutRequestStatus.REJECTED)
+              AND NOT EXISTS (
+                  SELECT 1 FROM com.buyology.ecommerce.refund.domain.RefundRequest rr
+                  WHERE rr.orderId = o.id
+                    AND rr.status <> com.buyology.ecommerce.refund.enums.RefundRequestStatus.REJECTED
+                    AND rr.status <> com.buyology.ecommerce.refund.enums.RefundRequestStatus.FAILED)
+            """)
+    List<OrderItem> findPayoutEligibleBySupplierId(@Param("supplierId") UUID supplierId);
 }

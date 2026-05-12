@@ -27,6 +27,7 @@ import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.order.dto.*;
 import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
+import com.buyology.ecommerce.order.event.PaymentFailedEvent;
 import com.buyology.ecommerce.order.exception.OrderNotFoundException;
 import com.buyology.ecommerce.order.repository.OrderRepository;
 import com.buyology.ecommerce.order.repository.OrderTrackingEventRepository;
@@ -412,6 +413,43 @@ public class OrderService {
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
             clearCartItemsSafely(cart.getId());
         }
+    }
+
+    /**
+     * Listens for PaymentFailedEvent published by PaymentService.
+     * Transitions the matching order (if any) to FAILED status. The cart is
+     * left untouched so the customer can retry payment without losing items.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onPaymentFailed(PaymentFailedEvent event) {
+        log.info("[ORDER] PaymentFailedEvent received: transactionId={} reason={}",
+                event.getTransactionId(), event.getReason());
+
+        PaymentTransaction tx = paymentTransactionRepo.findById(event.getTransactionId())
+                .orElse(null);
+        if (tx == null) {
+            log.warn("[ORDER] No PaymentTransaction found for id={}", event.getTransactionId());
+            return;
+        }
+
+        if (tx.getAppOrderId() == null) {
+            log.info("[ORDER] PaymentFailedEvent has no appOrderId — cart-first flow, no order to update.");
+            return;
+        }
+
+        orderRepo.findById(tx.getAppOrderId()).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.PENDING_PAYMENT
+                    || order.getStatus() == OrderStatus.PROCESSING) {
+                order.setStatus(OrderStatus.FAILED);
+                order.setPaymentTransactionId(event.getTransactionId());
+                String reason = event.getReason() != null ? event.getReason() : "Payment failed";
+                appendTrackingEvent(order, OrderStatus.FAILED, reason,
+                        null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                orderRepo.save(order);
+                log.info("[ORDER] Order {} transitioned to FAILED.", order.getId());
+            }
+        });
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.payment.service;
 
 import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
+import com.buyology.ecommerce.order.event.PaymentFailedEvent;
 import com.buyology.ecommerce.payment.domain.*;
 import com.buyology.ecommerce.payment.dto.*;
 import com.buyology.ecommerce.payment.enums.PaymentMethodType;
@@ -320,6 +321,13 @@ public class PaymentService {
             if (transaction.getStatus() == PaymentStatus.SUCCESS) {
                 log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
                 eventPublisher.publishEvent(new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
+            } else if (transaction.getStatus() == PaymentStatus.FAILED
+                    || transaction.getStatus() == PaymentStatus.CANCELLED) {
+                log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
+                eventPublisher.publishEvent(new PaymentFailedEvent(
+                        transaction.getAppOrderId(),
+                        transaction.getId(),
+                        transaction.getFailureReason()));
             }
 
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, null);
