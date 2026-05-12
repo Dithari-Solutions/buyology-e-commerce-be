@@ -376,22 +376,16 @@ public class CartService {
     private Cart findOrCreateActiveCart(UUID authCredentialId) {
         return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
                 .orElseGet(() -> {
-                    // If a stale CHECKED_OUT cart exists, clear and reuse it rather than
-                    // risking a unique-constraint violation by inserting a second cart row.
+                    // If a CHECKED_OUT cart exists, payment never reached SUCCESS
+                    // (success would have marked it ABANDONED). Revert it to ACTIVE
+                    // with items intact so the customer can resume.
                     Cart stale = cartRepository
                             .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT)
                             .orElse(null);
                     if (stale != null) {
-                        log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
+                        log.debug("findOrCreateActiveCart — resuming CHECKED_OUT cart {} for authCredentialId={} (preserving items)",
                                 stale.getId(), authCredentialId);
-                        
-                        specSelectionRepository.deleteByCartId(stale.getId());
-                        cartItemRepository.deleteByCartId(stale.getId());
-                        
                         stale.setStatus(Cart.CartStatus.ACTIVE);
-                        stale.setTotalPrice(BigDecimal.ZERO);
-                        stale.setCountryCode(null);
-                        stale.setCurrency(null);
                         return cartRepository.save(stale);
                     }
                     AuthCredentials cred = authCredentialRepository.findById(authCredentialId).orElseThrow();
@@ -406,16 +400,9 @@ public class CartService {
                             .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.CHECKED_OUT)
                             .orElse(null);
                     if (stale != null) {
-                        log.debug("findOrCreateActiveCart — resetting stale CHECKED_OUT cart {} for authCredentialId={}",
+                        log.debug("findOrCreateActiveCart — resuming CHECKED_OUT cart {} for authCredentialId={} (preserving items)",
                                 stale.getId(), authCredential.getId());
-                        
-                        specSelectionRepository.deleteByCartId(stale.getId());
-                        cartItemRepository.deleteByCartId(stale.getId());
-                        
                         stale.setStatus(Cart.CartStatus.ACTIVE);
-                        stale.setTotalPrice(BigDecimal.ZERO);
-                        stale.setCountryCode(null);
-                        stale.setCurrency(null);
                         return cartRepository.save(stale);
                     }
                     return cartRepository.save(new Cart(authCredential));

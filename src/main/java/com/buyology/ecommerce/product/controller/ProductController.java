@@ -91,6 +91,21 @@ public class ProductController {
         return productService.getRelatedProducts(productId, lang, countryCode, currency, lat, lng);
     }
 
+    @Operation(summary = "Popular for you — products similar to the supplied cart item IDs",
+            description = "Aggregates related products across the categories of the supplied productIds " +
+                    "(typically the user's current cart) and returns up to 8 popular suggestions, " +
+                    "excluding the products already in the list.")
+    @GetMapping("/popular-for-you")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getPopularForYou(
+            @RequestParam(required = false) List<UUID> productIds,
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productService.getPopularForYou(productIds, lang, countryCode, currency, lat, lng);
+    }
+
     @Operation(summary = "Get active products by category")
     @GetMapping("/category/{categoryId}")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(

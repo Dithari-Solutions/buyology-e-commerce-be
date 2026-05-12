@@ -425,6 +425,46 @@ public class ProductService {
         return ApiResponse.success(responses, "Related products fetched successfully");
     }
 
+    /**
+     * Popular-for-you suggestions based on a list of product IDs (typically the
+     * user's current cart). Aggregates ACTIVE products from the categories of
+     * the supplied items, excludes the items themselves, and returns up to 8.
+     */
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getPopularForYou(
+            List<UUID> productIds, String lang, String countryCode, String currency, Double lat, Double lng) {
+        if (productIds == null || productIds.isEmpty()) {
+            return ApiResponse.success(List.of(), "No products supplied");
+        }
+
+        List<Product> seedProducts = productRepository.findAllById(productIds);
+        Set<UUID> excludeIds = new java.util.HashSet<>(productIds);
+        Set<UUID> categoryIds = seedProducts.stream()
+                .map(p -> p.getCategory() != null ? p.getCategory().getId() : null)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (categoryIds.isEmpty()) {
+            return ApiResponse.success(List.of(), "No category context");
+        }
+
+        java.util.LinkedHashMap<UUID, Product> aggregated = new java.util.LinkedHashMap<>();
+        for (UUID categoryId : categoryIds) {
+            for (Product p : productRepository.findByStatusAndCategoryId("ACTIVE", categoryId)) {
+                if (excludeIds.contains(p.getId())) continue;
+                aggregated.putIfAbsent(p.getId(), p);
+                if (aggregated.size() >= 8) break;
+            }
+            if (aggregated.size() >= 8) break;
+        }
+
+        List<Product> popular = new java.util.ArrayList<>(aggregated.values());
+        List<ProductResponse> responses = popular.stream()
+                .map(p -> toResponse(p, lang, false))
+                .toList();
+        applyBatchCountryPricing(responses, popular, countryCode, currency, lat, lng);
+        return ApiResponse.success(responses, "Popular for you fetched successfully");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
             String lang, String countryCode, String currency, Double lat, Double lng) {
         List<Product> products = (countryCode != null && !countryCode.isBlank())
