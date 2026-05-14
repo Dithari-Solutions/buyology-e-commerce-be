@@ -71,10 +71,7 @@ public class BannerService {
             validateButtonConfiguration(
                     request.getButtonUrl() != null ? request.getButtonUrl() : banner.getButtonUrl(),
                     request.getTranslation());
-            banner.clearTranslations();
-            for (BannerTranslation t : buildTranslations(request.getTranslation())) {
-                banner.addTranslation(t);
-            }
+            applyTranslations(banner, request.getTranslation());
         }
         if (request.getButtonUrl() != null) {
             banner.setButtonUrl(emptyToNull(request.getButtonUrl()));
@@ -157,6 +154,29 @@ public class BannerService {
                 : "";
         String key = "banners/" + bannerId + "/background" + ext;
         return contaboObjectService.uploadFile(key, file);
+    }
+
+    private void applyTranslations(Banner banner, BannerTranslationRequest tr) {
+        applyOne(banner, Language.AZ, tr.getTextAz(), tr.getButtonLabelAz());
+        applyOne(banner, Language.EN, tr.getTextEn(), tr.getButtonLabelEn());
+        applyOne(banner, Language.AR, tr.getTextAr(), tr.getButtonLabelAr());
+    }
+
+    private void applyOne(Banner banner, Language language, String text, String buttonLabel) {
+        BannerTranslation existing = banner.getTranslations().stream()
+                .filter(t -> t.getLanguage() == language)
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            existing.setText(emptyToNull(text));
+            existing.setButtonLabel(emptyToNull(buttonLabel));
+        } else {
+            BannerTranslation fresh = new BannerTranslation();
+            fresh.setLanguage(language);
+            fresh.setText(emptyToNull(text));
+            fresh.setButtonLabel(emptyToNull(buttonLabel));
+            banner.addTranslation(fresh);
+        }
     }
 
     private List<BannerTranslation> buildTranslations(BannerTranslationRequest tr) {
