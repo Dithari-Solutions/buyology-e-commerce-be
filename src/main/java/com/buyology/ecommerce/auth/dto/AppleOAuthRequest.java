@@ -2,8 +2,12 @@ package com.buyology.ecommerce.auth.dto;
 
 public class AppleOAuthRequest {
     private String code;
+    private String identityToken;
     private String firstName;
     private String lastName;
+
+    public String getIdentityToken() { return identityToken; }
+    public void setIdentityToken(String identityToken) { this.identityToken = identityToken; }
 
     // Getters and setters
     public String getCode() {

@@ -94,6 +94,7 @@ public class SecurityConfig {
                         ).permitAll()
                         // Allow static resources
                         .requestMatchers("/story/**", "/product/**", "/review/**", "/store/**", "/user/**", "/css/**", "/js/**", "/images/**").permitAll()
+                        .requestMatchers("/api/banner/**").permitAll()
                         // Payment webhook — must be reachable by Paymob without a JWT
                         .requestMatchers("/api/payments/webhook").permitAll()
                         // Auth endpoints are public

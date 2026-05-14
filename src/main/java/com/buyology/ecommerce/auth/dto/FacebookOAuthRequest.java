@@ -1,14 +1,14 @@
 package com.buyology.ecommerce.auth.dto;
 
 /**
- * Google OAuth callback payload.
+ * Facebook OAuth callback payload.
  * Web flow: send {@code code} (+ optional {@code redirectUri} override).
- * Mobile / native flow: send {@code idToken} obtained from the native Google Sign-In SDK.
+ * Mobile / native SDK flow: send {@code accessToken} obtained from the FB SDK.
  */
-public class GoogleOAuthRequest {
+public class FacebookOAuthRequest {
     private String code;
     private String redirectUri;
-    private String idToken;
+    private String accessToken;
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
@@ -16,6 +16,6 @@ public class GoogleOAuthRequest {
     public String getRedirectUri() { return redirectUri; }
     public void setRedirectUri(String redirectUri) { this.redirectUri = redirectUri; }
 
-    public String getIdToken() { return idToken; }
-    public void setIdToken(String idToken) { this.idToken = idToken; }
+    public String getAccessToken() { return accessToken; }
+    public void setAccessToken(String accessToken) { this.accessToken = accessToken; }
 }

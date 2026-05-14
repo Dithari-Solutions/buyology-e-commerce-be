@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.buyology.ecommerce.auth.dto.AppleOAuthRequest;
+import com.buyology.ecommerce.auth.dto.FacebookOAuthRequest;
 import com.buyology.ecommerce.auth.dto.ForgotPasswordRequest;
 import com.buyology.ecommerce.auth.dto.GoogleOAuthRequest;
 import com.buyology.ecommerce.auth.dto.OtpVerifyRequest;
@@ -15,9 +16,12 @@ import com.buyology.ecommerce.auth.dto.ResetPasswordRequest;
 import com.buyology.ecommerce.auth.dto.SignInRequest;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.dto.SignUpRequest;
+import com.buyology.ecommerce.auth.dto.SnapchatOAuthRequest;
 import com.buyology.ecommerce.auth.service.AppleOAuthService;
 import com.buyology.ecommerce.auth.service.AuthService;
+import com.buyology.ecommerce.auth.service.FacebookOAuthService;
 import com.buyology.ecommerce.auth.service.GoogleOAuthService;
+import com.buyology.ecommerce.auth.service.SnapchatOAuthService;
 import com.buyology.ecommerce.auth.service.TokenService;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.service.TokenService.RotateTokensResult;
@@ -38,15 +42,21 @@ public class AuthController {
     private final AuthService authService;
     private final GoogleOAuthService googleOAuthService;
     private final AppleOAuthService appleOAuthService;
+    private final FacebookOAuthService facebookOAuthService;
+    private final SnapchatOAuthService snapchatOAuthService;
     private final TokenService tokenService;
 
     public AuthController(AuthService authService,
             GoogleOAuthService googleOAuthService,
             AppleOAuthService appleOAuthService,
+            FacebookOAuthService facebookOAuthService,
+            SnapchatOAuthService snapchatOAuthService,
             TokenService tokenService) {
         this.authService = authService;
         this.googleOAuthService = googleOAuthService;
         this.appleOAuthService = appleOAuthService;
+        this.facebookOAuthService = facebookOAuthService;
+        this.snapchatOAuthService = snapchatOAuthService;
         this.tokenService = tokenService;
     }
 
@@ -166,22 +176,70 @@ public class AuthController {
     // ── Google OAuth ──────────────────────────────────────────────────────────
 
     @Operation(summary = "Google OAuth login",
-            description = "Handles Google OAuth2 callback. Returns access and refresh tokens.")
+            description = "Handles Google OAuth2 callback. Web flow: pass {code, redirectUri?}. " +
+                          "Native (mobile) flow: pass {idToken}. Returns access and refresh tokens.")
     @PostMapping("/google/callback")
     public ResponseEntity<ApiResponse<SignInResponse>> googleCallback(
             @RequestBody GoogleOAuthRequest request,
             HttpServletRequest httpRequest) {
-        String code = request.getCode();
-        if (code == null || code.isEmpty()) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Authorization code is required");
-        }
         try {
-            AuthCredentials creds = googleOAuthService.processGoogleOAuth(code);
+            AuthCredentials creds;
+            if (request.getIdToken() != null && !request.getIdToken().isBlank()) {
+                creds = googleOAuthService.processGoogleNativeIdToken(request.getIdToken());
+            } else if (request.getCode() != null && !request.getCode().isBlank()) {
+                creds = googleOAuthService.processGoogleOAuth(request.getCode(), request.getRedirectUri());
+            } else {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "code or idToken is required");
+            }
             return authService.buildSigninResponse(creds, httpRequest);
         } catch (IllegalArgumentException e) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
             log.error("Google OAuth callback failed: {}", e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
+        }
+    }
+
+    // ── Facebook OAuth ────────────────────────────────────────────────────────
+
+    @Operation(summary = "Facebook OAuth login",
+            description = "Handles Facebook Login. Web flow: pass {code, redirectUri?}. " +
+                          "Native (mobile SDK) flow: pass {accessToken}.")
+    @PostMapping("/facebook/callback")
+    public ResponseEntity<ApiResponse<SignInResponse>> facebookCallback(
+            @RequestBody FacebookOAuthRequest request,
+            HttpServletRequest httpRequest) {
+        boolean hasCode = request.getCode() != null && !request.getCode().isBlank();
+        boolean hasToken = request.getAccessToken() != null && !request.getAccessToken().isBlank();
+        if (!hasCode && !hasToken) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "code or accessToken is required");
+        }
+        try {
+            AuthCredentials creds = facebookOAuthService.processFacebookOAuth(request);
+            return authService.buildSigninResponse(creds, httpRequest);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            log.error("Facebook OAuth callback failed: {}", e.getMessage(), e);
+            return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
+        }
+    }
+
+    // ── Snapchat OAuth ────────────────────────────────────────────────────────
+
+    @Operation(summary = "Snapchat OAuth login",
+            description = "Handles Snapchat Login Kit (PKCE). Pass {code, codeVerifier, redirectUri?}.")
+    @PostMapping("/snapchat/callback")
+    public ResponseEntity<ApiResponse<SignInResponse>> snapchatCallback(
+            @RequestBody SnapchatOAuthRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            AuthCredentials creds = snapchatOAuthService.processSnapchatOAuth(request);
+            return authService.buildSigninResponse(creds, httpRequest);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            log.error("Snapchat OAuth callback failed: {}", e.getMessage(), e);
             return ApiResponse.failure(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong during login");
         }
     }

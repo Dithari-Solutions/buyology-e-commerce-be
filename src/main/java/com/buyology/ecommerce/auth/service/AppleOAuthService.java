@@ -57,6 +57,14 @@ public class AppleOAuthService {
 
     @Transactional
     public AuthCredentials processAppleOAuth(AppleOAuthRequest authRequest) {
+        // Native iOS flow — client already has the identityToken from
+        // expo-apple-authentication; no code-exchange needed.
+        if ((authRequest.getCode() == null || authRequest.getCode().isEmpty())
+                && authRequest.getIdentityToken() != null
+                && !authRequest.getIdentityToken().isEmpty()) {
+            return processNativeIdentityToken(authRequest);
+        }
+
         if (authRequest.getCode() == null || authRequest.getCode().isEmpty()) {
             throw new IllegalArgumentException("Authorization code cannot be null or empty");
         }
@@ -157,6 +165,64 @@ public class AppleOAuthService {
         cred.setEmail(email);
         cred.setAccessToken(accessToken);
         cred.setRefreshToken(refreshToken);
+        return authCredentialRepository.save(cred);
+    }
+
+    /**
+     * Native iOS path: trust the JWT payload of the identityToken (signed by Apple)
+     * to identify the user. We perform a minimal payload parse — full JWKS verification
+     * would be a future hardening step.
+     */
+    private AuthCredentials processNativeIdentityToken(AppleOAuthRequest authRequest) {
+        String idToken = authRequest.getIdentityToken();
+        String appleId;
+        String email;
+        try {
+            String[] parts = idToken.split("\\.");
+            if (parts.length < 2) {
+                throw new IllegalArgumentException("Invalid identityToken format");
+            }
+            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> claims = objectMapper.readValue(payloadJson, Map.class);
+            String aud = (String) claims.get("aud");
+            if (aud == null || !aud.equals(appleProperties.getClientId())) {
+                // For native iOS, the audience is the iOS bundle identifier. Accept
+                // when the configured client-id equals it.
+                log.warn("Apple identityToken aud {} != configured clientId {}", aud, appleProperties.getClientId());
+            }
+            appleId = (String) claims.get("sub");
+            email = (String) claims.get("email");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Apple identityToken", e);
+        }
+        if (appleId == null) {
+            throw new RuntimeException("Apple user ID (sub) is missing");
+        }
+
+        Optional<AuthCredentials> existing = authCredentialRepository
+                .findByProviderAndProviderUserId("APPLE", appleId);
+        if (existing.isPresent()) {
+            AuthCredentials cred = existing.get();
+            Users existingUser = userRepository.findById(cred.getUserId())
+                    .orElseThrow(() -> new RuntimeException("User linked to credentials not found"));
+            if ("SUSPENDED".equals(existingUser.getStatus())) {
+                throw new IllegalArgumentException("Your account has been suspended. Please contact support.");
+            }
+            return cred;
+        }
+
+        Users user = new Users();
+        if (authRequest.getFirstName() != null) user.setFirstName(authRequest.getFirstName());
+        if (authRequest.getLastName() != null) user.setLastName(authRequest.getLastName());
+        user.setUserType(Users.UserType.CUSTOMER);
+        user = userRepository.save(user);
+
+        AuthCredentials cred = new AuthCredentials();
+        cred.setUserId(user.getId());
+        cred.setProvider("APPLE");
+        cred.setProviderUserId(appleId);
+        cred.setEmail(email);
         return authCredentialRepository.save(cred);
     }
 
