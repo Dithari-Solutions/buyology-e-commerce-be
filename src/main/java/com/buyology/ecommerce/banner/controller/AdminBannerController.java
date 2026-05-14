@@ -9,6 +9,7 @@ import com.buyology.ecommerce.banner.dto.CreateBannerRequest;
 import com.buyology.ecommerce.banner.dto.UpdateBannerRequest;
 import com.buyology.ecommerce.banner.service.BannerService;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -64,9 +65,9 @@ public class AdminBannerController {
     @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<BannerAdminResponse>> create(
             @RequestPart("request") String requestJson,
-            @RequestPart("background") MultipartFile background,
-            @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
+            @RequestPart("background") MultipartFile background) throws Exception {
         CreateBannerRequest request = objectMapper.readValue(requestJson, CreateBannerRequest.class);
+        UUID createdBy = SecurityUtils.currentUserIdOrNull();
         Banner created = bannerService.createBanner(request, background, createdBy);
         return ApiResponse.created(bannerService.getAdminById(created.getId()), "Banner created successfully");
     }
