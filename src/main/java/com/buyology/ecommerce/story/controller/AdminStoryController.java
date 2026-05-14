@@ -18,6 +18,7 @@ import com.buyology.ecommerce.story.dto.StoryResponse;
 import org.springframework.web.multipart.MultipartFile;
 import com.buyology.ecommerce.story.service.StoryService;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.story.dto.CreateStoryRequest;
 import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
@@ -62,9 +63,9 @@ public class AdminStoryController {
     public ResponseEntity<ApiResponse<StoryResponse>> createStory(
             @org.springframework.web.bind.annotation.RequestPart("request") String requestJson,
             @org.springframework.web.bind.annotation.RequestPart("thumbnail") MultipartFile thumbnail,
-            @org.springframework.web.bind.annotation.RequestPart("mediaFiles") List<MultipartFile> mediaFiles,
-            @RequestHeader("X-User-Id") UUID createdBy) throws Exception {
+            @org.springframework.web.bind.annotation.RequestPart("mediaFiles") List<MultipartFile> mediaFiles) throws Exception {
 
+        UUID createdBy = SecurityUtils.currentUserIdOrNull();
         CreateStoryRequest request = objectMapper.readValue(requestJson, CreateStoryRequest.class);
         StoryResponse response = StoryResponse.from(
                 storyService.createStory(request, thumbnail, mediaFiles, createdBy), Language.AZ);
