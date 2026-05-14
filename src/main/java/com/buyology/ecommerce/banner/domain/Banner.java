@@ -18,6 +18,10 @@ public class Banner {
     @Column(length = 20, nullable = false)
     private BannerStatus status = BannerStatus.ACTIVE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10, nullable = false)
+    private BannerPlatform platform = BannerPlatform.WEB;
+
     @Column(name = "background_image_url", columnDefinition = "TEXT")
     private String backgroundImageUrl;
 
@@ -59,6 +63,9 @@ public class Banner {
         if (this.status == null) {
             this.status = BannerStatus.ACTIVE;
         }
+        if (this.platform == null) {
+            this.platform = BannerPlatform.WEB;
+        }
         if (this.sortOrder == null) {
             this.sortOrder = 0;
         }
@@ -85,6 +92,9 @@ public class Banner {
 
     public BannerStatus getStatus() { return status; }
     public void setStatus(BannerStatus status) { this.status = status; }
+
+    public BannerPlatform getPlatform() { return platform; }
+    public void setPlatform(BannerPlatform platform) { this.platform = platform; }
 
     public String getBackgroundImageUrl() { return backgroundImageUrl; }
     public void setBackgroundImageUrl(String backgroundImageUrl) { this.backgroundImageUrl = backgroundImageUrl; }

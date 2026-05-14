@@ -10,9 +10,13 @@ public class BannerAdminResponse {
     private String buttonUrl;
     private Integer sortOrder;
     private String status;
+    private String platform;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private BannerTranslationRequest translation;
+
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }

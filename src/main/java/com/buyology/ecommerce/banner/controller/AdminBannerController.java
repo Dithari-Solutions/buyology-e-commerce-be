@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.banner.controller;
 
 import com.buyology.ecommerce.banner.domain.Banner;
+import com.buyology.ecommerce.banner.domain.BannerPlatform;
 import com.buyology.ecommerce.banner.domain.BannerStatus;
 import com.buyology.ecommerce.banner.dto.BannerAdminResponse;
 import com.buyology.ecommerce.banner.dto.CreateBannerFormData;
@@ -38,10 +39,11 @@ public class AdminBannerController {
         this.objectMapper = objectMapper;
     }
 
-    @Operation(summary = "List all banners (admin)")
+    @Operation(summary = "List all banners (admin), optionally filtered by platform")
     @GetMapping
-    public ResponseEntity<ApiResponse<List<BannerAdminResponse>>> list() {
-        return ApiResponse.success(bannerService.listForAdmin(), "Banners fetched successfully");
+    public ResponseEntity<ApiResponse<List<BannerAdminResponse>>> list(
+            @RequestParam(required = false) BannerPlatform platform) {
+        return ApiResponse.success(bannerService.listForAdmin(platform), "Banners fetched successfully");
     }
 
     @Operation(summary = "Get one banner by id")

@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.banner.controller;
 
+import com.buyology.ecommerce.banner.domain.BannerPlatform;
 import com.buyology.ecommerce.banner.dto.BannerResponse;
 import com.buyology.ecommerce.banner.service.BannerService;
 import com.buyology.ecommerce.common.enums.Language;
@@ -25,10 +26,12 @@ public class BannerController {
         this.bannerService = bannerService;
     }
 
-    @Operation(summary = "Get active banners ordered by sortOrder")
+    @Operation(summary = "Get active banners for the given platform ordered by sortOrder")
     @GetMapping
-    public ResponseEntity<ApiResponse<List<BannerResponse>>> getBanners(@RequestParam Language language) {
-        List<BannerResponse> data = bannerService.listActiveForPublic(language);
+    public ResponseEntity<ApiResponse<List<BannerResponse>>> getBanners(
+            @RequestParam Language language,
+            @RequestParam BannerPlatform platform) {
+        List<BannerResponse> data = bannerService.listActiveForPublic(language, platform);
         return ApiResponse.success(data, data.isEmpty() ? "No banners found." : "Banners fetched successfully");
     }
 }

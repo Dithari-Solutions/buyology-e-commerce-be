@@ -2,6 +2,7 @@ package com.buyology.ecommerce.banner.service;
 
 import com.buyology.ecommerce.banner.domain.Banner;
 import com.buyology.ecommerce.banner.domain.BannerNotFoundException;
+import com.buyology.ecommerce.banner.domain.BannerPlatform;
 import com.buyology.ecommerce.banner.domain.BannerStatus;
 import com.buyology.ecommerce.banner.domain.BannerTranslation;
 import com.buyology.ecommerce.banner.dto.BannerAdminResponse;
@@ -48,6 +49,7 @@ public class BannerService {
         if (request.getStatus() != null) {
             banner.setStatus(request.getStatus());
         }
+        banner.setPlatform(request.getPlatform() != null ? request.getPlatform() : BannerPlatform.WEB);
 
         for (BannerTranslation t : buildTranslations(request.getTranslation())) {
             banner.addTranslation(t);
@@ -82,6 +84,9 @@ public class BannerService {
         }
         if (request.getStatus() != null) {
             banner.setStatus(request.getStatus());
+        }
+        if (request.getPlatform() != null) {
+            banner.setPlatform(request.getPlatform());
         }
 
         if (background != null && !background.isEmpty()) {
@@ -120,19 +125,20 @@ public class BannerService {
     }
 
     @Transactional(readOnly = true)
-    public List<BannerResponse> listActiveForPublic(Language language) {
-        return bannerRepository.findByStatusOrderBySortOrderAscCreatedAtDesc(BannerStatus.ACTIVE)
+    public List<BannerResponse> listActiveForPublic(Language language, BannerPlatform platform) {
+        return bannerRepository
+                .findByStatusAndPlatformOrderBySortOrderAscCreatedAtDesc(BannerStatus.ACTIVE, platform)
                 .stream()
                 .map(b -> toPublicResponse(b, language))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<BannerAdminResponse> listForAdmin() {
-        return bannerRepository.findAllByOrderBySortOrderAscCreatedAtDesc()
-                .stream()
-                .map(this::toAdminResponse)
-                .toList();
+    public List<BannerAdminResponse> listForAdmin(BannerPlatform platform) {
+        List<Banner> banners = (platform == null)
+                ? bannerRepository.findAllByOrderBySortOrderAscCreatedAtDesc()
+                : bannerRepository.findByPlatformOrderBySortOrderAscCreatedAtDesc(platform);
+        return banners.stream().map(this::toAdminResponse).toList();
     }
 
     @Transactional(readOnly = true)
@@ -217,6 +223,7 @@ public class BannerService {
         response.setButtonUrl(banner.getButtonUrl());
         response.setSortOrder(banner.getSortOrder());
         response.setStatus(banner.getStatus().name());
+        response.setPlatform(banner.getPlatform().name());
         response.setCreatedAt(banner.getCreatedAt());
         response.setUpdatedAt(banner.getUpdatedAt());
 

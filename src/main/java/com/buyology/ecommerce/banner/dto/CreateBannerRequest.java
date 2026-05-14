@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.banner.dto;
 
+import com.buyology.ecommerce.banner.domain.BannerPlatform;
 import com.buyology.ecommerce.banner.domain.BannerStatus;
 
 public class CreateBannerRequest {
@@ -8,6 +9,10 @@ public class CreateBannerRequest {
     private String buttonUrl;
     private Integer sortOrder;
     private BannerStatus status;
+    private BannerPlatform platform;
+
+    public BannerPlatform getPlatform() { return platform; }
+    public void setPlatform(BannerPlatform platform) { this.platform = platform; }
 
     public BannerTranslationRequest getTranslation() { return translation; }
     public void setTranslation(BannerTranslationRequest translation) { this.translation = translation; }
