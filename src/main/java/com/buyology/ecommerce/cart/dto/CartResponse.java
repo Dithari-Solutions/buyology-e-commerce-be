@@ -17,6 +17,11 @@ public class CartResponse {
     private Instant createdAt;
     private Instant updatedAt;
 
+    // Pricing policy snapshot, all expressed in {@link #currency}.
+    private BigDecimal freeShippingThreshold;
+    private BigDecimal deliveryFee;
+    private Boolean qualifiesForFreeShipping;
+
     public CartResponse() {
     }
 
@@ -46,4 +51,13 @@ public class CartResponse {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public BigDecimal getFreeShippingThreshold() { return freeShippingThreshold; }
+    public void setFreeShippingThreshold(BigDecimal freeShippingThreshold) { this.freeShippingThreshold = freeShippingThreshold; }
+
+    public BigDecimal getDeliveryFee() { return deliveryFee; }
+    public void setDeliveryFee(BigDecimal deliveryFee) { this.deliveryFee = deliveryFee; }
+
+    public Boolean getQualifiesForFreeShipping() { return qualifiesForFreeShipping; }
+    public void setQualifiesForFreeShipping(Boolean qualifiesForFreeShipping) { this.qualifiesForFreeShipping = qualifiesForFreeShipping; }
 }

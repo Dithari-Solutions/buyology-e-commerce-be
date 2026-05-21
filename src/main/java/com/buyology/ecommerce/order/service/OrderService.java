@@ -63,11 +63,11 @@ public class OrderService {
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
-    // Delivery Fee Constants (in AED)
+    // Pricing constants (in AED, the base settlement currency).
+    // Express delivery: 15 AED if subtotal < 100 AED, free otherwise.
     private static final String BASE_CURRENCY = "AED";
-    private static final BigDecimal EXPRESS_FEE_LOW_CART = new BigDecimal("15.00");
-    private static final BigDecimal EXPRESS_FEE_HIGH_CART = new BigDecimal("10.00");
-    private static final BigDecimal CART_TOTAL_THRESHOLD = new BigDecimal("150.00");
+    private static final BigDecimal EXPRESS_DELIVERY_FEE = new BigDecimal("15.00");
+    private static final BigDecimal FREE_SHIPPING_THRESHOLD = new BigDecimal("100.00");
 
     private final OrderRepository orderRepo;
     private final OrderTrackingEventRepository trackingRepo;
@@ -542,16 +542,15 @@ public class OrderService {
         if (method == DeliveryMethod.REGULAR) {
             return BigDecimal.ZERO;
         }
-
-        // Convert threshold to cart currency
-        BigDecimal threshold = currencyExchangeService.convert(CART_TOTAL_THRESHOLD, BASE_CURRENCY, currency);
-        BigDecimal fee;
-        if (subtotal.compareTo(threshold) < 0) {
-            fee = currencyExchangeService.convert(EXPRESS_FEE_LOW_CART, BASE_CURRENCY, currency);
-        } else {
-            fee = currencyExchangeService.convert(EXPRESS_FEE_HIGH_CART, BASE_CURRENCY, currency);
+        // Free express delivery once subtotal (in AED equivalent) reaches the threshold;
+        // otherwise charge 15 AED converted to the cart's display currency.
+        BigDecimal subtotalAed = BASE_CURRENCY.equalsIgnoreCase(currency)
+                ? subtotal
+                : currencyExchangeService.convert(subtotal, currency, BASE_CURRENCY);
+        if (subtotalAed.compareTo(FREE_SHIPPING_THRESHOLD) >= 0) {
+            return BigDecimal.ZERO;
         }
-        return fee;
+        return currencyExchangeService.convert(EXPRESS_DELIVERY_FEE, BASE_CURRENCY, currency);
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {

@@ -12,7 +12,11 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/game")
@@ -44,5 +48,30 @@ public class AdminGameController {
     public ResponseEntity<ApiResponse<List<QuizQuestionResponse>>> getAllQuizQuestions() {
         List<QuizQuestionResponse> questions = gameService.getAllQuizQuestions();
         return ApiResponse.success(questions, "Quiz questions retrieved successfully");
+    }
+
+    @Operation(summary = "Update a quiz question")
+    @PutMapping("/quiz/{id}")
+    public ResponseEntity<ApiResponse<QuizQuestionResponse>> updateQuizQuestion(
+            @PathVariable UUID id,
+            @Valid @RequestBody QuizQuestionRequest request) {
+        QuizQuestionResponse response = gameService.updateQuizQuestion(id, request);
+        return ApiResponse.success(response, "Quiz question updated successfully");
+    }
+
+    @Operation(summary = "Delete a quiz question")
+    @DeleteMapping("/quiz/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteQuizQuestion(@PathVariable UUID id) {
+        gameService.deleteQuizQuestion(id);
+        return ApiResponse.success(null, "Quiz question deleted successfully");
+    }
+
+    @Operation(summary = "Get the daily game configuration for a given date (defaults to today)")
+    @GetMapping("/config")
+    public ResponseEntity<ApiResponse<DailyGameConfig>> getDailyGameConfig(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        LocalDate target = date != null ? date : LocalDate.now();
+        DailyGameConfig config = gameService.getDailyGameConfig(target);
+        return ApiResponse.success(config, "Daily game configuration retrieved");
     }
 }

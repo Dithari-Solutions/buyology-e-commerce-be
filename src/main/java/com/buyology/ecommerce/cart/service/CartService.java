@@ -428,6 +428,11 @@ public class CartService {
         return new HashSet<>(ids);
     }
 
+    // Pricing policy (same source-of-truth as OrderService).
+    private static final String POLICY_BASE_CURRENCY = "AED";
+    private static final BigDecimal POLICY_FREE_SHIPPING_AED = new BigDecimal("100.00");
+    private static final BigDecimal POLICY_DELIVERY_FEE_AED = new BigDecimal("15.00");
+
     private CartResponse buildCartResponse(Cart cart, Set<UUID> nearbyStoreIds) {
         CartResponse response = new CartResponse();
         response.setId(cart.getId());
@@ -438,6 +443,28 @@ public class CartService {
         response.setCurrency(cart.getCurrency());
         response.setCreatedAt(cart.getCreatedAt());
         response.setUpdatedAt(cart.getUpdatedAt());
+
+        // Pricing policy snapshot in the cart's display currency.
+        // Rule: subtotal in AED-equivalent >= 100 AED -> free express delivery,
+        //       otherwise charge 15 AED converted to the cart currency.
+        String displayCurrency = cart.getCurrency() != null ? cart.getCurrency() : POLICY_BASE_CURRENCY;
+        try {
+            BigDecimal threshold = POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
+                    ? POLICY_FREE_SHIPPING_AED
+                    : currencyExchangeService.convert(POLICY_FREE_SHIPPING_AED, POLICY_BASE_CURRENCY, displayCurrency);
+            BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
+            boolean qualifies = subtotal.compareTo(threshold) >= 0;
+            BigDecimal deliveryFee = qualifies
+                    ? BigDecimal.ZERO
+                    : (POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
+                            ? POLICY_DELIVERY_FEE_AED
+                            : currencyExchangeService.convert(POLICY_DELIVERY_FEE_AED, POLICY_BASE_CURRENCY, displayCurrency));
+            response.setFreeShippingThreshold(threshold);
+            response.setDeliveryFee(deliveryFee);
+            response.setQualifiesForFreeShipping(qualifies);
+        } catch (Exception ignored) {
+            // FX unavailable — leave policy fields null; clients should treat that as "unknown".
+        }
 
         List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
         List<CartItemResponse> itemResponses = new ArrayList<>();

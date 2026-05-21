@@ -77,6 +77,35 @@ public class GameService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    public QuizQuestionResponse updateQuizQuestion(UUID id, QuizQuestionRequest request) {
+        QuizQuestion question = quizQuestionRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz question not found: " + id));
+
+        question.setCorrectOptionIndex(request.getCorrectOptionIndex());
+        question.setPoints(request.getPoints());
+        question.setActive(request.isActive());
+
+        question.getTranslations().clear();
+        request.getTranslations().forEach(t -> question.getTranslations().add(
+                new QuizQuestionTranslation(question, t.getLanguage(), t.getQuestionText(),
+                        t.getOptionA(), t.getOptionB(), t.getOptionC(), t.getOptionD())));
+
+        return mapToResponse(quizQuestionRepository.save(question));
+    }
+
+    @Transactional
+    public void deleteQuizQuestion(UUID id) {
+        if (!quizQuestionRepository.existsById(id)) {
+            throw new IllegalArgumentException("Quiz question not found: " + id);
+        }
+        quizQuestionRepository.deleteById(id);
+    }
+
+    public DailyGameConfig getDailyGameConfig(LocalDate date) {
+        return dailyGameConfigRepository.findByGameDate(date).orElse(null);
+    }
+
     // User Methods
 
     public GameType getDailyGameType() {
