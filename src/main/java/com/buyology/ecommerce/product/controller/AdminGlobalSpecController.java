@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.dto.CreateGlobalSpecGroupRequest;
 import com.buyology.ecommerce.product.dto.GlobalSpecGroupResponse;
+import com.buyology.ecommerce.product.dto.ReorderSpecOptionsRequest;
 import com.buyology.ecommerce.product.service.GlobalSpecService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,5 +50,13 @@ public class AdminGlobalSpecController {
     @DeleteMapping("/options/{optionId}")
     public ResponseEntity<ApiResponse<Void>> deleteOption(@PathVariable UUID optionId) {
         return globalSpecService.deleteOption(optionId);
+    }
+
+    @Operation(summary = "Reorder the options of a spec group (sets their display order)")
+    @PutMapping("/{groupId}/options/reorder")
+    public ResponseEntity<ApiResponse<List<GlobalSpecGroupResponse.OptionDto>>> reorderOptions(
+            @PathVariable UUID groupId,
+            @Valid @RequestBody ReorderSpecOptionsRequest request) {
+        return globalSpecService.reorderOptions(groupId, request.getOptionIds());
     }
 }

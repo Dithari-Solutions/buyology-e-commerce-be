@@ -294,6 +294,27 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    /**
+     * Activate / deactivate a product (admin). Toggles between ACTIVE and
+     * INACTIVE. A trashed (DELETED) product must be restored first.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> setProductStatus(UUID id, String status) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        String normalized = status == null ? "" : status.trim().toUpperCase();
+        if (!normalized.equals("ACTIVE") && !normalized.equals("INACTIVE")) {
+            throw new IllegalArgumentException("Status must be ACTIVE or INACTIVE");
+        }
+        if ("DELETED".equals(product.getStatus())) {
+            throw new IllegalArgumentException("Restore the product from trash before changing its status");
+        }
+        product.setStatus(normalized);
+        product.setIsActive("ACTIVE".equals(normalized));
+        productRepository.save(product);
+        return ApiResponse.success(null, "Product status updated to " + normalized);
+    }
+
     @Transactional
     public ResponseEntity<ApiResponse<Void>> softDeleteProduct(UUID id) {
         Product product = productRepository.findById(id)

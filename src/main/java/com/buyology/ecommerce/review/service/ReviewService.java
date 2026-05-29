@@ -85,6 +85,20 @@ public class ReviewService {
         return ApiResponse.success(data, "Reviews fetched successfully");
     }
 
+    // ── Public: Get the reviews authored by a specific user ──────────────────
+    public ResponseEntity<ApiResponse<List<ReviewResponse>>> getReviewsByUser(
+            UUID userId, int page, int size) {
+
+        Page<ProductReview> reviews = reviewRepository
+                .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+                        userId, PageRequest.of(page, size));
+
+        List<ReviewResponse> data = reviews.getContent().stream()
+                .map(r -> toResponse(r, true))
+                .toList();
+        return ApiResponse.success(data, "User reviews fetched successfully");
+    }
+
     // ── Public: Get review stats for a product ────────────────────────────────
 
     public ResponseEntity<ApiResponse<ReviewStatsResponse>> getReviewStats(UUID productId) {

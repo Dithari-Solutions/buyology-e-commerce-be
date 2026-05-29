@@ -60,14 +60,16 @@ public class GlobalSpecGroupResponse {
 
         private UUID id;
         private SpecUnit unit;
+        private int displayOrder;
         private List<OptionTranslationDto> translations;
 
         public OptionDto() {
         }
 
-        public OptionDto(UUID id, SpecUnit unit, List<OptionTranslationDto> translations) {
+        public OptionDto(UUID id, SpecUnit unit, int displayOrder, List<OptionTranslationDto> translations) {
             this.id = id;
             this.unit = unit;
+            this.displayOrder = displayOrder;
             this.translations = translations;
         }
 
@@ -76,6 +78,9 @@ public class GlobalSpecGroupResponse {
 
         public SpecUnit getUnit() { return unit; }
         public void setUnit(SpecUnit unit) { this.unit = unit; }
+
+        public int getDisplayOrder() { return displayOrder; }
+        public void setDisplayOrder(int displayOrder) { this.displayOrder = displayOrder; }
 
         public List<OptionTranslationDto> getTranslations() { return translations; }
         public void setTranslations(List<OptionTranslationDto> translations) { this.translations = translations; }

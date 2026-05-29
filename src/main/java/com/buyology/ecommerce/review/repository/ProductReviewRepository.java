@@ -27,4 +27,6 @@ public interface ProductReviewRepository extends JpaRepository<ProductReview, UU
     Page<ProductReview> findByDeletedAtIsNull(Pageable pageable);
 
     Page<ProductReview> findByStatus(ModerationStatus status, Pageable pageable);
+
+    Page<ProductReview> findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 }

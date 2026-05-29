@@ -54,9 +54,14 @@ public class GlobalSpecService {
 
         List<GlobalSpecGroupResponse.OptionDto> optionDtos = List.of();
         if (request.getOptions() != null && !request.getOptions().isEmpty()) {
-            optionDtos = request.getOptions().stream()
-                    .map(o -> saveOption(group, o))
-                    .toList();
+            List<CreateGlobalSpecGroupRequest.OptionRequest> reqOptions = request.getOptions();
+            List<GlobalSpecGroupResponse.OptionDto> built = new java.util.ArrayList<>();
+            for (int i = 0; i < reqOptions.size(); i++) {
+                CreateGlobalSpecGroupRequest.OptionRequest o = reqOptions.get(i);
+                int order = o.getDisplayOrder() != null ? o.getDisplayOrder() : i;
+                built.add(saveOption(group, o, order));
+            }
+            optionDtos = built;
         }
 
         return ApiResponse.created(toGroupResponse(group, groupTranslations, optionDtos),
@@ -67,7 +72,8 @@ public class GlobalSpecService {
         List<GlobalSpecGroupResponse> groups = groupRepository.findAll().stream()
                 .map(g -> {
                     List<GlobalSpecGroupTranslation> groupTr = groupTranslationRepository.findAllByGroup_Id(g.getId());
-                    List<GlobalSpecGroupResponse.OptionDto> opts = optionRepository.findByGroupId(g.getId()).stream()
+                    List<GlobalSpecGroupResponse.OptionDto> opts = optionRepository
+                            .findByGroupIdOrderByDisplayOrderAscCreatedAtAsc(g.getId()).stream()
                             .map(o -> {
                                 List<GlobalSpecOptionTranslation> optTr =
                                         optionTranslationRepository.findAllByOption_Id(o.getId());
@@ -85,8 +91,52 @@ public class GlobalSpecService {
             UUID groupId, CreateGlobalSpecGroupRequest.OptionRequest request) {
         GlobalSpecGroup group = groupRepository.findById(groupId)
                 .orElseThrow(() -> new IllegalArgumentException("Global spec group not found: " + groupId));
-        GlobalSpecGroupResponse.OptionDto dto = saveOption(group, request);
+        int order = request.getDisplayOrder() != null
+                ? request.getDisplayOrder()
+                : optionRepository.findMaxDisplayOrder(groupId) + 1;
+        GlobalSpecGroupResponse.OptionDto dto = saveOption(group, request, order);
         return ApiResponse.created(dto, "Option added successfully");
+    }
+
+    /**
+     * Reorders the options of a group so their display order matches the order
+     * of the supplied id list (index 0 = first). Ids must all belong to the group.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<List<GlobalSpecGroupResponse.OptionDto>>> reorderOptions(
+            UUID groupId, List<UUID> orderedOptionIds) {
+        if (!groupRepository.existsById(groupId)) {
+            throw new IllegalArgumentException("Global spec group not found: " + groupId);
+        }
+        List<GlobalSpecOption> options = optionRepository
+                .findByGroupIdOrderByDisplayOrderAscCreatedAtAsc(groupId);
+        java.util.Map<UUID, GlobalSpecOption> byId = new java.util.HashMap<>();
+        for (GlobalSpecOption o : options) {
+            byId.put(o.getId(), o);
+        }
+
+        int index = 0;
+        for (UUID optionId : orderedOptionIds) {
+            GlobalSpecOption option = byId.get(optionId);
+            if (option == null) {
+                throw new IllegalArgumentException(
+                        "Option " + optionId + " does not belong to group " + groupId);
+            }
+            option.setDisplayOrder(index++);
+        }
+        // Any option not referenced in the request keeps its relative order after the listed ones.
+        for (GlobalSpecOption o : options) {
+            if (!orderedOptionIds.contains(o.getId())) {
+                o.setDisplayOrder(index++);
+            }
+        }
+        optionRepository.saveAll(options);
+
+        List<GlobalSpecGroupResponse.OptionDto> dtos = optionRepository
+                .findByGroupIdOrderByDisplayOrderAscCreatedAtAsc(groupId).stream()
+                .map(o -> toOptionDto(o, optionTranslationRepository.findAllByOption_Id(o.getId())))
+                .toList();
+        return ApiResponse.success(dtos, "Options reordered successfully");
     }
 
     @Transactional
@@ -102,8 +152,9 @@ public class GlobalSpecService {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private GlobalSpecGroupResponse.OptionDto saveOption(
-            GlobalSpecGroup group, CreateGlobalSpecGroupRequest.OptionRequest req) {
-        GlobalSpecOption option = optionRepository.save(new GlobalSpecOption(group, req.getUnit()));
+            GlobalSpecGroup group, CreateGlobalSpecGroupRequest.OptionRequest req, int displayOrder) {
+        GlobalSpecOption option = optionRepository.save(
+                new GlobalSpecOption(group, req.getUnit(), displayOrder));
         List<GlobalSpecOptionTranslation> translations = optionTranslationRepository.saveAll(List.of(
                 new GlobalSpecOptionTranslation(option, Language.AZ, req.getValueAz()),
                 new GlobalSpecOptionTranslation(option, Language.EN, req.getValueEn()),
@@ -126,6 +177,7 @@ public class GlobalSpecService {
         List<GlobalSpecGroupResponse.OptionTranslationDto> trDtos = translations.stream()
                 .map(t -> new GlobalSpecGroupResponse.OptionTranslationDto(t.getLanguage().name(), t.getValue()))
                 .toList();
-        return new GlobalSpecGroupResponse.OptionDto(option.getId(), option.getUnit(), trDtos);
+        return new GlobalSpecGroupResponse.OptionDto(
+                option.getId(), option.getUnit(), option.getDisplayOrder(), trDtos);
     }
 }

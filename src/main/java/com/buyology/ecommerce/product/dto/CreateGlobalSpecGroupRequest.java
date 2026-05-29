@@ -58,6 +58,9 @@ public class CreateGlobalSpecGroupRequest {
 
         private SpecUnit unit;
 
+        @Schema(description = "Optional sort position within the group. Defaults to the end when omitted.")
+        private Integer displayOrder;
+
         public String getValueAz() { return valueAz; }
         public void setValueAz(String valueAz) { this.valueAz = valueAz; }
 
@@ -69,5 +72,8 @@ public class CreateGlobalSpecGroupRequest {
 
         public SpecUnit getUnit() { return unit; }
         public void setUnit(SpecUnit unit) { this.unit = unit; }
+
+        public Integer getDisplayOrder() { return displayOrder; }
+        public void setDisplayOrder(Integer displayOrder) { this.displayOrder = displayOrder; }
     }
 }

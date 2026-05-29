@@ -43,6 +43,15 @@ public class ReviewController {
         return reviewService.getApprovedReviewsByProduct(productId, page, size);
     }
 
+    @Operation(summary = "Get reviews written by a specific user")
+    @GetMapping("/user/{userId}")
+    public ResponseEntity<ApiResponse<List<ReviewResponse>>> getReviewsByUser(
+            @PathVariable UUID userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return reviewService.getReviewsByUser(userId, page, size);
+    }
+
     @Operation(summary = "Get review stats (avg rating, counts per star) for a product")
     @GetMapping("/product/{productId}/stats")
     public ResponseEntity<ApiResponse<ReviewStatsResponse>> getReviewStats(

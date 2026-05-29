@@ -21,6 +21,13 @@ public class GlobalSpecOption {
     @Column(name = "unit", length = 20)
     private SpecUnit unit;
 
+    /**
+     * Sort position of this option within its group (ascending — lower comes
+     * first). Controlled from the admin Spec Library UI.
+     */
+    @Column(name = "display_order", nullable = false)
+    private int displayOrder = 0;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -33,6 +40,12 @@ public class GlobalSpecOption {
     public GlobalSpecOption(GlobalSpecGroup group, SpecUnit unit) {
         this.group = group;
         this.unit = unit;
+    }
+
+    public GlobalSpecOption(GlobalSpecGroup group, SpecUnit unit, int displayOrder) {
+        this.group = group;
+        this.unit = unit;
+        this.displayOrder = displayOrder;
     }
 
     @PrePersist
@@ -55,6 +68,9 @@ public class GlobalSpecOption {
 
     public SpecUnit getUnit() { return unit; }
     public void setUnit(SpecUnit unit) { this.unit = unit; }
+
+    public int getDisplayOrder() { return displayOrder; }
+    public void setDisplayOrder(int displayOrder) { this.displayOrder = displayOrder; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

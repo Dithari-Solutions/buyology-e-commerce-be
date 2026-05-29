@@ -17,6 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -82,6 +83,14 @@ public class AdminProductController {
             @PathVariable UUID categoryId,
             @RequestParam String lang) {
         return productService.getProductsByCategoryAdmin(categoryId, lang);
+    }
+
+    @Operation(summary = "Activate or deactivate a product (status ACTIVE / INACTIVE)")
+    @PatchMapping("/{productId}/status")
+    public ResponseEntity<ApiResponse<Void>> setProductStatus(
+            @PathVariable UUID productId,
+            @RequestParam String status) {
+        return productService.setProductStatus(productId, status);
     }
 
     @Operation(summary = "Soft-delete a product — moves it to trash (auto-purged after 30 days)")
