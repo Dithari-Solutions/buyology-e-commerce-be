@@ -33,6 +33,10 @@ public class CreateProductRequest {
     @Schema(description = "Type of the product", allowableValues = {"SIMPLE", "DIY", "ACCESSORY"})
     private ProductType productType;
 
+    @Schema(description = "Optional product SKU. If provided it is used as-is (must be globally unique); " +
+            "if omitted, a SKU is auto-generated (DTAX-/DTDX- prefix).", example = "DTAX0993")
+    private String sku;
+
     @Schema(description = "Whether the product is refurbished", example = "false", defaultValue = "false")
     private Boolean isRefurbished = false;
 
@@ -80,6 +84,14 @@ public class CreateProductRequest {
 
     public void setProductType(ProductType productType) {
         this.productType = productType;
+    }
+
+    public String getSku() {
+        return sku;
+    }
+
+    public void setSku(String sku) {
+        this.sku = sku;
     }
 
     public Boolean getIsRefurbished() {

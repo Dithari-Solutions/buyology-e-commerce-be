@@ -220,8 +220,16 @@ public class ProductService {
                     "Refurb grade (A, B, or C) is required when isRefurbished is true");
         }
 
-        // 3. Persist base product
-        String sku = generateSku(request.getProductType());
+        // 3. Persist base product — use the caller-supplied SKU if present, otherwise auto-generate
+        String sku;
+        if (request.getSku() != null && !request.getSku().isBlank()) {
+            sku = request.getSku().trim();
+            if (productRepository.existsBySku(sku)) {
+                throw new IllegalArgumentException("Product SKU already exists: " + sku);
+            }
+        } else {
+            sku = generateSku(request.getProductType());
+        }
         Product product = new Product(
                 category,
                 brand,

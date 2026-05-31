@@ -1,0 +1,142 @@
+{
+  "name": "Buyology – Create Product",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-trigger",
+      "name": "When clicking Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ───────────────────────────────────────────────\n// EDIT YOUR INPUTS HERE\n// ───────────────────────────────────────────────\nreturn [{\n  json: {\n    // Backend + admin credentials\n    baseUrl:       'http://localhost:8080',\n    adminEmail:    'admin@example.com',\n    adminPassword: 'CHANGE_ME',\n\n    // Language used to look up the category by name (AZ | EN | AR)\n    lang: 'EN',\n\n    // The product code you assign manually (must be globally unique)\n    sku: 'DTAX0993',\n\n    // ACCESSORY -> DTAX convention | SIMPLE / DIY -> DTDX\n    productType: 'ACCESSORY',\n\n    // Category is SELECTED by matching this name in GET /api/category\n    categoryName: 'Headphones',\n\n    // Spec is SELECTED from GET /api/admin/specs:\n    //   - match the group by its `code`\n    //   - match the option by its EN `value`\n    // Set spec to null if this product has no spec.\n    spec: { code: 'ram', value: '16' },\n\n    // Required translations (all three languages, non-blank)\n    translations: {\n      titleAz: 'Yeni Məhsul',\n      titleEn: 'New Product',\n      titleAr: 'منتج جديد',\n      descriptionAz: 'Təsvir',\n      descriptionEn: 'Description',\n      descriptionAr: 'وصف'\n    }\n  }\n}];"
+      },
+      "id": "node-input",
+      "name": "Set Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Input').item.json.baseUrl + '/auth/admin/signin' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Client-Type",
+              "value": "dashboard"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email: $('Set Input').item.json.adminEmail, password: $('Set Input').item.json.adminPassword }) }}",
+        "options": {}
+      },
+      "id": "node-signin",
+      "name": "Sign in",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Set Input').item.json.baseUrl + '/api/category?lang=' + $('Set Input').item.json.lang }}",
+        "options": {}
+      },
+      "id": "node-categories",
+      "name": "Get categories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Set Input').item.json.baseUrl + '/api/admin/specs' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Sign in').item.json.data.accessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-specs",
+      "name": "Get specs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input  = $('Set Input').item.json;\n\n// ── Select the category by name ───────────────────────────────\nconst cats = ($('Get categories').item.json.data) || [];\nconst cat  = cats.find(c => c.name === input.categoryName);\nif (!cat) {\n  throw new Error('Category not found: \"' + input.categoryName + '\". Available: ' + cats.map(c => c.name).join(', '));\n}\n\n// ── Select the spec group + option ────────────────────────────\nconst groups = ($('Get specs').item.json.data) || [];\nconst specs  = [];\nif (input.spec && input.spec.code) {\n  const g = groups.find(x => x.code === input.spec.code);\n  if (!g) throw new Error('Spec group not found: \"' + input.spec.code + '\". Available codes: ' + groups.map(x => x.code).join(', '));\n  const opt = (g.options || []).find(o =>\n    (o.translations || []).some(t => String(t.value) === String(input.spec.value)));\n  if (!opt) throw new Error('Spec option \"' + input.spec.value + '\" not found in group \"' + input.spec.code + '\"');\n  specs.push({\n    globalSpecGroupId: g.id,\n    options: [{ localKey: 'opt-1', globalOptionId: opt.id }]\n  });\n}\n\n// ── Assemble the create-product request payload ───────────────\nconst productRequest = {\n  categoryId:   cat.id,\n  productType:  input.productType,\n  sku:          input.sku,\n  translations: input.translations,\n  specs:        specs\n};\n\nreturn [{ json: { productRequest } }];"
+      },
+      "id": "node-build",
+      "name": "Build request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Input').item.json.baseUrl + '/api/admin/product/create' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Sign in').item.json.data.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formData",
+              "name": "request",
+              "value": "={{ JSON.stringify($json.productRequest) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-create",
+      "name": "Create product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "When clicking Test": {
+      "main": [[{ "node": "Set Input", "type": "main", "index": 0 }]]
+    },
+    "Set Input": {
+      "main": [[{ "node": "Sign in", "type": "main", "index": 0 }]]
+    },
+    "Sign in": {
+      "main": [[{ "node": "Get categories", "type": "main", "index": 0 }]]
+    },
+    "Get categories": {
+      "main": [[{ "node": "Get specs", "type": "main", "index": 0 }]]
+    },
+    "Get specs": {
+      "main": [[{ "node": "Build request", "type": "main", "index": 0 }]]
+    },
+    "Build request": {
+      "main": [[{ "node": "Create product", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
