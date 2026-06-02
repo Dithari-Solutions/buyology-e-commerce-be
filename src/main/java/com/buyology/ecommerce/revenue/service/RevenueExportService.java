@@ -64,11 +64,14 @@ public class RevenueExportService {
     public RevenueExportResponse exportSupplierOverview(RevenueExportFormat format, RevenuePeriod period,
                                                         LocalDate from, LocalDate to) {
         SupplierRevenueOverviewResponse overview = revenueService.supplierOverview(period, from, to);
-        Tabular data = new Tabular(List.of("Supplier", "Orders", "Revenue"), new ArrayList<>());
+        Tabular data = new Tabular(
+                List.of("Supplier", "Orders", "Gross Revenue", "Refunds", "Net Revenue"), new ArrayList<>());
         overview.suppliers().forEach(s -> data.rows().add(new String[]{
-                s.businessName(), String.valueOf(s.orders()), String.valueOf(s.revenue())}));
+                s.businessName(), String.valueOf(s.orders()), String.valueOf(s.revenue()),
+                String.valueOf(s.refunded()), String.valueOf(s.net())}));
         data.rows().add(new String[]{"TOTAL", String.valueOf(overview.totalOrders()),
-                String.valueOf(overview.totalRevenue())});
+                String.valueOf(overview.totalRevenue()), String.valueOf(overview.totalRefunded()),
+                String.valueOf(overview.netRevenue())});
         return generateAndStore(RevenueExportType.SUPPLIER_ALL, format, overview.period(),
                 overview.from(), overview.to(), null, "supplier-revenue-all", data);
     }
@@ -130,11 +133,14 @@ public class RevenueExportService {
     }
 
     private Tabular reportToTabular(RevenueReportResponse report, String periodHeader) {
-        Tabular data = new Tabular(List.of(periodHeader, "Orders", "Revenue"), new ArrayList<>());
+        Tabular data = new Tabular(
+                List.of(periodHeader, "Orders", "Gross Revenue", "Refunds", "Net Revenue"), new ArrayList<>());
         report.buckets().forEach(b -> data.rows().add(new String[]{
-                b.period(), String.valueOf(b.orders()), String.valueOf(b.revenue())}));
+                b.period(), String.valueOf(b.orders()), String.valueOf(b.revenue()),
+                String.valueOf(b.refunded()), String.valueOf(b.net())}));
         data.rows().add(new String[]{"TOTAL", String.valueOf(report.totalOrders()),
-                String.valueOf(report.totalRevenue())});
+                String.valueOf(report.totalRevenue()), String.valueOf(report.totalRefunded()),
+                String.valueOf(report.netRevenue())});
         return data;
     }
 

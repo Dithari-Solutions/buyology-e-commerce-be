@@ -8,5 +8,7 @@ public record SupplierRevenueRow(
         UUID supplierId,
         String businessName,
         long orders,
-        BigDecimal revenue) {
+        BigDecimal revenue,
+        BigDecimal refunded,
+        BigDecimal net) {
 }

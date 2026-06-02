@@ -633,9 +633,16 @@ public class OrderService {
     }
 
     public Page<OrderSummaryResponse> listAllOrders(OrderStatus status, DeliveryMethod deliveryMethod,
-                                                     UUID storeId, int page, int size) {
+                                                     UUID storeId, UUID supplierId, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return orderRepo.findAllWithFilters(status, deliveryMethod, storeId, pageable)
+        return orderRepo.findAllWithFilters(status, deliveryMethod, storeId, supplierId, pageable)
+                .map(this::toSummaryResponse);
+    }
+
+    /** Orders containing the given supplier's items — for the supplier portal orders view. */
+    public Page<OrderSummaryResponse> listOrdersForSupplier(UUID supplierId, OrderStatus status, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return orderRepo.findBySupplierId(supplierId, status, pageable)
                 .map(this::toSummaryResponse);
     }
 
@@ -1198,6 +1205,9 @@ public class OrderService {
         OrderSummaryResponse res = new OrderSummaryResponse();
         res.setId(o.getId());
         res.setUserId(o.getUserId());
+        if (o.getItems() != null && !o.getItems().isEmpty()) {
+            res.setStoreId(o.getItems().get(0).getStoreId());
+        }
         res.setDeliveryMethod(o.getDeliveryMethod());
         res.setStatus(o.getStatus());
         res.setTotalAmount(o.getTotalAmount());

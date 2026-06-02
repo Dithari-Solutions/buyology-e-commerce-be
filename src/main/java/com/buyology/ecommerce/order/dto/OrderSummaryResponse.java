@@ -14,6 +14,8 @@ public class OrderSummaryResponse {
 
     private UUID id;
     private UUID userId;
+    /** Store of the order's first item — lets list views deep-link to the store-scoped detail page. */
+    private UUID storeId;
     private DeliveryMethod deliveryMethod;
     private OrderStatus status;
     private BigDecimal totalAmount;
@@ -37,6 +39,9 @@ public class OrderSummaryResponse {
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
+
+    public UUID getStoreId() { return storeId; }
+    public void setStoreId(UUID storeId) { this.storeId = storeId; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }

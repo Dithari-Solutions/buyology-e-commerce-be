@@ -16,6 +16,8 @@ public record RevenueReportResponse(
         LocalDate to,
         String scopeLabel,
         BigDecimal totalRevenue,
+        BigDecimal totalRefunded,
+        BigDecimal netRevenue,
         long totalOrders,
         List<RevenueBucketRow> buckets) {
 }

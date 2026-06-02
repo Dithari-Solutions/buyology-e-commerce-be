@@ -12,6 +12,8 @@ public record SupplierRevenueOverviewResponse(
         LocalDate from,
         LocalDate to,
         BigDecimal totalRevenue,
+        BigDecimal totalRefunded,
+        BigDecimal netRevenue,
         long totalOrders,
         List<SupplierRevenueRow> suppliers) {
 }

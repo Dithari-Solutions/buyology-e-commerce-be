@@ -34,9 +34,19 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
            "WHERE (:status IS NULL OR o.status = :status) " +
            "AND (:deliveryMethod IS NULL OR o.deliveryMethod = :deliveryMethod) " +
-           "AND (:storeId IS NULL OR i.storeId = :storeId)")
+           "AND (:storeId IS NULL OR i.storeId = :storeId) " +
+           "AND (:supplierId IS NULL OR i.supplierId = :supplierId)")
     Page<Order> findAllWithFilters(@Param("status") OrderStatus status,
                                    @Param("deliveryMethod") DeliveryMethod deliveryMethod,
                                    @Param("storeId") UUID storeId,
+                                   @Param("supplierId") UUID supplierId,
                                    Pageable pageable);
+
+    /** Orders that contain at least one item belonging to the given supplier. */
+    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
+           "WHERE i.supplierId = :supplierId " +
+           "AND (:status IS NULL OR o.status = :status)")
+    Page<Order> findBySupplierId(@Param("supplierId") UUID supplierId,
+                                 @Param("status") OrderStatus status,
+                                 Pageable pageable);
 }
