@@ -27,7 +27,12 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@TestPropertySource(properties = "spring.flyway.enabled=false")
+@TestPropertySource(properties = {
+        "spring.flyway.enabled=false",
+        // Against a real (non-embedded) Postgres, @DataJpaTest leaves ddl-auto=none,
+        // so the schema must be created explicitly for this slice.
+        "spring.jpa.hibernate.ddl-auto=create-drop"
+})
 @Testcontainers
 class WebhookIdempotencyConstraintIT {
 
