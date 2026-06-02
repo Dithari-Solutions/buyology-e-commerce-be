@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.common.service;
 
+import com.sendgrid.Client;
 import com.sendgrid.Method;
 import com.sendgrid.Request;
 import com.sendgrid.Response;
@@ -7,9 +8,13 @@ import com.sendgrid.SendGrid;
 import com.sendgrid.helpers.mail.Mail;
 import com.sendgrid.helpers.mail.objects.Content;
 import com.sendgrid.helpers.mail.objects.Email;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +23,7 @@ import com.buyology.ecommerce.infrastructure.config.OtpProperties;
 import com.buyology.ecommerce.infrastructure.config.TwilioSendGridProperties;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
@@ -26,9 +32,16 @@ public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
+    // Connect/socket timeouts so a hung SendGrid endpoint can't pin a thread indefinitely
+    private static final int CONNECT_TIMEOUT_MS = 5_000;
+    private static final int SOCKET_TIMEOUT_MS = 10_000;
+
     private final EmailOtpRepository emailOtpRepository;
     private final TwilioSendGridProperties sendGridProps;
     private final OtpProperties otpProps;
+
+    // Created once and reused for every send (the SendGrid client is thread-safe)
+    private final SendGrid sendGrid;
 
     public EmailService(
             EmailOtpRepository emailOtpRepository,
@@ -37,6 +50,16 @@ public class EmailService {
         this.emailOtpRepository = emailOtpRepository;
         this.sendGridProps = sendGridProps;
         this.otpProps = otpProps;
+
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setConnectTimeout(CONNECT_TIMEOUT_MS)
+                .setConnectionRequestTimeout(CONNECT_TIMEOUT_MS)
+                .setSocketTimeout(SOCKET_TIMEOUT_MS)
+                .build();
+        CloseableHttpClient httpClient = HttpClients.custom()
+                .setDefaultRequestConfig(requestConfig)
+                .build();
+        this.sendGrid = new SendGrid(sendGridProps.getApiKey(), new Client(httpClient));
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -63,6 +86,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendPromoCodeEmail(String toEmail, String promoCode, String offerText) {
         try {
             String html = "<div style='font-family:sans-serif;max-width:600px;margin:auto'>"
@@ -79,6 +103,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendStreakReminderEmail(String toEmail, int streakCount) {
         try {
             String template = loadTemplate("static/streak-reminder-email.html");
@@ -89,6 +114,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendNewsletterEmail(String toEmail, String title, String htmlContent, String unsubscribeUrl) {
         try {
             String template = loadTemplate("static/newsletter-email.html");
@@ -102,6 +128,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendNewsletterSubscriptionEmail(String toEmail, String unsubscribeUrl) {
         try {
             String template = loadTemplate("static/newsletter-subscription-confirmation.html");
@@ -112,6 +139,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendB2bInquiryNotification(String adminEmail, String company, String contact,
                                             String email, String phone, int quantity, String message) {
         try {
@@ -131,6 +159,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRegistrationSuccessEmail(String toEmail) {
         try {
             String htmlBody = loadTemplate("static/email.html");
@@ -153,6 +182,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendB2bApplicationReceivedEmail(String toEmail, String memberName, String companyName) {
         try {
             String template = loadTemplate("static/b2b-application-received.html");
@@ -166,6 +196,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendB2bMembershipApprovedEmail(String toEmail, String memberName, String companyName,
                                                String membershipId, String creditAmount, String currency,
                                                String setupLink) {
@@ -184,6 +215,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendB2bMembershipRejectedEmail(String toEmail, String memberName, String companyName, String reason) {
         try {
             String template = loadTemplate("static/b2b-membership-rejected.html");
@@ -197,6 +229,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierApplicationReceivedEmail(String toEmail, String supplierName, String businessName) {
         try {
             String template = loadTemplate("static/supplier-application-received.html");
@@ -210,6 +243,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierApprovedEmail(String toEmail, String supplierName, String businessName, String setupLink) {
         try {
             String template = loadTemplate("static/supplier-approved.html");
@@ -223,6 +257,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierRejectedEmail(String toEmail, String supplierName, String businessName, String reason) {
         try {
             String template = loadTemplate("static/supplier-rejected.html");
@@ -236,6 +271,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierProductUnderReviewEmail(String toEmail, String supplierName, String productName, String sku) {
         try {
             String template = loadTemplate("static/supplier-product-under-review.html");
@@ -249,6 +285,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierProductApprovedEmail(String toEmail, String supplierName, String productName, String sku) {
         try {
             String template = loadTemplate("static/supplier-product-approved.html");
@@ -262,6 +299,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendSupplierProductRejectedEmail(String toEmail, String supplierName, String productName, String reason) {
         try {
             String template = loadTemplate("static/supplier-product-rejected.html");
@@ -277,6 +315,7 @@ public class EmailService {
 
     // ── Refund emails ────────────────────────────────────────────────────────
 
+    @Async
     public void sendRefundRequestReceivedEmail(String toEmail, String customerName,
                                                String orderNumber, String requestId) {
         try {
@@ -290,6 +329,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundApprovedEmail(String toEmail, String customerName, String orderNumber,
                                         String requestId, String courierFeeLocal) {
         try {
@@ -304,6 +344,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundRejectedEmail(String toEmail, String customerName, String orderNumber,
                                         String requestId, String reason) {
         try {
@@ -318,6 +359,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundMethodConfirmedEmail(String toEmail, String customerName, String orderNumber,
                                                String requestId, String method, String instructions) {
         try {
@@ -333,6 +375,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundProductReceivedEmail(String toEmail, String customerName,
                                                String orderNumber, String requestId) {
         try {
@@ -346,6 +389,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundCompletedEmail(String toEmail, String customerName, String orderNumber,
                                          String requestId, String amount, String currency) {
         try {
@@ -361,6 +405,7 @@ public class EmailService {
         }
     }
 
+    @Async
     public void sendRefundFailedEmail(String toEmail, String customerName,
                                       String orderNumber, String requestId) {
         try {
@@ -394,13 +439,12 @@ public class EmailService {
         Content content = new Content("text/html", htmlBody);
         Mail mail = new Mail(from, subject, to, content);
 
-        SendGrid sg = new SendGrid(sendGridProps.getApiKey());
         Request request = new Request();
         request.setMethod(Method.POST);
         request.setEndpoint("mail/send");
         request.setBody(mail.build());
 
-        Response response = sg.api(request);
+        Response response = sendGrid.api(request);
 
         if (response.getStatusCode() >= 400) {
             String body = response.getBody();
@@ -420,6 +464,8 @@ public class EmailService {
 
     private String loadTemplate(String classpathPath) throws IOException {
         ClassPathResource resource = new ClassPathResource(classpathPath);
-        return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        try (InputStream in = resource.getInputStream()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 }

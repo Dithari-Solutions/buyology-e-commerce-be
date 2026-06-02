@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 
 public final class SecurityUtils {
 
@@ -27,6 +29,48 @@ public final class SecurityUtils {
             return uuid;
         }
         return null;
+    }
+
+    /**
+     * Returns the authenticated user's UUID, or throws 401 if the request is not authenticated.
+     */
+    public static UUID currentUserId() {
+        UUID id = currentUserIdOrNull();
+        if (id == null) {
+            throw new AuthenticationCredentialsNotFoundException("Authentication required");
+        }
+        return id;
+    }
+
+    /**
+     * Asserts the authenticated user owns the resource identified by {@code ownerUserId}.
+     * Admins/superadmins bypass the ownership check. Throws 403 on mismatch.
+     */
+    public static void requireSelfOrAdmin(UUID ownerUserId) {
+        if (isAdmin()) return;
+        requireSelf(ownerUserId);
+    }
+
+    /**
+     * Asserts the authenticated user IS the owner of the resource. Throws 403 on mismatch.
+     */
+    public static void requireSelf(UUID ownerUserId) {
+        UUID current = currentUserId();
+        if (ownerUserId == null || !ownerUserId.equals(current)) {
+            throw new AccessDeniedException("You are not allowed to access this resource");
+        }
+    }
+
+    /**
+     * True if the current principal has ADMIN or SUPERADMIN authority.
+     */
+    public static boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) return false;
+        return auth.getAuthorities().stream().anyMatch(a -> {
+            String r = a.getAuthority();
+            return "ROLE_ADMIN".equals(r) || "ROLE_SUPERADMIN".equals(r);
+        });
     }
 
     /**

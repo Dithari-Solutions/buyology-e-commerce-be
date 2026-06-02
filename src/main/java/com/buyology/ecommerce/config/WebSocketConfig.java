@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageDeliveryException;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -105,6 +106,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 try {
                     return handlePreSend(message);
+                } catch (MessageDeliveryException ex) {
+                    // Authentication failures must propagate so the STOMP CONNECT is rejected.
+                    throw ex;
                 } catch (Exception ex) {
                     log.error("[WS] Unexpected error in preSend interceptor", ex);
                     return message;
@@ -129,28 +133,37 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             String clientType = accessor.getFirstNativeHeader("X-Client-Type");
             String authHeader = accessor.getFirstNativeHeader("Authorization");
 
-            if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                String token = authHeader.substring(7).trim();
-                log.debug("[WS] Attempting to extract userId from token");
-                try {
-                    UUID userId = extractUserIdFromToken(token);
-                    if (userId != null) {
-                        UsernamePasswordAuthenticationToken auth =
-                                new UsernamePasswordAuthenticationToken(
-                                        userId, null,
-                                        List.of(new SimpleGrantedAuthority("ROLE_USER")));
-                        accessor.setUser(auth);
-                        log.info("[WS] STOMP CONNECT authenticated successfully - userId: {}", userId);
-                    } else {
-                        log.warn("[WS] STOMP CONNECT - userId extraction failed (invalid/expired token)");
-                    }
-                } catch (Exception e) {
-                    log.error("[WS] STOMP CONNECT - Error during token extraction", e);
-                }
-            } else {
-                log.warn("[WS] STOMP CONNECT - Missing or invalid Bearer token. Header: {}", 
-                    (authHeader != null ? "present (but no Bearer)" : "null"));
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                log.warn("[WS] STOMP CONNECT rejected — missing or malformed Bearer token. Header: {}",
+                        (authHeader != null ? "present (but no Bearer)" : "null"));
+                throw new MessageDeliveryException(message,
+                        "STOMP CONNECT rejected: missing or invalid Authorization Bearer token");
             }
+
+            String token = authHeader.substring(7).trim();
+            log.debug("[WS] Attempting to extract userId from token");
+
+            UUID userId;
+            try {
+                userId = extractUserIdFromToken(token);
+            } catch (Exception e) {
+                log.error("[WS] STOMP CONNECT - Error during token extraction", e);
+                throw new MessageDeliveryException(message,
+                        "STOMP CONNECT rejected: error validating token");
+            }
+
+            if (userId == null) {
+                log.warn("[WS] STOMP CONNECT rejected — invalid/expired token or missing 'uid' claim");
+                throw new MessageDeliveryException(message,
+                        "STOMP CONNECT rejected: invalid or expired token");
+            }
+
+            UsernamePasswordAuthenticationToken auth =
+                    new UsernamePasswordAuthenticationToken(
+                            userId, null,
+                            List.of(new SimpleGrantedAuthority("ROLE_USER")));
+            accessor.setUser(auth);
+            log.info("[WS] STOMP CONNECT authenticated successfully - userId: {}", userId);
         }
  else if (StompCommand.SUBSCRIBE.equals(cmd)) {
             log.debug("[WS] SUBSCRIBE — destination={} user={}",

@@ -3,6 +3,7 @@ package com.buyology.ecommerce.user.service;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.utils.FileValidationUtils;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;
@@ -191,8 +192,12 @@ public class UserProfileService {
     private Users findUser(UUID authCredId) {
         AuthCredentials creds = authCredentialRepo.findById(authCredId)
                 .orElseThrow(() -> new NoSuchElementException("Auth credentials not found: " + authCredId));
-        return userRepo.findById(creds.getUserId())
+        Users user = userRepo.findById(creds.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("User not found for credentials: " + authCredId));
+        // IDOR guard: the JWT principal is users.id; the {userId} path var is auth_credentials.id.
+        // Ensure the resolved user is the authenticated caller (admins bypass).
+        SecurityUtils.requireSelfOrAdmin(user.getId());
+        return user;
     }
 
     private UserProfiles findOrCreateProfile(Users user) {

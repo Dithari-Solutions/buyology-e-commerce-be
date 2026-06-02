@@ -10,6 +10,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
+import java.time.Duration;
 
 @Configuration
 public class ContaboConfig {
@@ -28,6 +29,12 @@ public class ContaboConfig {
                         AwsBasicCredentials.create(properties.getAccessKey(), properties.getSecretKey())))
                 .region(Region.US_EAST_1) // Contabo S3 is region-agnostic but AWS SDK requires a region
                 .forcePathStyle(true)      // Required for many S3-compatible providers
+                // Overall call + per-attempt timeouts so a stalled storage backend
+                // can never hang a request thread indefinitely. (Applied at the SDK
+                // layer so no specific HTTP-client artifact is required.)
+                .overrideConfiguration(b -> b
+                        .apiCallTimeout(Duration.ofSeconds(30))
+                        .apiCallAttemptTimeout(Duration.ofSeconds(10)))
                 .build();
     }
 

@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.buyology.ecommerce.common.enums.Language;
@@ -24,6 +25,7 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
 @RequestMapping("/api/admin/story")
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Story", description = "Admin APIs for story management")
 public class AdminStoryController {
 

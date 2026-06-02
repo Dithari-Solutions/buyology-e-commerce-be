@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -32,6 +33,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/product")
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Product", description = "Admin APIs for managing all products")
 public class AdminProductController {
 

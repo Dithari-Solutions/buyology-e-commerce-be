@@ -56,6 +56,15 @@ public class ChatWebSocketController {
                      @Valid @Payload SendMessageRequest request,
                      Principal principal) {
 
+        // Defensive: after the STOMP CONNECT interceptor a connected session always
+        // carries an authenticated principal, but never trust a null/blank one.
+        if (principal == null || principal.getName() == null) {
+            log.warn("[Chat-WS] Rejected send — no authenticated principal on session (deliveryOrderId={})",
+                    deliveryOrderId);
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Not authenticated");
+        }
+
         UUID customerId = UUID.fromString(principal.getName());
 
         // Resolve ecommerceOrderId from deliveryOrderId (indexed lookup)

@@ -15,6 +15,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -98,20 +99,30 @@ public class PromoCodeService {
 
     @Transactional
     public void recordUsage(UUID promoCodeId, UUID orderId, UUID userId, BigDecimal discountApplied) {
-        promoCodeRepo.findById(promoCodeId).ifPresent(pc -> {
-            PromoCodeUsage usage = new PromoCodeUsage();
-            usage.setPromoCode(pc);
-            usage.setOrderId(orderId);
-            usage.setUserId(userId);
-            usage.setDiscountApplied(discountApplied);
-            usageRepo.save(usage);
-        });
+        // A missing promo must fail the transaction, not silently no-op while the
+        // order keeps the discount.
+        PromoCode pc = promoCodeRepo.findById(promoCodeId)
+                .orElseThrow(() -> new NoSuchElementException("Promo code not found: " + promoCodeId));
+
+        PromoCodeUsage usage = new PromoCodeUsage();
+        usage.setPromoCode(pc);
+        usage.setOrderId(orderId);
+        usage.setUserId(userId);
+        usage.setDiscountApplied(discountApplied);
+        try {
+            usageRepo.saveAndFlush(usage);
+        } catch (DataIntegrityViolationException e) {
+            // Unique constraint (promo_code_id, user_id, order_id) tripped by a
+            // concurrent/retried checkout — the redemption was already recorded.
+            throw new IllegalStateException("Promo code already used", e);
+        }
     }
 
     // ── Admin: create promo code ─────────────────────────────────────────────
 
     @Transactional
     public PromoCodeResponse createPromoCode(CreatePromoCodeRequest req) {
+        validateDiscount(req.getDiscountType(), req.getDiscountValue());
         if (promoCodeRepo.existsByCodeIgnoreCase(req.getCode())) {
             throw new IllegalArgumentException("Promo code already exists: " + req.getCode());
         }
@@ -145,6 +156,7 @@ public class PromoCodeService {
 
     @Transactional
     public PromoCodeResponse updatePromoCode(UUID id, CreatePromoCodeRequest req) {
+        validateDiscount(req.getDiscountType(), req.getDiscountValue());
         PromoCode pc = promoCodeRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Promo code not found: " + id));
         pc.setDiscountType(req.getDiscountType());
@@ -214,12 +226,30 @@ public class PromoCodeService {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private BigDecimal calculateDiscount(PromoCode pc, BigDecimal orderAmount) {
-        if (pc.getDiscountType() == DiscountType.PERCENTAGE) {
-            return orderAmount.multiply(pc.getDiscountValue())
-                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+    private void validateDiscount(DiscountType type, BigDecimal value) {
+        // Bean Validation already rejects null / <= 0 on the DTO (@NotNull, @DecimalMin("0.01")).
+        // The percentage upper bound is type-dependent, so it is enforced here.
+        if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Discount value must be greater than 0");
         }
-        return pc.getDiscountValue().min(orderAmount);
+        if (type == DiscountType.PERCENTAGE && value.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw new IllegalArgumentException("Percentage discount cannot exceed 100");
+        }
+    }
+
+    private BigDecimal calculateDiscount(PromoCode pc, BigDecimal orderAmount) {
+        BigDecimal discount;
+        if (pc.getDiscountType() == DiscountType.PERCENTAGE) {
+            discount = orderAmount.multiply(pc.getDiscountValue())
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        } else {
+            discount = pc.getDiscountValue();
+        }
+        // Clamp to [0, orderAmount]: a discount can never be negative nor exceed the order total.
+        if (discount.compareTo(BigDecimal.ZERO) < 0) {
+            return BigDecimal.ZERO;
+        }
+        return discount.min(orderAmount);
     }
 
     private PromoCodeResponse toResponse(PromoCode pc) {

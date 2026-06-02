@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +28,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -39,6 +39,7 @@ public class PaymentService {
     private final PaymentMethodConfigRepository methodConfigRepo;
     private final PaymentTransactionRepository transactionRepo;
     private final PaymentWebhookEventRepository webhookEventRepo;
+    private final ProcessedWebhookEventRepository processedWebhookEventRepo;
     private final PaymentRefundRepository refundRepo;
     private final PaymobClient paymobClient;
     private final ObjectMapper objectMapper;
@@ -55,6 +56,7 @@ public class PaymentService {
             PaymentMethodConfigRepository methodConfigRepo,
             PaymentTransactionRepository transactionRepo,
             PaymentWebhookEventRepository webhookEventRepo,
+            ProcessedWebhookEventRepository processedWebhookEventRepo,
             PaymentRefundRepository refundRepo,
             PaymobClient paymobClient,
             ObjectMapper objectMapper,
@@ -69,6 +71,7 @@ public class PaymentService {
         this.methodConfigRepo = methodConfigRepo;
         this.transactionRepo = transactionRepo;
         this.webhookEventRepo = webhookEventRepo;
+        this.processedWebhookEventRepo = processedWebhookEventRepo;
         this.refundRepo = refundRepo;
         this.paymobClient = paymobClient;
         this.objectMapper = objectMapper;
@@ -129,7 +132,8 @@ public class PaymentService {
 
         long amountCents = convertedAmount
                 .multiply(BigDecimal.valueOf(100))
-                .longValue();
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .longValueExact();
 
         UserAddress address = req.getAddressId() != null
                 ? addressRepo.findById(req.getAddressId()).orElse(null)
@@ -233,7 +237,15 @@ public class PaymentService {
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider"));
 
+        // 0. VERIFY HMAC FIRST. An invalid signature is rejected immediately —
+        //    before resolving any transaction, touching the idempotency ledger,
+        //    or mutating any state. (Audit-log the rejection, then abort.)
         boolean hmacValid = validateHmac(rawPayload, receivedHmac, provider.getHmacSecret());
+        if (!hmacValid) {
+            log.warn("[WEBHOOK] Rejecting webhook with invalid HMAC; no state will be mutated");
+            saveWebhookEvent(provider, null, null, false, rawPayload, "Invalid HMAC");
+            return;
+        }
 
         JsonNode root;
         try {
@@ -247,53 +259,58 @@ public class PaymentService {
         String providerTxnIdStr = obj.has("id") ? obj.get("id").asText() : null;
         Long providerTxnId = (providerTxnIdStr != null) ? Long.valueOf(providerTxnIdStr) : null;
 
-        // 0. B2B credit payback short-circuit
-        // CreditPaybackService creates Paymob intentions with merchant_order_id="CRED-<usageId>"
-        // and does NOT create a PaymentTransaction row. Detect that and route to the payback flow.
         String maybeMoid = null;
         if (obj.has("order") && obj.get("order").has("merchant_order_id")) {
             maybeMoid = obj.get("order").get("merchant_order_id").asText();
         }
+
+        // 1. TRUE IDEMPOTENCY (INSERT-first). Reserve this event in the ledger
+        //    before doing any work. The unique key is the numeric Paymob
+        //    transaction id when present, else the merchant_order_id. A
+        //    duplicate/replayed delivery collides on the UNIQUE constraint and
+        //    is skipped — protecting both the normal and CRED- branches from
+        //    double-processing (e.g. double-credit on the payback flow).
+        String eventKey = providerTxnIdStr != null ? providerTxnIdStr : maybeMoid;
+        if (eventKey == null) {
+            log.error("[WEBHOOK] No event key (txn id / merchant_order_id) in payload. raw={}", rawPayload);
+            saveWebhookEvent(provider, null, null, true, rawPayload, "No event key");
+            return;
+        }
+        if (!reserveEventKey(eventKey)) {
+            log.info("[WEBHOOK] Duplicate/replayed event {} — already processed. Skipping.", eventKey);
+            return;
+        }
+
+        // 2. B2B credit payback short-circuit
+        // CreditPaybackService creates Paymob intentions with merchant_order_id="CRED-<usageId>"
+        // and does NOT create a PaymentTransaction row. Detect that and route to the payback flow.
         if (maybeMoid != null && maybeMoid.startsWith(
                 com.buyology.ecommerce.membership.service.CreditPaybackService.MERCHANT_ID_PREFIX)) {
-            if (!hmacValid) {
-                log.warn("[WEBHOOK][CRED] Invalid HMAC for {}", maybeMoid);
-                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, "Invalid HMAC (CRED)");
-                return;
-            }
             boolean success = obj.has("success") && obj.get("success").asBoolean();
             if (!success) {
                 log.info("[WEBHOOK][CRED] Non-success webhook for {}, skipping", maybeMoid);
-                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, "non-success");
+                saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, "non-success");
                 return;
             }
             long amountCents = obj.has("amount_cents") ? obj.get("amount_cents").asLong() : 0L;
             BigDecimal amountAed = BigDecimal.valueOf(amountCents).movePointLeft(2);
             try {
                 creditPaybackProvider.getObject().markPaid(maybeMoid, amountAed);
-                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, null);
+                saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, null);
             } catch (Exception e) {
                 log.error("[WEBHOOK][CRED] markPaid failed for {}", maybeMoid, e);
-                saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, e.getMessage());
+                saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, e.getMessage());
+                throw e;
             }
             return;
         }
 
-        // 1. Robust Idempotency check using numeric paymob_transaction_id
-        if (providerTxnId != null) {
-            Optional<PaymentTransaction> existing = transactionRepo.findByPaymobTransactionId(providerTxnId);
-            if (existing.isPresent() && isTerminal(existing.get().getStatus())) {
-                log.info("[WEBHOOK] Paymob transaction {} already processed. Status={}", providerTxnId, existing.get().getStatus());
-                return;
-            }
-        }
-
-        // 2. Resolve Transaction
+        // 3. Resolve Transaction
         PaymentTransaction transaction = resolveTransactionFromPayload(root);
 
         if (transaction == null) {
             log.error("[WEBHOOK] Could not resolve transaction from payload. raw={}", rawPayload);
-            saveWebhookEvent(provider, null, providerTxnIdStr, hmacValid, rawPayload, "Unresolved transaction");
+            saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, "Unresolved transaction");
             return;
         }
 
@@ -301,17 +318,11 @@ public class PaymentService {
 
         if (isTerminal(transaction.getStatus())) {
             log.info("[WEBHOOK] Transaction {} already terminal ({}). Skipping.", transaction.getId(), transaction.getStatus());
-            saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, null);
+            saveWebhookEvent(provider, transaction, providerTxnIdStr, true, rawPayload, null);
             return;
         }
 
-        if (!hmacValid) {
-            log.warn("[WEBHOOK] HMAC invalid for transaction {}", transaction.getId());
-            saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, "Invalid HMAC");
-            return;
-        }
-
-        // 3. Process status update
+        // 4. Process status update
         try {
             applyWebhookToTransaction(transaction, obj, providerTxnId);
             transactionRepo.saveAndFlush(transaction);
@@ -335,6 +346,25 @@ public class PaymentService {
             log.error("[WEBHOOK] Error processing transaction {}", transaction.getId(), e);
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, e.getMessage());
             throw e;
+        }
+    }
+
+    /**
+     * INSERT-first idempotency guard. Attempts to claim {@code eventKey} in the
+     * processed-events ledger. Returns {@code true} if the claim succeeded (this
+     * is the first time we see the event), {@code false} if the row already
+     * exists — i.e. the event is a duplicate/replay and must be skipped.
+     *
+     * The insert is flushed eagerly so the UNIQUE constraint is enforced now,
+     * letting two concurrently-delivered copies serialize: the loser sees the
+     * {@link DataIntegrityViolationException} and bails out.
+     */
+    private boolean reserveEventKey(String eventKey) {
+        try {
+            processedWebhookEventRepo.saveAndFlush(new ProcessedWebhookEvent(eventKey));
+            return true;
+        } catch (DataIntegrityViolationException dup) {
+            return false;
         }
     }
 
@@ -401,7 +431,9 @@ public class PaymentService {
 
     @Transactional
     public RefundResponse initiateRefund(RefundRequest req) {
-        PaymentTransaction tx = transactionRepo.findById(req.getTransactionId())
+        // Lock the transaction row so concurrent refunds serialize on the
+        // read-check-write of refund state (prevents two refunds both passing).
+        PaymentTransaction tx = transactionRepo.findWithLockById(req.getTransactionId())
                 .orElseThrow(() -> new NoSuchElementException("Transaction not found: " + req.getTransactionId()));
 
         if (tx.getStatus() != PaymentStatus.SUCCESS && tx.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
@@ -414,7 +446,10 @@ public class PaymentService {
         }
 
         PaymentProvider provider = tx.getMethodConfig().getProvider();
-        long refundCents = req.getAmount().multiply(BigDecimal.valueOf(100)).longValue();
+        long refundCents = req.getAmount()
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .longValueExact();
 
         // Use numeric paymob_transaction_id for refund call
         String providerRefundId = paymobClient.refund(

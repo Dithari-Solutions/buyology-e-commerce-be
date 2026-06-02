@@ -19,6 +19,7 @@ import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
+import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
@@ -78,6 +79,7 @@ public class OrderService {
     private final PaymentTransactionRepository paymentTransactionRepo;
     private final StoreLocationRepository storeLocationRepo;
     private final StoreProductRepository storeProductRepo;
+    private final StoreProductVariantRepository storeProductVariantRepo;
     private final UserProfilesRepository userProfileRepo;
     private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
@@ -96,6 +98,7 @@ public class OrderService {
                         PaymentTransactionRepository paymentTransactionRepo,
                         StoreLocationRepository storeLocationRepo,
                         StoreProductRepository storeProductRepo,
+                        StoreProductVariantRepository storeProductVariantRepo,
                         UserProfilesRepository userProfileRepo,
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
@@ -113,6 +116,7 @@ public class OrderService {
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.storeLocationRepo = storeLocationRepo;
         this.storeProductRepo = storeProductRepo;
+        this.storeProductVariantRepo = storeProductVariantRepo;
         this.userProfileRepo = userProfileRepo;
         this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
@@ -215,9 +219,23 @@ public class OrderService {
             }
         }
 
+        // Clamp discount so it can never exceed subtotal + shipping (otherwise the total
+        // would go negative). Then clamp the total at zero as a final safety floor.
+        BigDecimal grossTotal = subtotal.add(shippingFee);
+        if (discount.compareTo(grossTotal) > 0) {
+            discount = grossTotal;
+        }
+        if (discount.compareTo(BigDecimal.ZERO) < 0) {
+            discount = BigDecimal.ZERO;
+        }
+        BigDecimal totalAmount = grossTotal.subtract(discount);
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
+        }
+
         order.setSubtotal(subtotal);
         order.setDiscount(discount);
-        order.setTotalAmount(subtotal.add(shippingFee).subtract(discount));
+        order.setTotalAmount(totalAmount);
         
         // Ensure currency is never null (fall back to profile if cart was somehow not stamped)
         String currency = cart.getCurrency();
@@ -231,8 +249,25 @@ public class OrderService {
 
         order = orderRepo.save(order);
 
-        // Convert cart items to order items
+        // Convert cart items to order items, decrementing store inventory atomically.
         for (CartItem cartItem : cartItems) {
+            // Decrement stock atomically and guard against overselling. Stock lives on
+            // StoreProductVariant only — items without a variant have no stock to track,
+            // so they are skipped (StoreProduct has no stock column). This runs inside the
+            // surrounding @Transactional boundary so a failed guard rolls back the order.
+            if (cartItem.getVariant() != null && cartItem.getStoreId() != null) {
+                int updated = storeProductVariantRepo.decrementStock(
+                        cartItem.getStoreId(),
+                        cartItem.getProduct().getId(),
+                        cartItem.getVariant().getId(),
+                        cartItem.getQuantity());
+                if (updated != 1) {
+                    throw new IllegalStateException("Insufficient stock for product "
+                            + cartItem.getProduct().getId() + " variant " + cartItem.getVariant().getId()
+                            + " (requested " + cartItem.getQuantity() + ")");
+                }
+            }
+
             OrderItem item = new OrderItem();
             item.setOrder(order);
             item.setProductId(cartItem.getProduct().getId());

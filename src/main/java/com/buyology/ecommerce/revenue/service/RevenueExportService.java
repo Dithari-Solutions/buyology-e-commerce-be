@@ -153,7 +153,7 @@ public class RevenueExportService {
                 e.getId(), e.getExportType(), e.getFormat(), e.getPeriod(),
                 e.getFromDate(), e.getToDate(), e.getSupplierId(), e.getFileName(), e.getFileSize(),
                 e.getExportedByUserId(), e.getExportedByEmail(), e.getExportedByRole(),
-                e.getCreatedAt(), contaboObjectService.getPresignedUrl(e.getObjectKey()));
+                e.getCreatedAt(), contaboObjectService.getPresignedDownloadUrl(e.getObjectKey(), e.getFileName()));
     }
 
     private Tabular reportToTabular(RevenueReportResponse report, String periodHeader) {

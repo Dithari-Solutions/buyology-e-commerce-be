@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -76,6 +77,7 @@ public class ReviewController {
                     encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
             )
     )
+    @PreAuthorize("isAuthenticated()")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ReviewResponse>> createReview(
             @Parameter(hidden = true) @RequestPart("request") String requestJson,
@@ -87,6 +89,7 @@ public class ReviewController {
 
     @Operation(summary = "Update a pending review",
             description = "Only reviews in PENDING status can be edited.")
+    @PreAuthorize("isAuthenticated()")
     @PutMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<ReviewResponse>> updateReview(
             @PathVariable UUID reviewId,
@@ -95,6 +98,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "Delete (soft-delete) a review")
+    @PreAuthorize("isAuthenticated()")
     @DeleteMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<Void>> deleteReview(
             @PathVariable UUID reviewId) {
@@ -103,6 +107,7 @@ public class ReviewController {
 
     @Operation(summary = "Vote on a review's helpfulness",
             description = "isHelpful=true records a helpful vote; false records a not-helpful vote. Re-voting changes the existing vote.")
+    @PreAuthorize("isAuthenticated()")
     @PostMapping("/{reviewId}/vote")
     public ResponseEntity<ApiResponse<Void>> voteOnReview(
             @PathVariable UUID reviewId,
@@ -111,6 +116,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "Remove a helpfulness vote from a review")
+    @PreAuthorize("isAuthenticated()")
     @DeleteMapping("/{reviewId}/vote")
     public ResponseEntity<ApiResponse<Void>> removeVoteOnReview(
             @PathVariable UUID reviewId,

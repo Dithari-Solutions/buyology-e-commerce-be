@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,6 +43,7 @@ public class QuestionController {
 
     @Operation(summary = "Ask a question about a product",
             description = "The question starts in PENDING status awaiting moderation.")
+    @PreAuthorize("isAuthenticated()")
     @PostMapping
     public ResponseEntity<ApiResponse<QuestionResponse>> createQuestion(
             @RequestBody @Valid CreateQuestionRequest request) {
@@ -49,6 +51,7 @@ public class QuestionController {
     }
 
     @Operation(summary = "Delete (soft-delete) a question")
+    @PreAuthorize("isAuthenticated()")
     @DeleteMapping("/{questionId}")
     public ResponseEntity<ApiResponse<Void>> deleteQuestion(
             @PathVariable UUID questionId) {
@@ -56,6 +59,7 @@ public class QuestionController {
     }
 
     @Operation(summary = "Mark a question as helpful")
+    @PreAuthorize("isAuthenticated()")
     @PostMapping("/{questionId}/vote")
     public ResponseEntity<ApiResponse<Void>> voteOnQuestion(
             @PathVariable UUID questionId,
@@ -64,6 +68,7 @@ public class QuestionController {
     }
 
     @Operation(summary = "Remove helpful vote from a question")
+    @PreAuthorize("isAuthenticated()")
     @DeleteMapping("/{questionId}/vote")
     public ResponseEntity<ApiResponse<Void>> removeVoteOnQuestion(
             @PathVariable UUID questionId,

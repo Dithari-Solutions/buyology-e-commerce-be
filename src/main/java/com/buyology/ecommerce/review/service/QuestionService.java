@@ -3,6 +3,7 @@ package com.buyology.ecommerce.review.service;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.review.domain.*;
@@ -86,6 +87,8 @@ public class QuestionService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
 
+        SecurityUtils.requireSelf(authCredentials.getUserId());
+
         Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
         if (user == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
@@ -104,6 +107,11 @@ public class QuestionService {
         if (question == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Question not found");
         }
+
+        if (!SecurityUtils.isAdmin()) {
+            SecurityUtils.requireSelf(question.getUser().getId());
+        }
+
         question.setDeletedAt(Instant.now());
         questionRepository.save(question);
         return ApiResponse.success(null, "Question deleted successfully");
@@ -122,6 +130,8 @@ public class QuestionService {
         if (voteAuthCred == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
+
+        SecurityUtils.requireSelf(voteAuthCred.getUserId());
 
         Users user = userRepository.findById(voteAuthCred.getUserId()).orElse(null);
         if (user == null) {
@@ -149,6 +159,9 @@ public class QuestionService {
         if (authCredentials == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
         }
+
+        SecurityUtils.requireSelf(authCredentials.getUserId());
+
         ProductQuestionVote vote = voteRepository
                 .findByIdQuestionIdAndIdUserId(questionId, authCredentials.getUserId()).orElse(null);
         if (vote == null) {

@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.game.service;
 
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.game.domain.*;
 import com.buyology.ecommerce.game.dto.*;
 import com.buyology.ecommerce.game.enums.GameType;
@@ -7,16 +8,19 @@ import com.buyology.ecommerce.game.repository.*;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -150,8 +154,54 @@ public class GameService {
      */
     private static final int TOKENS_PER_WIN = 10;
 
-    private int computeTokensEarned(GameSubmissionRequest request) {
-        return request.isSuccess() ? TOKENS_PER_WIN : 0;
+    /**
+     * Server-side outcome of a submission. Success and score are derived here
+     * from authoritative data (stored quiz answers), never from the client.
+     */
+    private record GameOutcome(boolean success, int score) {}
+
+    /**
+     * Recomputes success/score on the server. For QUIZ games every submitted
+     * answer is checked against the stored {@link QuizQuestion#getCorrectOptionIndex()};
+     * the client's {@code isSuccess}/{@code score} are ignored. A quiz is a "win"
+     * only if at least one question was answered and ALL answered questions are correct.
+     */
+    private GameOutcome evaluate(GameSubmissionRequest request) {
+        if (request.getGameType() != GameType.QUIZ) {
+            // MINI_GAME has no server-side answer key; trust the reported score but
+            // not the client success flag — success is derived from a positive score.
+            int score = request.getScore();
+            return new GameOutcome(score > 0, Math.max(score, 0));
+        }
+
+        List<GameSubmissionRequest.QuizAnswer> answers =
+                request.getAnswers() == null ? Collections.emptyList() : request.getAnswers();
+        if (answers.isEmpty()) {
+            return new GameOutcome(false, 0);
+        }
+
+        List<UUID> questionIds = answers.stream()
+                .map(GameSubmissionRequest.QuizAnswer::getQuestionId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+
+        Map<UUID, QuizQuestion> questions = quizQuestionRepository.findAllById(questionIds).stream()
+                .collect(Collectors.toMap(QuizQuestion::getId, Function.identity()));
+
+        int score = 0;
+        boolean allCorrect = true;
+        for (GameSubmissionRequest.QuizAnswer answer : answers) {
+            QuizQuestion question = answer.getQuestionId() == null ? null : questions.get(answer.getQuestionId());
+            // Unknown/inactive questions can never count as correct.
+            if (question == null || !question.isActive()
+                    || question.getCorrectOptionIndex() != answer.getSelectedOptionIndex()) {
+                allCorrect = false;
+            } else {
+                score += question.getPoints();
+            }
+        }
+
+        return new GameOutcome(allCorrect, score);
     }
 
     @Transactional
@@ -162,14 +212,24 @@ public class GameService {
 
         // Daily-limit guard — backend is the source of truth, regardless of what
         // the client sends. Mobile/web should also gate their UI but we don't trust them.
+        // This is best-effort; the (user, play_date) unique constraint below is the
+        // real race-proof guard against concurrent double-submits.
         if (hasPlayedToday(user, today)) {
             throw new AlreadyPlayedException("Already played today");
         }
 
-        GameResult result = new GameResult(user, request.getGameType(), request.getScore(), request.isSuccess(), now);
-        gameResultRepository.save(result);
+        // Recompute the outcome server-side; the client's success/score are not trusted.
+        GameOutcome outcome = evaluate(request);
 
-        int tokensEarned = computeTokensEarned(request);
+        GameResult result = new GameResult(user, request.getGameType(), outcome.score(), outcome.success(), now);
+        try {
+            gameResultRepository.saveAndFlush(result);
+        } catch (DataIntegrityViolationException e) {
+            // A concurrent submit won the race and already inserted today's row.
+            throw new AlreadyPlayedException("Already played today");
+        }
+
+        int tokensEarned = outcome.success() ? TOKENS_PER_WIN : 0;
         int newTotalTokens = userProfilesRepository.findByUser(user)
                 .map(profile -> {
                     int updated = profile.getTokens() + tokensEarned;
@@ -236,17 +296,9 @@ public class GameService {
     }
 
     private Users getCurrentUser() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        UUID userId;
-        if (principal instanceof UUID) {
-            userId = (UUID) principal;
-        } else {
-            try {
-                userId = UUID.fromString(principal.toString());
-            } catch (Exception e) {
-                throw new RuntimeException("User not found: " + principal);
-            }
-        }
+        // Identify the player from the authenticated principal only — never from any
+        // client-supplied id. Throws 401 via SecurityUtils if unauthenticated.
+        UUID userId = SecurityUtils.currentUserId();
         return userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found: " + userId));
     }

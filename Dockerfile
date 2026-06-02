@@ -15,8 +15,21 @@ FROM eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
 
+# curl is used by the container HEALTHCHECK; it is not present in the slim JRE image
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Run as an unprivileged user
+RUN groupadd --system appuser && useradd --system --gid appuser appuser
+
 COPY --from=build /app/target/*.jar app.jar
+
+USER appuser
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "app.jar"]

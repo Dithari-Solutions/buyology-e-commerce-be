@@ -1,13 +1,19 @@
 package com.buyology.ecommerce.cart.dto;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+
 import java.util.List;
 import java.util.UUID;
 
 public class AddToCartRequest {
 
     /** The store from which this product is being purchased — determines price and currency */
+    @NotNull
     private UUID storeId;
 
+    @NotNull
     private UUID productId;
 
     /** Optional — set for products with pre-built variants (e.g. refurbished grades) */
@@ -16,6 +22,9 @@ public class AddToCartRequest {
     /** Optional — set for DIY/configurable products to capture selected spec options */
     private List<UUID> specOptionIds;
 
+    @NotNull
+    @Min(1)
+    @Max(1000)
     private Integer quantity = 1;
 
     public AddToCartRequest() {

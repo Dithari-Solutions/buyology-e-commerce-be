@@ -6,6 +6,8 @@ import com.buyology.ecommerce.order.dto.OrderResponse;
 import com.buyology.ecommerce.order.dto.OrderSummaryResponse;
 import com.buyology.ecommerce.membership.service.B2bCreditOrderService;
 import com.buyology.ecommerce.order.service.OrderService;
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -24,13 +26,19 @@ import java.util.UUID;
 @RequestMapping("/api/orders")
 public class OrderController {
 
+    /** Hard cap on page size for order listings to prevent unbounded queries (DoS). */
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final OrderService orderService;
     private final B2bCreditOrderService b2bCreditOrderService;
+    private final AuthCredentialRepository authCredentialRepository;
 
     public OrderController(OrderService orderService,
-                           B2bCreditOrderService b2bCreditOrderService) {
+                           B2bCreditOrderService b2bCreditOrderService,
+                           AuthCredentialRepository authCredentialRepository) {
         this.orderService = orderService;
         this.b2bCreditOrderService = b2bCreditOrderService;
+        this.authCredentialRepository = authCredentialRepository;
     }
 
     /**
@@ -44,9 +52,23 @@ public class OrderController {
             @AuthenticationPrincipal UUID userId,
             @RequestHeader("X-Auth-Credential-Id") UUID authCredentialId,
             @Valid @RequestBody CreateOrderRequest request) {
+        // The authCredentialId is client-supplied — verify it actually belongs to the
+        // authenticated user so one user cannot place orders under another's credential.
+        requireOwnedCredential(userId, authCredentialId);
         return ApiResponse.created(
                 orderService.createOrder(userId, authCredentialId, request),
                 "Order created successfully");
+    }
+
+    /**
+     * Resolves the client-supplied authCredentialId to its owning userId and asserts
+     * it matches the authenticated principal (admins bypass). Throws 403 otherwise.
+     */
+    private void requireOwnedCredential(UUID userId, UUID authCredentialId) {
+        UUID ownerUserId = authCredentialRepository.findById(authCredentialId)
+                .map(c -> c.getUserId())
+                .orElse(null);
+        SecurityUtils.requireSelfOrAdmin(ownerUserId);
     }
 
     /**
@@ -71,8 +93,10 @@ public class OrderController {
             @AuthenticationPrincipal UUID userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        // Clamp the page size to a sane maximum to prevent unbounded result sets (DoS).
+        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         return ApiResponse.success(
-                orderService.listCustomerOrders(userId, page, size),
+                orderService.listCustomerOrders(userId, page, safeSize),
                 "Orders fetched successfully");
     }
 

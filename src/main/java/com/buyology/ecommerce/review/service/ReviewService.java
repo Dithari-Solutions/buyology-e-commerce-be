@@ -3,6 +3,7 @@ package com.buyology.ecommerce.review.service;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.review.domain.*;
@@ -89,11 +90,16 @@ public class ReviewService {
     public ResponseEntity<ApiResponse<List<ReviewResponse>>> getReviewsByUser(
             UUID userId, int page, int size) {
 
+        UUID currentUserId = SecurityUtils.currentUserIdOrNull();
+        boolean privileged = SecurityUtils.isAdmin()
+                || (currentUserId != null && currentUserId.equals(userId));
+
         Page<ProductReview> reviews = reviewRepository
                 .findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
                         userId, PageRequest.of(page, size));
 
         List<ReviewResponse> data = reviews.getContent().stream()
+                .filter(r -> privileged || r.getStatus() == ModerationStatus.APPROVED)
                 .map(r -> toResponse(r, true))
                 .toList();
         return ApiResponse.success(data, "User reviews fetched successfully");
@@ -135,6 +141,8 @@ public class ReviewService {
         if (authCredentials == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
+
+        SecurityUtils.requireSelf(authCredentials.getUserId());
 
         Users user = userRepository.findById(authCredentials.getUserId()).orElse(null);
         if (user == null) {
@@ -203,6 +211,10 @@ public class ReviewService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Review not found");
         }
 
+        if (!SecurityUtils.isAdmin()) {
+            SecurityUtils.requireSelf(review.getUser().getId());
+        }
+
         if (review.getStatus() != ModerationStatus.PENDING) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST,
                     "Only pending reviews can be edited");
@@ -230,6 +242,10 @@ public class ReviewService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Review not found");
         }
 
+        if (!SecurityUtils.isAdmin()) {
+            SecurityUtils.requireSelf(review.getUser().getId());
+        }
+
         review.setDeletedAt(Instant.now());
         reviewRepository.save(review);
 
@@ -253,6 +269,8 @@ public class ReviewService {
         if (voteAuthCred == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
+
+        SecurityUtils.requireSelf(voteAuthCred.getUserId());
 
         Users user = userRepository.findById(voteAuthCred.getUserId()).orElse(null);
         if (user == null) {
@@ -301,6 +319,9 @@ public class ReviewService {
         if (authCredentials == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Vote not found");
         }
+
+        SecurityUtils.requireSelf(authCredentials.getUserId());
+
         ProductReviewVote vote = voteRepository
                 .findByIdReviewIdAndIdUserId(reviewId, authCredentials.getUserId()).orElse(null);
         if (vote == null) {

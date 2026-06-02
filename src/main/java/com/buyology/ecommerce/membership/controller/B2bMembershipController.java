@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.membership.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.membership.dto.*;
 import com.buyology.ecommerce.membership.service.B2bMembershipLifecycleService;
 import com.buyology.ecommerce.membership.service.B2bMembershipService;
@@ -33,35 +34,44 @@ public class B2bMembershipController {
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> apply(
             @Valid @RequestBody MembershipApplicationRequest req,
             @RequestParam(required = false) UUID userId) {
-        return ApiResponse.created(membershipService.submitApplication(req, userId),
+        // Tie the application to the authenticated caller. The principal IS users.id;
+        // ignore any client-supplied userId so applications can't be filed for someone else.
+        UUID self = SecurityUtils.currentUserId();
+        return ApiResponse.created(membershipService.submitApplication(req, self),
                 "Application submitted successfully. We'll review it shortly.");
     }
 
     @GetMapping("/application")
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> getMyApplication(
             @RequestParam UUID userId) {
+        SecurityUtils.requireSelf(membershipService.resolveUsersId(userId));
         return ApiResponse.success(membershipService.getMyApplication(userId), "Application fetched");
     }
 
     @GetMapping("/card")
     public ResponseEntity<ApiResponse<MembershipCardResponse>> getMembershipCard(
             @RequestParam UUID userId) {
+        SecurityUtils.requireSelf(membershipService.resolveUsersId(userId));
         return ApiResponse.success(membershipService.getMembershipCard(userId), "Membership card fetched");
     }
 
     @GetMapping("/wallet")
     public ResponseEntity<ApiResponse<WalletResponse>> getWallet(
             @RequestParam UUID userId) {
+        UUID resolved = membershipService.resolveUsersId(userId);
+        SecurityUtils.requireSelf(resolved);
         return ApiResponse.success(
-                walletService.getWallet(membershipService.resolveUsersId(userId)),
+                walletService.getWallet(resolved),
                 "Wallet fetched");
     }
 
     @GetMapping("/wallet/transactions")
     public ResponseEntity<ApiResponse<List<WalletTransactionResponse>>> getTransactions(
             @RequestParam UUID userId) {
+        UUID resolved = membershipService.resolveUsersId(userId);
+        SecurityUtils.requireSelf(resolved);
         return ApiResponse.success(
-                walletService.getTransactions(membershipService.resolveUsersId(userId)),
+                walletService.getTransactions(resolved),
                 "Transactions fetched");
     }
 

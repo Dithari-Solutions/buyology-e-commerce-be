@@ -11,6 +11,7 @@ import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.utils.CountryCodeUtil;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
@@ -89,9 +90,7 @@ public class CartService {
      * @param userLng optional — when provided together with userLat, enables the quick-delivery badge
      */
     public ResponseEntity<ApiResponse<CartResponse>> getCart(UUID authCredentialId, Double userLat, Double userLng) {
-        if (!authCredentialRepository.existsById(authCredentialId)) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
-        }
+        requireOwnedCredential(authCredentialId);
         Cart cart = findOrCreateActiveCart(authCredentialId);
 
         Set<UUID> nearbyStoreIds = resolveNearbyStoreIds(userLat, userLng);
@@ -106,6 +105,8 @@ public class CartService {
                 authCredentialId, request.getProductId(), request.getVariantId(),
                 request.getStoreId(), request.getQuantity());
 
+        AuthCredentials authCredential = requireOwnedCredential(authCredentialId);
+
         if (request.getProductId() == null) {
             log.warn("addItem rejected — productId is null [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "productId is required");
@@ -114,12 +115,6 @@ public class CartService {
             log.warn("addItem rejected — invalid quantity={} [authCredentialId={} productId={}]",
                     request.getQuantity(), authCredentialId, request.getProductId());
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
-        }
-
-        AuthCredentials authCredential = authCredentialRepository.findById(authCredentialId).orElse(null);
-        if (authCredential == null) {
-            log.warn("addItem rejected — authCredentialId={} not found", authCredentialId);
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
         }
 
         Product product = productRepository.findById(request.getProductId()).orElse(null);
@@ -266,6 +261,8 @@ public class CartService {
         log.debug("updateItemQuantity called — authCredentialId={} cartItemId={} qty={}",
                 authCredentialId, cartItemId, request.getQuantity());
 
+        requireOwnedCredential(authCredentialId);
+
         if (request.getQuantity() == null || request.getQuantity() < 1) {
             log.warn("updateItemQuantity rejected — invalid quantity={} [authCredentialId={} cartItemId={}]",
                     request.getQuantity(), authCredentialId, cartItemId);
@@ -299,6 +296,8 @@ public class CartService {
     public ResponseEntity<ApiResponse<CartResponse>> removeItem(UUID authCredentialId, UUID cartItemId) {
         log.debug("removeItem called — authCredentialId={} cartItemId={}", authCredentialId, cartItemId);
 
+        requireOwnedCredential(authCredentialId);
+
         Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             log.warn("removeItem rejected — no active cart [authCredentialId={}]", authCredentialId);
@@ -323,6 +322,7 @@ public class CartService {
 
     @Transactional
     public ResponseEntity<ApiResponse<Void>> clearCart(UUID authCredentialId) {
+        requireOwnedCredential(authCredentialId);
         // Accept both ACTIVE and CHECKED_OUT carts so this endpoint works after checkout
         Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
                 .or(() -> cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT))
@@ -351,6 +351,8 @@ public class CartService {
     public ResponseEntity<ApiResponse<CartResponse>> checkout(UUID authCredentialId) {
         log.debug("checkout called — authCredentialId={}", authCredentialId);
 
+        requireOwnedCredential(authCredentialId);
+
         Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
             log.warn("checkout rejected — no active cart [authCredentialId={}]", authCredentialId);
@@ -372,6 +374,19 @@ public class CartService {
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Loads the AuthCredentials and asserts the authenticated principal (Users.id) owns it.
+     * The path-supplied authCredentialId is NOT trusted as identity — ownership is verified
+     * against the JWT principal. Throws IllegalArgumentException (→400/404) if absent,
+     * AccessDeniedException (→403) if the caller is not the owner.
+     */
+    private AuthCredentials requireOwnedCredential(UUID authCredentialId) {
+        AuthCredentials credential = authCredentialRepository.findById(authCredentialId)
+                .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
+        SecurityUtils.requireSelf(credential.getUserId());
+        return credential;
+    }
 
     private Cart findOrCreateActiveCart(UUID authCredentialId) {
         return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)

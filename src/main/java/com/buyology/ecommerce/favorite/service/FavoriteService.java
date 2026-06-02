@@ -3,6 +3,7 @@ package com.buyology.ecommerce.favorite.service;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.favorite.domain.Favorite;
 import com.buyology.ecommerce.favorite.dto.AdminFavoriteEntryResponse;
 import com.buyology.ecommerce.favorite.dto.AdminFavoritePageResponse;
@@ -43,10 +44,7 @@ public class FavoriteService {
 
     @Transactional
     public ResponseEntity<ApiResponse<FavoriteItemResponse>> addFavorite(UUID authCredentialId, UUID productId) {
-        AuthCredentials authCredential = authCredentialRepository.findById(authCredentialId).orElse(null);
-        if (authCredential == null) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
-        }
+        AuthCredentials authCredential = requireOwnedCredential(authCredentialId);
 
         Product product = productRepository.findById(productId).orElse(null);
         if (product == null || "DELETED".equals(product.getStatus())) {
@@ -65,9 +63,7 @@ public class FavoriteService {
 
     @Transactional
     public ResponseEntity<ApiResponse<Void>> removeFavorite(UUID authCredentialId, UUID productId) {
-        if (!authCredentialRepository.existsById(authCredentialId)) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
-        }
+        requireOwnedCredential(authCredentialId);
 
         if (!favoriteRepository.existsByAuthCredential_IdAndProduct_Id(authCredentialId, productId)) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product is not in favorites");
@@ -80,9 +76,7 @@ public class FavoriteService {
     // ─── Get my favorites ─────────────────────────────────────────────────────
 
     public ResponseEntity<ApiResponse<FavoriteListResponse>> getFavorites(UUID authCredentialId) {
-        if (!authCredentialRepository.existsById(authCredentialId)) {
-            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");
-        }
+        requireOwnedCredential(authCredentialId);
 
         List<Favorite> favorites = favoriteRepository.findByAuthCredential_Id(authCredentialId);
         List<FavoriteItemResponse> items = favorites.stream()
@@ -95,6 +89,7 @@ public class FavoriteService {
     // ─── Check if product is favorited ────────────────────────────────────────
 
     public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkFavorite(UUID authCredentialId, UUID productId) {
+        requireOwnedCredential(authCredentialId);
         boolean favorited = favoriteRepository.existsByAuthCredential_IdAndProduct_Id(authCredentialId, productId);
         return ApiResponse.success(Map.of("favorited", favorited), "Check complete");
     }
@@ -135,6 +130,19 @@ public class FavoriteService {
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Loads the AuthCredentials and asserts the authenticated principal (Users.id) owns it.
+     * The path-supplied authCredentialId is NOT trusted as identity — ownership is verified
+     * against the JWT principal. Throws IllegalArgumentException (→400/404) if absent,
+     * AccessDeniedException (→403) if the caller is not the owner.
+     */
+    private AuthCredentials requireOwnedCredential(UUID authCredentialId) {
+        AuthCredentials credential = authCredentialRepository.findById(authCredentialId)
+                .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
+        SecurityUtils.requireSelf(credential.getUserId());
+        return credential;
+    }
 
     private FavoriteItemResponse toItemResponse(Favorite favorite) {
         return new FavoriteItemResponse(

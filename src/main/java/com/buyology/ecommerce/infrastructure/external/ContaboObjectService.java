@@ -64,6 +64,29 @@ public class ContaboObjectService {
     }
 
     /**
+     * Presigned URL that forces a browser download (Content-Disposition: attachment)
+     * with the given file name. Use for generated files like revenue exports.
+     */
+    public String getPresignedDownloadUrl(String key, String fileName) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        String safeName = (fileName == null ? "download" : fileName).replace("\"", "").replace("\n", "").replace("\r", "");
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(key)
+                .responseContentDisposition("attachment; filename=\"" + safeName + "\"")
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(2))
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    /**
      * Generates a presigned URL for a given S3 key or existing full URL.
      */
     public String getPresignedUrl(String key) {

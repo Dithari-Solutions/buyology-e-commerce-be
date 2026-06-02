@@ -33,6 +33,14 @@ public class Order {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    /**
+     * Optimistic-locking version — prevents lost updates when concurrent actors
+     * (e.g. admin status change vs. courier-backend sync) mutate the same order.
+     */
+    @Version
+    @Column(name = "version")
+    private Long version;
+
     // ── Actor IDs (cross-service UUIDs, no DB-level FK) ──────────────────────
 
     @Column(name = "user_id", nullable = false)
@@ -231,6 +239,9 @@ public class Order {
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }

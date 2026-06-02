@@ -3,11 +3,19 @@ package com.buyology.ecommerce.game.domain;
 import com.buyology.ecommerce.game.enums.GameType;
 import com.buyology.ecommerce.user.domain.Users;
 import jakarta.persistence.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "game_results")
+@Table(
+        name = "game_results",
+        // Enforces the daily-play limit at the DB level so concurrent submits
+        // cannot both pass the check-then-act guard and double-award tokens.
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_game_results_user_play_date",
+                columnNames = {"user_id", "play_date"})
+)
 public class GameResult {
 
     @Id
@@ -31,6 +39,10 @@ public class GameResult {
     @Column(name = "played_at", nullable = false)
     private LocalDateTime playedAt;
 
+    /** Calendar day of the play, used by the daily-limit unique constraint. */
+    @Column(name = "play_date", nullable = false)
+    private LocalDate playDate;
+
     public GameResult() {
     }
 
@@ -40,6 +52,7 @@ public class GameResult {
         this.score = score;
         this.isSuccess = isSuccess;
         this.playedAt = playedAt;
+        this.playDate = playedAt != null ? playedAt.toLocalDate() : null;
     }
 
     public UUID getId() {
@@ -88,5 +101,14 @@ public class GameResult {
 
     public void setPlayedAt(LocalDateTime playedAt) {
         this.playedAt = playedAt;
+        this.playDate = playedAt != null ? playedAt.toLocalDate() : null;
+    }
+
+    public LocalDate getPlayDate() {
+        return playDate;
+    }
+
+    public void setPlayDate(LocalDate playDate) {
+        this.playDate = playDate;
     }
 }

@@ -7,6 +7,7 @@ import com.buyology.ecommerce.cart.service.CartService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,7 +37,7 @@ public class CartController {
     @PostMapping("/{authCredentialId}/items")
     public ResponseEntity<ApiResponse<CartResponse>> addItem(
             @PathVariable UUID authCredentialId,
-            @RequestBody AddToCartRequest request) {
+            @Valid @RequestBody AddToCartRequest request) {
         return cartService.addItem(authCredentialId, request);
     }
 
@@ -45,7 +46,7 @@ public class CartController {
     public ResponseEntity<ApiResponse<CartResponse>> updateItemQuantity(
             @PathVariable UUID authCredentialId,
             @PathVariable UUID cartItemId,
-            @RequestBody UpdateCartItemRequest request) {
+            @Valid @RequestBody UpdateCartItemRequest request) {
         return cartService.updateItemQuantity(authCredentialId, cartItemId, request);
     }
 

@@ -110,7 +110,16 @@ public class SecurityConfig {
                         // Order endpoints require authentication
                         .requestMatchers("/api/orders/**").authenticated()
                         .requestMatchers("/api/courier/orders/**").authenticated()
-                        // All other requests
+                        // Per-user resources — must be authenticated; ownership is enforced
+                        // at the service layer (see SecurityUtils.requireSelf*).
+                        .requestMatchers("/api/cart/**").authenticated()
+                        .requestMatchers("/api/favorites/**").authenticated()
+                        .requestMatchers("/api/users/**").authenticated()
+                        .requestMatchers("/api/membership/**").authenticated()
+                        .requestMatchers("/api/game/**").authenticated()
+                        // Review/question reads are public; writes are gated by
+                        // method-level @PreAuthorize + ownership checks in the service.
+                        // All other requests must be authenticated by default (deny-by-default).
                         .anyRequest().permitAll())
                 .formLogin(form -> form.disable())
                 .httpBasic(httpBasic -> httpBasic.disable());
@@ -128,6 +137,13 @@ public class SecurityConfig {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
+        // Fail fast: a wildcard origin combined with allowCredentials=true is both
+        // rejected by the browser and a security hole. Refuse to start with it.
+        if (allowed.isEmpty() || allowed.contains("*")) {
+            throw new IllegalStateException(
+                    "app.cors.allowed-origins must be a non-empty explicit allowlist (no '*') "
+                    + "because credentials are allowed. Configured value: '" + allowedOriginsCsv + "'");
+        }
         configuration.setAllowedOrigins(allowed);
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));

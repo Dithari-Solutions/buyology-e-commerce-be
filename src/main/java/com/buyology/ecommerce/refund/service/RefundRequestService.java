@@ -2,6 +2,7 @@ package com.buyology.ecommerce.refund.service;
 
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.order.domain.Order;
@@ -183,6 +184,13 @@ public class RefundRequestService {
     public RefundRequestResponse setReturnMethod(UUID id, UUID userId, SetReturnMethodRequest request) {
         RefundRequest req = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new RefundException("Refund request not found"));
+
+        // Customer-initiated, money-relevant action (sets the courier fee withheld
+        // from the refund): verify the caller actually owns the underlying order.
+        // The order carries an authCredentialId; resolve it to a Users.id and assert
+        // the authenticated principal is that user (403 otherwise).
+        assertOwnsOrder(req.getOrderId());
+
         if (req.getStatus() != RefundRequestStatus.APPROVED) {
             throw new RefundException("Return method can only be set on an approved request");
         }
@@ -208,6 +216,25 @@ public class RefundRequestService {
         Order order = orderRepository.findById(req.getOrderId()).orElse(null);
         notifyMethodConfirmed(req, order);
         return toResponse(req);
+    }
+
+    /**
+     * Ownership guard for customer-initiated refund actions. The client supplies
+     * the order indirectly; the order stores an {@code authCredentialId} (NOT a
+     * Users.id), so we resolve the credential to its owning Users.id and assert
+     * the authenticated principal matches it. Throws 403 on mismatch.
+     */
+    private void assertOwnsOrder(UUID orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        UUID authCredentialId = order.getAuthCredentialId();
+        if (authCredentialId == null) {
+            throw new RefundException("Order is not linked to an account");
+        }
+        UUID ownerUserId = authCredentialRepository.findById(authCredentialId)
+                .map(c -> c.getUserId())
+                .orElseThrow(() -> new RefundException("Order owner could not be resolved"));
+        SecurityUtils.requireSelf(ownerUserId);
     }
 
     // ── Admin ───────────────────────────────────────────────────────────────
@@ -287,19 +314,54 @@ public class RefundRequestService {
             throw new RefundException("Refund can only be paid after the product is received");
         }
 
-        PaymentTransaction txn = paymentTxRepository.findById(req.getPaymentTransactionId())
+        // Lock the transaction row so two concurrent pay()/refund attempts
+        // serialize on the read-check-write of refund state instead of racing.
+        PaymentTransaction txn = paymentTxRepository.findWithLockById(req.getPaymentTransactionId())
                 .orElseThrow(() -> new RefundException("Payment transaction not found"));
         if (txn.getPaymobTransactionId() == null) {
             throw new RefundException("Payment transaction has no Paymob transaction id — cannot refund");
         }
 
-        long amountCents = txn.getAmountCents();
+        // Refundable = charged amount − courier fee − amount already refunded.
+        // All math is done in the transaction's currency (what Paymob charged).
+        String txCurrency = txn.getCurrency();
+        BigDecimal courierFee = BigDecimal.ZERO;
+        if (req.getCourierFeeAmount() != null
+                && req.getCourierFeeAmount().compareTo(BigDecimal.ZERO) > 0) {
+            String feeCurrency = req.getCourierFeeCurrency() != null
+                    ? req.getCourierFeeCurrency()
+                    : txCurrency;
+            courierFee = feeCurrency.equalsIgnoreCase(txCurrency)
+                    ? req.getCourierFeeAmount()
+                    : currencyService.convert(req.getCourierFeeAmount(), feeCurrency, txCurrency);
+        }
+
+        BigDecimal alreadyRefunded = paymentRefundRepository
+                .sumAmountByTransactionAndStatus(txn, RefundStatus.SUCCESS);
+        if (alreadyRefunded == null) {
+            alreadyRefunded = BigDecimal.ZERO;
+        }
+
+        BigDecimal refundAmount = txn.getAmount()
+                .subtract(courierFee)
+                .subtract(alreadyRefunded)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        if (refundAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RefundException(
+                    "Nothing to refund: charged " + txn.getAmount() + " " + txCurrency
+                            + ", courier fee " + courierFee + ", already refunded " + alreadyRefunded);
+        }
+
+        long amountCents = refundAmount
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .longValueExact();
 
         PaymentRefund refundRow = new PaymentRefund();
         refundRow.setTransaction(txn);
-        refundRow.setAmount(txn.getAmount());
+        refundRow.setAmount(refundAmount);
         refundRow.setAmountCents(amountCents);
-        refundRow.setCurrency(txn.getCurrency());
+        refundRow.setCurrency(txCurrency);
         refundRow.setReason("Refund request " + req.getId());
         refundRow.setRefundedBy(adminId);
         refundRow.setStatus(RefundStatus.PENDING);
@@ -317,7 +379,12 @@ public class RefundRequestService {
             refundRow.setStatus(RefundStatus.SUCCESS);
             paymentRefundRepository.save(refundRow);
 
-            txn.setStatus(PaymentStatus.REFUNDED);
+            // Fully refunded only when total successful refunds reach the charged amount;
+            // otherwise (e.g. courier fee withheld) the transaction is partially refunded.
+            BigDecimal totalRefunded = alreadyRefunded.add(refundAmount);
+            txn.setStatus(totalRefunded.compareTo(txn.getAmount()) >= 0
+                    ? PaymentStatus.REFUNDED
+                    : PaymentStatus.PARTIALLY_REFUNDED);
             paymentTxRepository.save(txn);
 
             req.setPaymentRefundId(refundRow.getId());

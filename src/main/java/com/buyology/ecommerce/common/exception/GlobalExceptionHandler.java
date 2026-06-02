@@ -106,6 +106,22 @@ public class GlobalExceptionHandler {
         return ApiResponse.failure(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    // ── Authentication / authorization ────────────────────────────────────────
+
+    @ExceptionHandler(org.springframework.security.authentication.AuthenticationCredentialsNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthenticated(
+            org.springframework.security.authentication.AuthenticationCredentialsNotFoundException ex) {
+        return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Authentication required");
+    }
+
+    @ExceptionHandler({
+            org.springframework.security.access.AccessDeniedException.class,
+            org.springframework.security.authorization.AuthorizationDeniedException.class
+    })
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(RuntimeException ex) {
+        return ApiResponse.failure(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         log.error("Unexpected error: {}", ex.getMessage(), ex);
