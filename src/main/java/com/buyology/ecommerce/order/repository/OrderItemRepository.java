@@ -178,6 +178,57 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             @Param("from") Instant from,
             @Param("to") Instant to);
 
+    // ── Order-level revenue rows (one row per order, not bucketed) ───────────
+    // gross = scope's item total on the order; refunded = order's PAID refunds
+    // allocated to the scope by item-value share; net is computed in Java.
+
+    /** Platform (supplier_id IS NULL) revenue, one row per order. Optional store filter. */
+    @Query(value = """
+            SELECT CAST(o.id AS text) AS order_id,
+                   MIN(oi.created_at) AS created_at,
+                   SUM(oi.total_price) AS gross,
+                   COALESCE((SELECT COALESCE(SUM(rr.refund_amount), 0)
+                             FROM refund_requests rr
+                             WHERE rr.order_id = o.id AND rr.status = 'PAID'), 0)
+                       * SUM(oi.total_price) / NULLIF(o.total_amount, 0) AS refunded
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE oi.supplier_id IS NULL
+              AND oi.created_at >= :from
+              AND oi.created_at < :to
+              AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
+            GROUP BY o.id, o.total_amount
+            ORDER BY MIN(oi.created_at) DESC
+            """, nativeQuery = true)
+    List<Object[]> platformOrderRows(
+            @Param("from") Instant from,
+            @Param("to") Instant to,
+            @Param("storeId") String storeId);
+
+    /** A single supplier's revenue, one row per order. */
+    @Query(value = """
+            SELECT CAST(o.id AS text) AS order_id,
+                   MIN(oi.created_at) AS created_at,
+                   SUM(oi.total_price) AS gross,
+                   COALESCE((SELECT COALESCE(SUM(rr.refund_amount), 0)
+                             FROM refund_requests rr
+                             WHERE rr.order_id = o.id AND rr.status = 'PAID'), 0)
+                       * SUM(oi.total_price) / NULLIF(o.total_amount, 0) AS refunded
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE oi.supplier_id = :supplierId
+              AND oi.created_at >= :from
+              AND oi.created_at < :to
+              AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+            GROUP BY o.id, o.total_amount
+            ORDER BY MIN(oi.created_at) DESC
+            """, nativeQuery = true)
+    List<Object[]> supplierOrderRows(
+            @Param("supplierId") UUID supplierId,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
+
     /**
      * Items owed to a supplier that are not yet locked into a non-rejected payout
      * request and whose order has been delivered and is not under an active refund

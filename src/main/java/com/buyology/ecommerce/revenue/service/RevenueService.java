@@ -2,6 +2,7 @@ package com.buyology.ecommerce.revenue.service;
 
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
 import com.buyology.ecommerce.revenue.dto.RevenueBucketRow;
+import com.buyology.ecommerce.revenue.dto.RevenueOrderRow;
 import com.buyology.ecommerce.revenue.dto.RevenueReportResponse;
 import com.buyology.ecommerce.revenue.dto.SupplierRevenueOverviewResponse;
 import com.buyology.ecommerce.revenue.dto.SupplierRevenueRow;
@@ -51,7 +52,8 @@ public class RevenueService {
         List<Object[]> rows = orderItemRepository.platformRevenueBuckets(period.getTruncUnit(), fromI, toI, store);
         Map<String, BigDecimal> refunds = refundMap(
                 orderItemRepository.platformRefundBuckets(period.getTruncUnit(), fromI, toI, store));
-        return buildReport(period, window[0], window[1], "Buyology", rows, refunds);
+        List<RevenueOrderRow> orders = orderRows(orderItemRepository.platformOrderRows(fromI, toI, store));
+        return buildReport(period, window[0], window[1], "Buyology", rows, refunds, orders);
     }
 
     public RevenueReportResponse supplierReport(UUID supplierId, RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -61,10 +63,11 @@ public class RevenueService {
         List<Object[]> rows = orderItemRepository.supplierRevenueBuckets(supplierId, period.getTruncUnit(), fromI, toI);
         Map<String, BigDecimal> refunds = refundMap(
                 orderItemRepository.supplierRefundBuckets(supplierId, period.getTruncUnit(), fromI, toI));
+        List<RevenueOrderRow> orders = orderRows(orderItemRepository.supplierOrderRows(supplierId, fromI, toI));
         String label = supplierRepository.findById(supplierId)
                 .map(Supplier::getBusinessName)
                 .orElse(supplierId.toString());
-        return buildReport(period, window[0], window[1], label, rows, refunds);
+        return buildReport(period, window[0], window[1], label, rows, refunds, orders);
     }
 
     public SupplierRevenueOverviewResponse supplierOverview(RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -108,7 +111,7 @@ public class RevenueService {
 
     private RevenueReportResponse buildReport(
             RevenuePeriod period, LocalDate from, LocalDate to, String label,
-            List<Object[]> rows, Map<String, BigDecimal> refunds) {
+            List<Object[]> rows, Map<String, BigDecimal> refunds, List<RevenueOrderRow> orders) {
         List<RevenueBucketRow> buckets = new ArrayList<>();
         long totalOrders = 0;
         BigDecimal totalRevenue = BigDecimal.ZERO;
@@ -116,12 +119,12 @@ public class RevenueService {
         Set<String> seenPeriods = new LinkedHashSet<>();
         for (Object[] row : rows) {
             String period0 = periodLabel(row[0]);
-            long orders = ((Number) row[1]).longValue();
+            long bucketOrders = ((Number) row[1]).longValue();
             BigDecimal revenue = (BigDecimal) row[2];
             BigDecimal refunded = refunds.getOrDefault(period0, BigDecimal.ZERO);
-            buckets.add(new RevenueBucketRow(period0, orders, revenue, refunded, revenue.subtract(refunded)));
+            buckets.add(new RevenueBucketRow(period0, bucketOrders, revenue, refunded, revenue.subtract(refunded)));
             seenPeriods.add(period0);
-            totalOrders += orders;
+            totalOrders += bucketOrders;
             totalRevenue = totalRevenue.add(revenue);
             totalRefunded = totalRefunded.add(refunded);
         }
@@ -133,7 +136,8 @@ public class RevenueService {
             }
         }
         return new RevenueReportResponse(period, from, to, label,
-                totalRevenue, totalRefunded, totalRevenue.subtract(totalRefunded), totalOrders, buckets);
+                totalRevenue, totalRefunded, totalRevenue.subtract(totalRefunded), totalOrders,
+                buckets, orders == null ? List.of() : orders);
     }
 
     /** period label -> allocated refund amount, from a [period, refunded] row list. */
@@ -143,6 +147,27 @@ public class RevenueService {
             map.put(periodLabel(r[0]), (BigDecimal) r[1]);
         }
         return map;
+    }
+
+    /** [order_id, created_at, gross, refunded] rows -> per-order revenue rows. */
+    private List<RevenueOrderRow> orderRows(List<Object[]> rows) {
+        List<RevenueOrderRow> result = new ArrayList<>();
+        for (Object[] r : rows) {
+            String orderId = r[0] != null ? r[0].toString() : null;
+            String createdAt = instantString(r[1]);
+            BigDecimal gross = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
+            BigDecimal refunded = r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO;
+            result.add(new RevenueOrderRow(orderId, createdAt, gross, refunded, gross.subtract(refunded)));
+        }
+        return result;
+    }
+
+    /** Render a JDBC timestamp/instant column as an ISO-8601 string. */
+    private String instantString(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof java.sql.Timestamp ts) return ts.toInstant().toString();
+        if (raw instanceof Instant i) return i.toString();
+        return raw.toString();
     }
 
     /** date_trunc returns a timestamp; keep just the date portion as the bucket label. */
