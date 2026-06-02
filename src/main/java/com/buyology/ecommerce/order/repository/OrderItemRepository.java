@@ -56,7 +56,8 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     // form would emit the unit param twice (SELECT + GROUP BY) as two distinct
     // placeholders, which Postgres rejects as a non-matching GROUP BY expression.
 
-    /** Buyology's own revenue: order items for platform-owned products (supplier_id IS NULL). */
+    /** Buyology's own revenue: order items for platform-owned products (supplier_id IS NULL).
+     *  Optional store filter (pass null storeId for all stores). */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
                    COUNT(DISTINCT oi.order_id) AS orders,
@@ -67,13 +68,15 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY 1
             ORDER BY 1
             """, nativeQuery = true)
     List<Object[]> platformRevenueBuckets(
             @Param("bucket") String bucket,
             @Param("from") Instant from,
-            @Param("to") Instant to);
+            @Param("to") Instant to,
+            @Param("storeId") String storeId);
 
     /** A single supplier's revenue, bucketed by the given unit. */
     @Query(value = """
@@ -120,7 +123,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     // its items' value: refund_amount * scope_item_total / order_total. Bucketed
     // by order item created_at so a refund reduces the period the revenue was booked.
 
-    /** Platform (supplier_id IS NULL) refund allocation, bucketed. */
+    /** Platform (supplier_id IS NULL) refund allocation, bucketed. Optional store filter. */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
                    COALESCE(SUM(rr.refund_amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
@@ -130,13 +133,15 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             WHERE oi.supplier_id IS NULL
               AND oi.created_at >= :from
               AND oi.created_at < :to
+              AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY 1
             ORDER BY 1
             """, nativeQuery = true)
     List<Object[]> platformRefundBuckets(
             @Param("bucket") String bucket,
             @Param("from") Instant from,
-            @Param("to") Instant to);
+            @Param("to") Instant to,
+            @Param("storeId") String storeId);
 
     /** A single supplier's refund allocation, bucketed. */
     @Query(value = """

@@ -37,9 +37,10 @@ public class RevenueExportController {
             @RequestParam(defaultValue = "CSV") RevenueExportFormat format,
             @RequestParam(defaultValue = "MONTHLY") RevenuePeriod period,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) java.util.UUID storeId) {
         RevenueExportResponse result = switch (type) {
-            case PLATFORM -> exportService.exportPlatform(format, period, from, to);
+            case PLATFORM -> exportService.exportPlatform(format, period, from, to, storeId);
             case SUPPLIER_ALL -> exportService.exportSupplierOverview(format, period, from, to);
             case SUPPLIER -> null;
         };

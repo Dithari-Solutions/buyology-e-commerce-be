@@ -28,13 +28,14 @@ public class AdminRevenueController {
         this.revenueService = revenueService;
     }
 
-    /** Buyology's own revenue (platform-owned products). */
+    /** Buyology's own revenue (platform-owned products), optionally filtered to one store. */
     @GetMapping("/platform")
     public ResponseEntity<ApiResponse<RevenueReportResponse>> platform(
             @RequestParam(defaultValue = "MONTHLY") RevenuePeriod period,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return ApiResponse.success(revenueService.platformReport(period, from, to), "Platform revenue");
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) UUID storeId) {
+        return ApiResponse.success(revenueService.platformReport(period, from, to, storeId), "Platform revenue");
     }
 
     /** All suppliers' revenue totals. */

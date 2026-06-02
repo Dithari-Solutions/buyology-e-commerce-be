@@ -3,7 +3,8 @@ package com.buyology.ecommerce.revenue.enums;
 /** File format produced by a revenue export. */
 public enum RevenueExportFormat {
     CSV("text/csv", "csv"),
-    XLSX("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
+    XLSX("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+    PDF("application/pdf", "pdf");
 
     private final String contentType;
     private final String extension;

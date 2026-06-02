@@ -40,12 +40,17 @@ public class RevenueService {
     }
 
     public RevenueReportResponse platformReport(RevenuePeriod period, LocalDate from, LocalDate to) {
+        return platformReport(period, from, to, null);
+    }
+
+    public RevenueReportResponse platformReport(RevenuePeriod period, LocalDate from, LocalDate to, UUID storeId) {
         LocalDate[] window = resolveWindow(period, from, to);
         Instant fromI = startInstant(window[0]);
         Instant toI = endInstant(window[1]);
-        List<Object[]> rows = orderItemRepository.platformRevenueBuckets(period.getTruncUnit(), fromI, toI);
+        String store = storeId != null ? storeId.toString() : null;
+        List<Object[]> rows = orderItemRepository.platformRevenueBuckets(period.getTruncUnit(), fromI, toI, store);
         Map<String, BigDecimal> refunds = refundMap(
-                orderItemRepository.platformRefundBuckets(period.getTruncUnit(), fromI, toI));
+                orderItemRepository.platformRefundBuckets(period.getTruncUnit(), fromI, toI, store));
         return buildReport(period, window[0], window[1], "Buyology", rows, refunds);
     }
 
@@ -147,16 +152,24 @@ public class RevenueService {
         return s.length() >= 10 ? s.substring(0, 10) : s;
     }
 
-    /** Default window when none supplied: a sensible recent span per granularity. */
+    /**
+     * Default window when no dates are supplied — each granularity defaults to the
+     * current calendar unit it lives in (overridable via the date filter):
+     *   DAILY   → current week (days of this week)
+     *   WEEKLY  → current month (weeks of this month)
+     *   MONTHLY → current year (months of this year)
+     *   YEARLY  → current year (this year's total)
+     */
     private LocalDate[] resolveWindow(RevenuePeriod period, LocalDate from, LocalDate to) {
-        LocalDate end = to != null ? to : LocalDate.now(ZoneOffset.UTC);
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        LocalDate end = to != null ? to : today;
         LocalDate start = from;
         if (start == null) {
             start = switch (period) {
-                case DAILY -> end.minusDays(29);
-                case WEEKLY -> end.minusWeeks(11);
-                case MONTHLY -> end.minusMonths(11);
-                case YEARLY -> end.minusYears(4);
+                case DAILY -> today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+                case WEEKLY -> today.withDayOfMonth(1);
+                case MONTHLY -> today.withDayOfYear(1);
+                case YEARLY -> today.withDayOfYear(1);
             };
         }
         return new LocalDate[]{start, end};
