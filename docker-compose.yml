@@ -79,6 +79,9 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      # Hybrid Flyway adoption: stamp the existing (non-empty) schema at baseline
+      # version 0 instead of failing on first run. Not a secret — a plain config flag.
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
