@@ -49,6 +49,21 @@ public class ContaboObjectService {
     }
 
     /**
+     * Uploads raw bytes (e.g. a generated report) to Contabo S3 and returns the S3 key.
+     * Use this for in-memory content that isn't a {@link MultipartFile}.
+     */
+    public String uploadBytes(String key, byte[] data, String contentType) {
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(key)
+                .contentType(contentType)
+                .build();
+
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+        return key;
+    }
+
+    /**
      * Generates a presigned URL for a given S3 key or existing full URL.
      */
     public String getPresignedUrl(String key) {

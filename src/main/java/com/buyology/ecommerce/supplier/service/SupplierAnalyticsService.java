@@ -2,6 +2,12 @@ package com.buyology.ecommerce.supplier.service;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
+import com.buyology.ecommerce.revenue.dto.RevenueExportResponse;
+import com.buyology.ecommerce.revenue.dto.RevenueReportResponse;
+import com.buyology.ecommerce.revenue.enums.RevenueExportFormat;
+import com.buyology.ecommerce.revenue.enums.RevenuePeriod;
+import com.buyology.ecommerce.revenue.service.RevenueExportService;
+import com.buyology.ecommerce.revenue.service.RevenueService;
 import com.buyology.ecommerce.supplier.domain.Supplier;
 import com.buyology.ecommerce.supplier.repository.SupplierRepository;
 import org.springframework.http.HttpStatus;
@@ -23,12 +29,18 @@ public class SupplierAnalyticsService {
 
     private final SupplierRepository supplierRepository;
     private final OrderItemRepository orderItemRepository;
+    private final RevenueService revenueService;
+    private final RevenueExportService revenueExportService;
 
     public SupplierAnalyticsService(
             SupplierRepository supplierRepository,
-            OrderItemRepository orderItemRepository) {
+            OrderItemRepository orderItemRepository,
+            RevenueService revenueService,
+            RevenueExportService revenueExportService) {
         this.supplierRepository = supplierRepository;
         this.orderItemRepository = orderItemRepository;
+        this.revenueService = revenueService;
+        this.revenueExportService = revenueExportService;
     }
 
     public ResponseEntity<ApiResponse<Map<String, Object>>> getSummary() {
@@ -69,6 +81,29 @@ public class SupplierAnalyticsService {
         result.put("to", toDate.toString());
         result.put("monthly", monthly);
         return ApiResponse.success(result, "Analytics");
+    }
+
+    /** Bucketed revenue report (daily/weekly/monthly/yearly) for the current supplier. */
+    public ResponseEntity<ApiResponse<RevenueReportResponse>> getRevenue(
+            RevenuePeriod period, LocalDate from, LocalDate to) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+        }
+        return ApiResponse.success(
+                revenueService.supplierReport(supplier.getId(), period, from, to), "Revenue");
+    }
+
+    /** Export the current supplier's revenue to Contabo and return a download link. */
+    public ResponseEntity<ApiResponse<RevenueExportResponse>> exportRevenue(
+            RevenueExportFormat format, RevenuePeriod period, LocalDate from, LocalDate to) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+        }
+        return ApiResponse.created(
+                revenueExportService.exportSupplier(supplier.getId(), format, period, from, to),
+                "Revenue export generated");
     }
 
     private Supplier resolveCurrentSupplier() {
