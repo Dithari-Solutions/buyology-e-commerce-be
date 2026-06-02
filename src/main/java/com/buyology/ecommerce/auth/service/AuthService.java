@@ -31,6 +31,7 @@ import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
+import com.buyology.ecommerce.common.utils.PasswordPolicy;
 import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.infrastructure.config.OtpProperties;
 import com.buyology.ecommerce.user.domain.Users;
@@ -87,8 +88,10 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
         }
 
-        if (request.getPassword() == null || request.getPassword().length() < 8) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        try {
+            PasswordPolicy.validate(request.getPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         }
 
         if (!request.getPassword().equals(request.getRepeatedPassword())) {
@@ -226,8 +229,10 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is not valid");
         }
 
-        if (request.getPassword() == null || request.getPassword().length() < 8) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        try {
+            PasswordPolicy.validate(request.getPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         }
 
         if (!request.getPassword().equals(request.getRepeatedPassword())) {
@@ -592,8 +597,10 @@ public class AuthService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Reset code is required");
         }
 
-        if (request.getNewPassword() == null || request.getNewPassword().length() < 8) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        try {
+            PasswordPolicy.validate(request.getNewPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         }
 
         if (!request.getNewPassword().equals(request.getRepeatPassword())) {
@@ -688,7 +695,7 @@ public class AuthService {
 
         String accessToken = tokenService.generateAccessToken(credentials, audience);
         var refreshToken = tokenService.generateRefreshToken(credentials, extractDeviceInfo(httpRequest));
-        String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.getToken());
+        String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.rawValue());
 
         SignInResponse body = new SignInResponse(accessToken, tokenService.getAccessTokenExpirySeconds());
 

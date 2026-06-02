@@ -1,17 +1,17 @@
 package com.buyology.ecommerce.auth.service;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.SecretKey;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,10 +23,16 @@ import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.domain.RefreshToken;
 import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.repository.RefreshTokenRepository;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.role.domain.UserPermission;
 import com.buyology.ecommerce.role.repository.RolePermissionRepository;
 import com.buyology.ecommerce.role.repository.UserPermissionRepository;
 import com.buyology.ecommerce.role.repository.UserRoleRepository;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 
 import java.nio.charset.StandardCharsets;
 
@@ -37,11 +43,13 @@ public class TokenService {
 
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRoleRepository userRoleRepository;
     private final RolePermissionRepository rolePermissionRepository;
     private final UserPermissionRepository userPermissionRepository;
-    private final String secret;
+    private final SecretKey signingKey;
     private final String issuer;
     private final long accessTokenValidityMinutes;
     private final long refreshTokenValidityDays;
@@ -61,7 +69,9 @@ public class TokenService {
         this.userRoleRepository = userRoleRepository;
         this.rolePermissionRepository = rolePermissionRepository;
         this.userPermissionRepository = userPermissionRepository;
-        this.secret = secret;
+        // HS256 signing key. JwtSecretValidator guarantees the secret is >= 32 chars
+        // (>= 256 bits), which Keys.hmacShaKeyFor requires.
+        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.issuer = issuer;
         this.accessTokenValidityMinutes = accessTokenValidityMinutes;
         this.refreshTokenValidityDays = refreshTokenValidityDays;
@@ -77,7 +87,7 @@ public class TokenService {
     }
 
     // ---------------------------
-    // Generate access token (JWT — manual HMAC-SHA256)
+    // Generate access token (JWT — HS256, signed with jjwt)
     // ---------------------------
     public String generateAccessToken(AuthCredentials authCredentials) {
         return generateAccessToken(authCredentials, "web");
@@ -85,8 +95,6 @@ public class TokenService {
 
     public String generateAccessToken(AuthCredentials authCredentials, String audience) {
         String safeAudience = (audience == null || audience.isBlank()) ? "web" : audience;
-        String header = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
 
         Instant now = Instant.now();
         Instant exp = now.plus(accessTokenValidityMinutes, ChronoUnit.MINUTES);
@@ -113,79 +121,91 @@ public class TokenService {
             }
         }
 
-        String rolesJson = roleNames.stream()
-                .map(r -> "\"" + r + "\"")
-                .collect(Collectors.joining(",", "[", "]"));
-        String permissionsJson = effectivePermissions.stream()
-                .map(p -> "\"" + p + "\"")
-                .collect(Collectors.joining(",", "[", "]"));
-
-        String payloadJson = String.format(
-                "{\"iss\":\"%s\",\"aud\":\"%s\",\"sub\":\"%s\",\"uid\":\"%s\",\"roles\":%s,\"permissions\":%s,\"iat\":%d,\"exp\":%d}",
-                issuer,
-                safeAudience,
-                authCredentials.getId(),
-                userId,
-                rolesJson,
-                permissionsJson,
-                now.getEpochSecond(),
-                exp.getEpochSecond());
-
-        String payload = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
-
-        String signature = sign(header + "." + payload, secret);
-        return String.format("%s.%s.%s", header, payload, signature);
-    }
-
-    private String sign(String data, String secretKey) {
-        try {
-            Mac hmac = Mac.getInstance("HmacSHA256");
-            hmac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(hmac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception e) {
-            throw new RuntimeException("Error signing token", e);
-        }
+        return Jwts.builder()
+                .issuer(issuer)
+                .audience().add(safeAudience).and()
+                .subject(authCredentials.getId().toString())
+                .claim("uid", userId.toString())
+                .claim("roles", List.copyOf(roleNames))
+                .claim("permissions", List.copyOf(effectivePermissions))
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(signingKey)
+                .compact();
     }
 
     // ---------------------------
-    // Validate access token
+    // Validate / parse access token (jjwt — verifies signature, expiry, issuer)
     // ---------------------------
     public boolean validateAccessToken(String token) {
+        return parseClaims(token) != null;
+    }
+
+    /**
+     * Returns the authenticated subject (the AuthCredentials id) from a valid token, or null.
+     */
+    public UUID getAuthCredentialId(String token) {
+        Claims claims = parseClaims(token);
+        if (claims == null) return null;
         try {
-            String[] parts = token.split("\\.");
-            if (parts.length != 3) {
-                log.warn("[JWT] Invalid structure: {} parts", parts.length);
-                return false;
-            }
-
-            String expected = sign(parts[0] + "." + parts[1], secret);
-            if (!expected.equals(parts[2])) {
-                log.warn("[JWT] Signature mismatch. expected={} actual={}", expected, parts[2]);
-                return false;
-            }
-
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
-            long exp = Long.parseLong(payloadJson.replaceAll(".*\"exp\":(\\d+).*", "$1"));
-            if (Instant.now().getEpochSecond() >= exp) {
-                log.warn("[JWT] Token expired. exp={} now={}", exp, Instant.now().getEpochSecond());
-                return false;
-            }
-            return true;
+            return UUID.fromString(claims.getSubject());
         } catch (Exception e) {
-            log.warn("[JWT] Validation exception: {}", e.getMessage());
-            return false;
+            return null;
+        }
+    }
+
+    /**
+     * Returns the audience claim from a valid token, or "web" when absent/invalid.
+     */
+    public String getAudience(String token) {
+        Claims claims = parseClaims(token);
+        if (claims == null) return "web";
+        Set<String> aud = claims.getAudience();
+        if (aud == null || aud.isEmpty()) return "web";
+        return aud.iterator().next();
+    }
+
+    /**
+     * Parses and fully validates the token (signature, expiry, issuer). Returns the
+     * claims on success, or null on any validation failure. Never logs token material.
+     */
+    private Claims parseClaims(String token) {
+        try {
+            Jws<Claims> jws = Jwts.parser()
+                    .verifyWith(signingKey)
+                    .requireIssuer(issuer)
+                    .build()
+                    .parseSignedClaims(token);
+            return jws.getPayload();
+        } catch (Exception e) {
+            log.warn("[JWT] Access token validation failed: {}", e.getClass().getSimpleName());
+            return null;
         }
     }
 
     // ---------------------------
-    // Persist refresh token
+    // Persist refresh token (opaque, random, stored hashed)
     // ---------------------------
-    public RefreshToken generateRefreshToken(AuthCredentials authCredentials, String deviceInfo) {
-        String tokenValue = UUID.randomUUID().toString();
+
+    /**
+     * Holds a freshly issued refresh token: the persisted entity (with the HASH stored)
+     * and the RAW value that must be handed to the client (and never persisted).
+     */
+    public record IssuedRefreshToken(RefreshToken token, String rawValue) {}
+
+    public IssuedRefreshToken generateRefreshToken(AuthCredentials authCredentials, String deviceInfo) {
+        String rawValue = newOpaqueToken();
+        String hashed = SecurityUtils.sha256Hex(rawValue);
         Instant expiry = Instant.now().plus(refreshTokenValidityDays, ChronoUnit.DAYS);
-        return refreshTokenRepository.save(new RefreshToken(authCredentials, tokenValue, expiry, deviceInfo));
+        RefreshToken saved = refreshTokenRepository.save(
+                new RefreshToken(authCredentials, hashed, expiry, deviceInfo));
+        return new IssuedRefreshToken(saved, rawValue);
+    }
+
+    private static String newOpaqueToken() {
+        byte[] bytes = new byte[32]; // 256 bits of entropy
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     // ---------------------------
@@ -247,7 +267,8 @@ public class TokenService {
     }
 
     public RotateTokensResult rotateTokens(String refreshTokenValue, String deviceInfo, String audience) {
-        RefreshToken existing = refreshTokenRepository.findByToken(refreshTokenValue)
+        String hashed = SecurityUtils.sha256Hex(refreshTokenValue);
+        RefreshToken existing = refreshTokenRepository.findByToken(hashed)
                 .orElseThrow(() -> new SecurityException("Invalid refresh token"));
 
         if (existing.isRevoked() || existing.isExpired()) {
@@ -259,11 +280,11 @@ public class TokenService {
 
         AuthCredentials creds = existing.getAuthCredential();
         String newAccessToken = generateAccessToken(creds, audience);
-        RefreshToken newRefreshToken = generateRefreshToken(creds, deviceInfo);
+        IssuedRefreshToken newRefreshToken = generateRefreshToken(creds, deviceInfo);
 
         return new RotateTokensResult(
                 new SignInResponse(newAccessToken, getAccessTokenExpirySeconds()),
-                buildRefreshTokenCookieString(newRefreshToken.getToken())
+                buildRefreshTokenCookieString(newRefreshToken.rawValue())
         );
     }
 
@@ -271,7 +292,8 @@ public class TokenService {
     // Revoke refresh token (logout)
     // ---------------------------
     public void revokeRefreshToken(String refreshTokenValue) {
-        refreshTokenRepository.findByToken(refreshTokenValue).ifPresent(token -> {
+        String hashed = SecurityUtils.sha256Hex(refreshTokenValue);
+        refreshTokenRepository.findByToken(hashed).ifPresent(token -> {
             token.revoke();
             refreshTokenRepository.save(token);
         });

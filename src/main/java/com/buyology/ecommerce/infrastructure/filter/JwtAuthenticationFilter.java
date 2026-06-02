@@ -19,7 +19,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -71,7 +70,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        UUID authCredentialsId = extractSubject(token);
+        UUID authCredentialsId = tokenService.getAuthCredentialId(token);
         if (authCredentialsId == null) {
             filterChain.doFilter(request, response);
             return;
@@ -112,7 +111,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         || "SUPERADMIN".equalsIgnoreCase(r)
                         || "CUSTOMER_SUPPORT".equalsIgnoreCase(r));
         if (isAdminUserType || isPrivilegedRole) {
-            String audience = extractAudience(token);
+            String audience = tokenService.getAudience(token);
             if (!"dashboard".equals(audience)) {
                 filterChain.doFilter(request, response);
                 return;
@@ -145,27 +144,5 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         filterChain.doFilter(request, response);
-    }
-
-    private UUID extractSubject(String token) {
-        try {
-            String[] parts = token.split("\\.");
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
-            String sub = payloadJson.replaceAll(".*\"sub\":\"([^\"]+)\".*", "$1");
-            return UUID.fromString(sub);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String extractAudience(String token) {
-        try {
-            String[] parts = token.split("\\.");
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
-            if (!payloadJson.contains("\"aud\"")) return "web";
-            return payloadJson.replaceAll(".*\"aud\":\"([^\"]+)\".*", "$1");
-        } catch (Exception e) {
-            return "web";
-        }
     }
 }

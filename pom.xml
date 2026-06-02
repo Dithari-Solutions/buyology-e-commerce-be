@@ -91,6 +91,20 @@
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+
+		<!-- Flyway — versioned DB migrations. Adopted in "hybrid" mode:
+		     baseline-on-migrate stamps existing databases, while ddl-auto=update
+		     remains the schema authority during the transition. New schema changes
+		     go in versioned V<n>__*.sql files under classpath:db/migration. -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>

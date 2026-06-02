@@ -5,6 +5,7 @@ import com.buyology.ecommerce.auth.dto.SignInResponse;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.auth.service.AuthService;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.PasswordPolicy;
 import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.supplier.domain.Supplier;
 import com.buyology.ecommerce.supplier.domain.SupplierSetupToken;
@@ -61,17 +62,13 @@ public class SupplierAuthService {
     public ResponseEntity<ApiResponse<SignInResponse>> setPassword(
             SetPasswordRequest request, HttpServletRequest httpRequest) {
 
-        if (request.getPassword().length() < 8) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        try {
+            PasswordPolicy.validate(request.getPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
         }
         if (!request.getPassword().equals(request.getConfirmedPassword())) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Passwords do not match");
-        }
-        boolean hasUppercase = request.getPassword().chars().anyMatch(Character::isUpperCase);
-        boolean hasDigit = request.getPassword().chars().anyMatch(Character::isDigit);
-        if (!hasUppercase || !hasDigit) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
-                    "Password must contain at least one uppercase letter and one number");
         }
 
         SupplierSetupToken setupToken = setupTokenRepository.findByTokenAndUsedFalse(request.getToken())

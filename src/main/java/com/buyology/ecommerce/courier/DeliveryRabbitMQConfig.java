@@ -35,6 +35,11 @@ public class DeliveryRabbitMQConfig {
                                   Jackson2JsonMessageConverter converter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(converter);
+        // Required so the outbox publisher can block on broker ACKs
+        // (RabbitTemplate#invoke + waitForConfirmsOrDie). Has no effect unless the
+        // underlying connection factory is in CONFIRMING/correlated mode, which is
+        // enabled via spring.rabbitmq.publisher-confirm-type=correlated.
+        template.setMandatory(true);
         return template;
     }
 }

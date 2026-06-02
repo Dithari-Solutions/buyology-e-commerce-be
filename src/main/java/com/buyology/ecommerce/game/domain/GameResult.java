@@ -39,8 +39,13 @@ public class GameResult {
     @Column(name = "played_at", nullable = false)
     private LocalDateTime playedAt;
 
-    /** Calendar day of the play, used by the daily-limit unique constraint. */
-    @Column(name = "play_date", nullable = false)
+    /**
+     * Calendar day of the play, used by the daily-limit unique constraint.
+     * Nullable so the column + unique constraint can be added by ddl-auto to a table
+     * that already holds rows (existing rows become NULL; Postgres treats NULLs as
+     * distinct, so daily-play uniqueness still holds for every new row).
+     */
+    @Column(name = "play_date")
     private LocalDate playDate;
 
     public GameResult() {
