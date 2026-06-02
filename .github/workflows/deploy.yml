@@ -3,14 +3,41 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
   DEPLOY_PATH: /opt/buyology-ecommerce-be
 
 jobs:
 
+  # ── Job 0: Run unit + Testcontainers integration tests ─────────────────────
+  # ubuntu-latest ships a running Docker daemon, so Testcontainers (real Postgres)
+  # works out of the box. We run all *Test (unit) and *IT (integration) classes
+  # but NOT EcommerceBackendApplicationTests, whose @SpringBootTest needs the full
+  # stack (Redis/RabbitMQ/Elasticsearch) that isn't provisioned in this job.
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Run unit + integration tests
+        run: ./mvnw -B test -Dtest='*Test,*IT' -DfailIfNoTests=false
+
   # ── Job 1: Build JAR, build & push Docker image ────────────────────────────
+  # Only on push to main — PRs run the test job only (no build/deploy).
   build-and-push:
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -50,6 +77,7 @@ jobs:
   # ── Job 2: Deploy to VPS via Docker Compose ────────────────────────────────
   deploy:
     needs: build-and-push
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
