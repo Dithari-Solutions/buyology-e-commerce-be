@@ -65,7 +65,7 @@ public class AdminStoryController {
     public ResponseEntity<ApiResponse<StoryResponse>> createStory(
             @org.springframework.web.bind.annotation.RequestPart("request") String requestJson,
             @org.springframework.web.bind.annotation.RequestPart("thumbnail") MultipartFile thumbnail,
-            @org.springframework.web.bind.annotation.RequestPart("mediaFiles") List<MultipartFile> mediaFiles) throws Exception {
+            @org.springframework.web.bind.annotation.RequestPart(value = "mediaFiles", required = false) List<MultipartFile> mediaFiles) throws Exception {
 
         UUID createdBy = SecurityUtils.currentUserIdOrNull();
         CreateStoryRequest request = objectMapper.readValue(requestJson, CreateStoryRequest.class);
