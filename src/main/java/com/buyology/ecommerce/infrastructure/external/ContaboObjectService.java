@@ -9,6 +9,7 @@ import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -133,6 +134,42 @@ public class ContaboObjectService {
 
         PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
         return presignedRequest.url().toString();
+    }
+
+    /**
+     * Generates a presigned PUT URL so a client (browser) can upload a file
+     * directly to Contabo S3, bypassing the application server and any edge
+     * body-size limits. The client MUST send the exact same Content-Type that
+     * is signed here, and nothing else, or the upload will be rejected.
+     */
+    public String generatePresignedUploadUrl(String key, String contentType, Duration expiry) {
+        PutObjectRequest objectRequest = PutObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(key)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(expiry)
+                .putObjectRequest(objectRequest)
+                .build();
+
+        return s3Presigner.presignPutObject(presignRequest).url().toString();
+    }
+
+    /**
+     * Server-side copy of an object within the same bucket (no data is streamed
+     * through this application). Used to move a staged upload into its final key.
+     */
+    public void copyObject(String sourceKey, String destinationKey) {
+        CopyObjectRequest copyRequest = CopyObjectRequest.builder()
+                .sourceBucket(properties.getBucketName())
+                .sourceKey(sourceKey)
+                .destinationBucket(properties.getBucketName())
+                .destinationKey(destinationKey)
+                .build();
+
+        s3Client.copyObject(copyRequest);
     }
 
     /**

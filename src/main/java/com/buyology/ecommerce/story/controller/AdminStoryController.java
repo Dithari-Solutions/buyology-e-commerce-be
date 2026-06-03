@@ -74,6 +74,23 @@ public class AdminStoryController {
         return ApiResponse.created(response, "Story created successfully");
     }
 
+    @Operation(summary = "Get a presigned URL to upload a story media file directly to storage")
+    @PostMapping("/presign-upload")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.story.dto.PresignUploadResponse>> presignUpload(
+            @jakarta.validation.Valid @RequestBody com.buyology.ecommerce.story.dto.PresignUploadRequest request) {
+        return ApiResponse.success(storyService.presignUpload(request), "Upload URL generated");
+    }
+
+    @Operation(summary = "Create a story from already-uploaded media keys (direct-to-storage upload)")
+    @PostMapping("/create-direct")
+    public ResponseEntity<ApiResponse<StoryResponse>> createStoryDirect(
+            @jakarta.validation.Valid @RequestBody com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest request) {
+        UUID createdBy = SecurityUtils.currentUserIdOrNull();
+        StoryResponse response = StoryResponse.from(
+                storyService.createStoryFromKeys(request, createdBy), Language.AZ);
+        return ApiResponse.created(response, "Story created successfully");
+    }
+
     @Operation(summary = "Add media files to an existing story")
     @PostMapping(value = "/{storyId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<Void>> addMediaToStory(

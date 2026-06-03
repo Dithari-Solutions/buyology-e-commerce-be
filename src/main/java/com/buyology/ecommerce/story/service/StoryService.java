@@ -31,6 +31,11 @@ import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 @Service
 public class StoryService {
 
+    /** Prefix under which direct uploads are staged before a story is created. */
+    private static final String STAGING_PREFIX = "stories/uploads/";
+    /** How long a presigned upload URL stays valid. */
+    private static final java.time.Duration UPLOAD_URL_TTL = java.time.Duration.ofMinutes(30);
+
     private final StoryRepository storyRepository;
     private final com.buyology.ecommerce.story.repository.StoryMediaRepository storyMediaRepository;
     private final StoryViewRepository storyViewRepository;
@@ -132,6 +137,85 @@ public class StoryService {
         storyRepository.save(savedStory);
 
         return savedStory;
+    }
+
+    /**
+     * Issues a presigned URL so the client can upload a single story media file
+     * (image or video) directly to storage, bypassing the app server and edge
+     * body-size limits. The file is staged under {@code stories/uploads/} and
+     * moved into its final location when the story is created.
+     */
+    public com.buyology.ecommerce.story.dto.PresignUploadResponse presignUpload(
+            com.buyology.ecommerce.story.dto.PresignUploadRequest request) {
+        if (!FileValidationUtils.isAllowedMediaContentType(request.getContentType())) {
+            throw new IllegalArgumentException("Unsupported content type: " + request.getContentType());
+        }
+        String ext = extractExtension(request.getFilename());
+        String key = STAGING_PREFIX + UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+        String uploadUrl = contaboObjectService.generatePresignedUploadUrl(key, request.getContentType(), UPLOAD_URL_TTL);
+        return new com.buyology.ecommerce.story.dto.PresignUploadResponse(uploadUrl, key);
+    }
+
+    /**
+     * Creates a story from media that was already uploaded directly to storage
+     * via {@link #presignUpload}. Staged objects are copied (server-side) into
+     * {@code stories/{storyId}/...} so the existing delete-by-folder cleanup
+     * keeps working, then the staged copies are removed.
+     */
+    @Transactional
+    public Story createStoryFromKeys(com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest request, UUID createdBy) {
+        validateStagingKey(request.getThumbnailKey());
+
+        Story story = new Story(createdBy);
+        for (StoryTranslation translation : buildTranslations(story, request.getTranslation())) {
+            story.addTranslation(translation);
+        }
+        Story savedStory = storyRepository.save(story);
+
+        // Thumbnail: move staged upload into the story folder
+        String thumbExt = extractExtension(request.getThumbnailKey());
+        String thumbFinalKey = "stories/" + savedStory.getId() + "/thumbnail" + (thumbExt.isEmpty() ? "" : "." + thumbExt);
+        contaboObjectService.copyObject(request.getThumbnailKey(), thumbFinalKey);
+        contaboObjectService.deleteFile(request.getThumbnailKey());
+        savedStory.setThumbnailUrl(thumbFinalKey);
+
+        // Media: copy each staged upload into the story folder, re-indexed 0..n-1
+        List<com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest.MediaItem> items =
+                request.getMedia() == null ? new ArrayList<>() : new ArrayList<>(request.getMedia());
+        items.sort(Comparator.comparingInt(com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest.MediaItem::getOrderIndex));
+
+        for (int i = 0; i < items.size(); i++) {
+            com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest.MediaItem item = items.get(i);
+            validateStagingKey(item.getKey());
+            String ext = extractExtension(item.getKey());
+            String finalKey = "stories/" + savedStory.getId() + "/" + i + (ext.isEmpty() ? "" : "." + ext);
+            contaboObjectService.copyObject(item.getKey(), finalKey);
+            contaboObjectService.deleteFile(item.getKey());
+
+            String mediaType = determineMediaType(item.getContentType());
+            savedStory.addMedia(new StoryMedia(savedStory, mediaType, finalKey, null, i));
+        }
+
+        storyRepository.save(savedStory);
+        return savedStory;
+    }
+
+    private void validateStagingKey(String key) {
+        if (key == null || key.isBlank() || !key.startsWith(STAGING_PREFIX) || key.contains("..")) {
+            throw new IllegalArgumentException("Invalid upload key: " + key);
+        }
+    }
+
+    /** Returns the lowercase, sanitized file extension (without the dot), or "" if none. */
+    private String extractExtension(String nameOrKey) {
+        if (nameOrKey == null) {
+            return "";
+        }
+        int dot = nameOrKey.lastIndexOf('.');
+        if (dot < 0 || dot == nameOrKey.length() - 1) {
+            return "";
+        }
+        return nameOrKey.substring(dot + 1).toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     private List<StoryTranslation> buildTranslations(Story story, StoryTranslationRequest tr) {
