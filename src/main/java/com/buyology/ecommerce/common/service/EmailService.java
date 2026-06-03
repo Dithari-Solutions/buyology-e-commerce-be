@@ -89,14 +89,9 @@ public class EmailService {
     @Async
     public void sendPromoCodeEmail(String toEmail, String promoCode, String offerText) {
         try {
-            String html = "<div style='font-family:sans-serif;max-width:600px;margin:auto'>"
-                    + "<h2 style='color:#402F75'>Exclusive Offer from Buyology! 🎉</h2>"
-                    + "<p>" + offerText + "</p>"
-                    + "<div style='background:#f5f5f5;padding:16px;border-radius:8px;text-align:center'>"
-                    + "<span style='font-size:24px;font-weight:bold;letter-spacing:4px;color:#402F75'>"
-                    + promoCode + "</span></div>"
-                    + "<p style='color:#888;font-size:12px;margin-top:24px'>Buyology — Shop smarter.</p>"
-                    + "</div>";
+            String html = loadTemplate("static/promo-code.html")
+                    .replace("{{OFFER_TEXT}}", nullToEmpty(offerText))
+                    .replace("{{PROMO_CODE}}", nullToEmpty(promoCode));
             send(toEmail, "Your exclusive promo code: " + promoCode, html);
         } catch (Exception e) {
             log.warn("Could not send promo email to {}: {}", toEmail, e.getMessage());
@@ -143,16 +138,13 @@ public class EmailService {
     public void sendB2bInquiryNotification(String adminEmail, String company, String contact,
                                             String email, String phone, int quantity, String message) {
         try {
-            String html = "<div style='font-family:sans-serif;max-width:600px;margin:auto'>"
-                    + "<h2 style='color:#402F75'>New B2B Inquiry</h2>"
-                    + "<table style='width:100%;border-collapse:collapse'>"
-                    + "<tr><td><b>Company:</b></td><td>" + company + "</td></tr>"
-                    + "<tr><td><b>Contact:</b></td><td>" + contact + "</td></tr>"
-                    + "<tr><td><b>Email:</b></td><td>" + email + "</td></tr>"
-                    + "<tr><td><b>Phone:</b></td><td>" + (phone != null ? phone : "—") + "</td></tr>"
-                    + "<tr><td><b>Quantity:</b></td><td>" + quantity + "</td></tr>"
-                    + "<tr><td><b>Message:</b></td><td>" + (message != null ? message : "—") + "</td></tr>"
-                    + "</table></div>";
+            String html = loadTemplate("static/b2b-inquiry-notification.html")
+                    .replace("{{COMPANY}}", nullToEmpty(company))
+                    .replace("{{CONTACT}}", nullToEmpty(contact))
+                    .replace("{{EMAIL}}", nullToEmpty(email))
+                    .replace("{{PHONE}}", phone != null ? phone : "—")
+                    .replace("{{QUANTITY}}", String.valueOf(quantity))
+                    .replace("{{MESSAGE}}", message != null ? message : "—");
             send(adminEmail, "New B2B Inquiry from " + company, html);
         } catch (Exception e) {
             log.warn("Could not send B2B inquiry notification: {}", e.getMessage());

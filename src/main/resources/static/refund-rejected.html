@@ -3,39 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Refund Request Update</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Update on your refund request — Buyology</title>
+  <style>
+    body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    img { -ms-interpolation-mode:bicubic; border:0; outline:none; text-decoration:none; }
+    @media only screen and (max-width:620px) {
+      .wrap { padding:16px 0 !important; }
+      .card { width:100% !important; border-radius:0 !important; }
+      .body { padding:28px 24px !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+<body style="margin:0;padding:0;background-color:#f0f0f0;font-family:Arial,Helvetica,sans-serif;">
+  <table class="wrap" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f0f0;padding:40px 0;">
     <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+      <td align="center" style="padding:0 16px;">
+        <table class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;max-width:600px;width:100%;">
           <tr>
-            <td style="background:#402F75;padding:32px 40px;text-align:center;">
-              <h1 style="color:#ffffff;margin:0;font-size:24px;letter-spacing:1px;">Buyology</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:40px;">
-              <h2 style="color:#402F75;margin:0 0 16px;">Update on your refund request</h2>
-              <p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 12px;">
-                Hi <strong>{{CUSTOMER_NAME}}</strong>,
-              </p>
-              <p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 12px;">
-                We've reviewed your refund request for order <strong>{{ORDER_NUMBER}}</strong> and unfortunately we're unable to approve it at this time.
-              </p>
-              <div style="background:#f9f0f0;border-left:4px solid #c0392b;padding:16px 20px;border-radius:4px;margin:16px 0 24px;">
-                <p style="margin:0 0 6px;color:#c0392b;font-size:14px;"><strong>Reason:</strong></p>
-                <p style="margin:0;color:#333;font-size:14px;">{{REASON}}</p>
+            <td align="center" style="background-color:#3a3180;padding:38px 40px 30px;">
+              <span style="font-size:24px;font-weight:700;letter-spacing:6px;color:#ffffff;font-family:Arial,sans-serif;text-transform:uppercase;">BUY<span style="color:#f5c842;">O</span>L<span style="color:#f5c842;">O</span>GY</span>
+              <div style="line-height:0;margin-top:8px;">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEyIiB2aWV3Qm94PSIwIDAgMTYwIDEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxwYXRoIGQ9Ik0wIDZDMjAgNiAyMCAxIDQwIDFDNjAgMSA2MCAxMSA4MCAxMUMxMDAgMTEgMTAwIDEgMTIwIDFDMTQwIDEgMTQwIDYgMTYwIDYiIHN0cm9rZT0iI2Y1Yzg0MiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8L3N2Zz4=" alt="" width="160" height="12" style="display:inline-block;" />
               </div>
-              <p style="color:#555;font-size:14px;line-height:1.6;margin:0;">
-                If you'd like to discuss this, please reply to this email or contact <a href="mailto:support@buyology.com" style="color:#402F75;">support@buyology.com</a>. Request ID: <strong>{{REQUEST_ID}}</strong>.
-              </p>
             </td>
           </tr>
           <tr>
-            <td style="background:#f9f9f9;padding:20px 40px;text-align:center;border-top:1px solid #eeeeee;">
-              <p style="color:#999;font-size:12px;margin:0;">© Buyology. All rights reserved.</p>
+            <td class="body" style="padding:40px;">
+              <h1 style="margin:0 0 18px;color:#1f1b3a;font-size:23px;font-weight:800;font-family:Arial,sans-serif;line-height:1.3;">Update on your refund request</h1>
+              <p style="margin:0 0 16px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">Hi <strong>{{CUSTOMER_NAME}}</strong>,</p>
+              <p style="margin:0 0 16px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">We've carefully reviewed your refund request for order <strong>{{ORDER_NUMBER}}</strong>, and unfortunately we're unable to approve it at this time.</p>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0;">
+                <tr><td style="background-color:#fbf1f1;border-left:4px solid #c0392b;border-radius:6px;padding:16px 20px;font-family:Arial,sans-serif;">
+                  <span style="display:block;color:#c0392b;font-size:13px;font-weight:700;margin-bottom:4px;">Reason</span>
+                  <span style="display:block;color:#4a4a4a;font-size:14px;line-height:1.6;">{{REASON}}</span>
+                </td></tr>
+              </table>
+              <p style="margin:24px 0 0;color:#6b6b6b;font-size:14px;line-height:1.7;font-family:Arial,sans-serif;">If you'd like to discuss this, reply to this email or contact <a href="mailto:support@buyology.com" style="color:#3a3180;text-decoration:none;">support@buyology.com</a>. Request ID: <strong>{{REQUEST_ID}}</strong>.</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="background-color:#faf9fd;padding:28px 40px;border-top:1px solid #efecf8;">
+              <p style="margin:0 0 6px;color:#9b96b8;font-size:12px;font-family:Arial,sans-serif;letter-spacing:2px;font-weight:700;">BUYOLOGY</p>
+              <p style="margin:0;color:#b3afc7;font-size:12px;font-family:Arial,sans-serif;line-height:1.6;">© Buyology. All rights reserved.</p>
             </td>
           </tr>
         </table>

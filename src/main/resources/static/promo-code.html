@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <title>Your product is now live — Buyology</title>
+  <title>Your exclusive promo code — Buyology</title>
   <style>
     body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
     table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
@@ -13,6 +13,7 @@
       .wrap { padding:16px 0 !important; }
       .card { width:100% !important; border-radius:0 !important; }
       .body { padding:28px 24px !important; }
+      .code { font-size:26px !important; letter-spacing:8px !important; padding:18px 24px !important; }
     }
   </style>
 </head>
@@ -30,28 +31,13 @@
             </td>
           </tr>
           <tr>
-            <td class="body" style="padding:40px;">
-              <h1 style="margin:0 0 18px;color:#1f1b3a;font-size:23px;font-weight:800;font-family:Arial,sans-serif;line-height:1.3;">Your product is now live</h1>
-              <p style="margin:0 0 16px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">Hi <strong>{{SUPPLIER_NAME}}</strong>,</p>
-              <p style="margin:0 0 16px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">Your product has been approved and is now visible to customers on Buyology.</p>
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f1f9f4;border-left:4px solid #2f8f5b;border-radius:8px;margin:22px 0;">
-                <tr>
-                  <td style="padding:18px 20px;font-family:Arial,sans-serif;">
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      <tr>
-                        <td style="color:#5c7a68;font-size:13px;padding:4px 0;width:120px;">Product</td>
-                        <td style="color:#1f3a2a;font-size:14px;font-weight:700;padding:4px 0;">{{PRODUCT_NAME}}</td>
-                      </tr>
-                      <tr>
-                        <td style="color:#5c7a68;font-size:13px;padding:4px 0;">SKU</td>
-                        <td style="color:#1f3a2a;font-size:14px;padding:4px 0;">{{PRODUCT_SKU}}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
+            <td class="body" style="padding:40px;text-align:center;">
+              <h1 style="margin:0 0 16px;color:#1f1b3a;font-size:24px;font-weight:800;font-family:Arial,sans-serif;line-height:1.3;">An exclusive offer, just for you</h1>
+              <p style="margin:0 0 28px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">{{OFFER_TEXT}}</p>
+              <table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 24px;">
+                <tr><td class="code" align="center" style="background-color:#f4f2fb;border:2px dashed #c7bff0;border-radius:12px;padding:22px 40px;color:#3a3180;font-size:30px;font-weight:800;letter-spacing:10px;font-family:'Courier New',Courier,monospace;">{{PROMO_CODE}}</td></tr>
               </table>
-              <p style="margin:0 0 16px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">You can track this product's performance and incoming orders from your seller dashboard.</p>
-              <p style="margin:24px 0 0;color:#6b6b6b;font-size:14px;line-height:1.7;font-family:Arial,sans-serif;">Questions? Contact us at <a href="mailto:support@buyology.com" style="color:#3a3180;text-decoration:none;">support@buyology.com</a>.</p>
+              <p style="margin:0;color:#6b6b6b;font-size:13px;line-height:1.6;font-family:Arial,sans-serif;">Apply this code at checkout to claim your discount.</p>
             </td>
           </tr>
           <tr>

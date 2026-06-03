@@ -31,6 +31,12 @@ jobs:
           cache: maven
 
       - name: Run unit + integration tests
+        # Ryuk (the Testcontainers reaper) is unnecessary on an ephemeral CI runner
+        # and its lingering connection thread is what delays JVM shutdown after the
+        # tests finish (the "Surefire is going to kill self fork JVM" warning).
+        # The runner is torn down after the job, so containers are cleaned up anyway.
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         run: ./mvnw -B test -Dtest='*Test,*IT' -DfailIfNoTests=false
 
   # ── Job 1: Build JAR, build & push Docker image ────────────────────────────
