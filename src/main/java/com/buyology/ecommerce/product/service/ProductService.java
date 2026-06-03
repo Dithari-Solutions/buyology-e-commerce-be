@@ -29,6 +29,7 @@ import com.buyology.ecommerce.product.dto.CreateSpecOptionRequest;
 import com.buyology.ecommerce.product.dto.CreateVariantRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
 import com.buyology.ecommerce.product.dto.ProductTranslationRequest;
+import com.buyology.ecommerce.product.dto.UpdateProductRequest;
 import com.buyology.ecommerce.product.dto.ProductFilterRequest;
 import com.buyology.ecommerce.product.repository.BrandRepository;
 import com.buyology.ecommerce.product.repository.BrandTranslationRepository;
@@ -363,6 +364,188 @@ public class ProductService {
         product.setDeletedAt(null);
         productRepository.save(product);
         return ApiResponse.success(toResponse(product, lang, true), "Product restored successfully");
+    }
+
+    /**
+     * Partial update of a product. Only the non-null fields on {@code request}
+     * are applied. Media can be edited: existing items removed by id, new files
+     * appended, and an existing item promoted to primary. Variants, specs and
+     * colors are out of scope and left untouched.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
+            UUID id, UpdateProductRequest request, List<MultipartFile> newFiles) {
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        if ("DELETED".equals(product.getStatus())) {
+            throw new IllegalArgumentException("Restore the product from trash before editing it");
+        }
+
+        // ── Scalar fields ────────────────────────────────────────────────────
+        if (request.getCategoryId() != null) {
+            ProductCategory category = categoryRepository.findById(request.getCategoryId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Category not found with id: " + request.getCategoryId()));
+            product.setCategory(category);
+        }
+        if (request.getBrandId() != null) {
+            Brand brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Brand not found with id: " + request.getBrandId()));
+            product.setBrand(brand);
+        }
+        if (request.getProductType() != null) {
+            product.setProductType(request.getProductType());
+        }
+        if (request.getAvailabilityStatus() != null) {
+            product.setAvailabilityStatus(request.getAvailabilityStatus());
+        }
+        if (request.getIsSuperDeal() != null) {
+            product.setIsSuperDeal(request.getIsSuperDeal());
+        }
+        if (request.getIsLimitedStock() != null) {
+            product.setIsLimitedStock(request.getIsLimitedStock());
+        }
+        if (request.getIsRefurbished() != null) {
+            product.setIsRefurbished(request.getIsRefurbished());
+        }
+        if (request.getRefurbGrade() != null) {
+            product.setRefurbGrade(request.getRefurbGrade());
+        }
+        // Keep refurbished/grade consistent
+        if (Boolean.TRUE.equals(product.getIsRefurbished()) && product.getRefurbGrade() == null) {
+            throw new IllegalArgumentException(
+                    "Refurb grade (A, B, or C) is required when isRefurbished is true");
+        }
+        if (Boolean.FALSE.equals(product.getIsRefurbished())) {
+            product.setRefurbGrade(null);
+        }
+        if (request.getStatus() != null) {
+            String normalized = request.getStatus().trim().toUpperCase();
+            if (!normalized.equals("ACTIVE") && !normalized.equals("INACTIVE")) {
+                throw new IllegalArgumentException("Status must be ACTIVE or INACTIVE");
+            }
+            product.setStatus(normalized);
+            product.setIsActive("ACTIVE".equals(normalized));
+        }
+
+        // ── Translations (partial) ───────────────────────────────────────────
+        if (request.getTranslations() != null) {
+            applyTranslationPatch(product, request.getTranslations());
+        }
+
+        productRepository.save(product);
+
+        // ── Media: remove ────────────────────────────────────────────────────
+        if (request.getRemoveMediaIds() != null) {
+            for (UUID mediaId : request.getRemoveMediaIds()) {
+                ProductMedia media = mediaRepository.findById(mediaId)
+                        .orElseThrow(() -> new IllegalArgumentException("Media not found with id: " + mediaId));
+                if (!media.getProduct().getId().equals(id)) {
+                    throw new IllegalArgumentException("Media does not belong to this product");
+                }
+                contaboObjectService.deleteFile(media.getUrl());
+                mediaRepository.delete(media);
+            }
+        }
+
+        // ── Media: add new product-level files ───────────────────────────────
+        if (newFiles != null && !newFiles.isEmpty()) {
+            List<ProductMedia> existing = mediaRepository.findByProductIdAndColorOptionIsNull(id);
+            int nextOrder = existing.stream().mapToInt(ProductMedia::getOrderIndex).max().orElse(-1) + 1;
+            boolean hasPrimary = existing.stream().anyMatch(m -> Boolean.TRUE.equals(m.getIsPrimary()));
+            List<ProductMedia> toAdd = new ArrayList<>();
+            for (MultipartFile file : newFiles) {
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+                String url = uploadToContabo(id, file, "product_" + nextOrder);
+                boolean isPrimary = !hasPrimary && toAdd.isEmpty();
+                toAdd.add(new ProductMedia(
+                        product, resolveMediaType(file.getContentType()), url, null, isPrimary, nextOrder));
+                nextOrder++;
+            }
+            mediaRepository.saveAll(toAdd);
+        }
+
+        // ── Media: primary selection ─────────────────────────────────────────
+        if (request.getPrimaryMediaId() != null) {
+            setPrimaryMedia(id, request.getPrimaryMediaId());
+        } else {
+            ensureSomePrimary(id);
+        }
+
+        // Keep the search index in sync
+        List<ProductTranslation> translations = translationRepository.findByProductId(id);
+        productSearchService.indexProduct(product, translations);
+
+        return ApiResponse.success(toResponse(product, "EN", true), "Product updated successfully");
+    }
+
+    private void applyTranslationPatch(Product product, UpdateProductRequest.TranslationPatch patch) {
+        List<ProductTranslation> translations = translationRepository.findByProductId(product.getId());
+        for (ProductTranslation t : translations) {
+            String lang = t.getLanguage() == null ? "" : t.getLanguage().toUpperCase();
+            String newTitle = switch (lang) {
+                case "AZ" -> patch.getTitleAz();
+                case "EN" -> patch.getTitleEn();
+                case "AR" -> patch.getTitleAr();
+                default -> null;
+            };
+            String newDescription = switch (lang) {
+                case "AZ" -> patch.getDescriptionAz();
+                case "EN" -> patch.getDescriptionEn();
+                case "AR" -> patch.getDescriptionAr();
+                default -> null;
+            };
+
+            if (newTitle != null && !newTitle.isBlank() && !newTitle.equals(t.getTitle())) {
+                String newSlug = SlugUtils.toSlug(newTitle);
+                if (!newSlug.equals(t.getSlug())) {
+                    if (translationRepository.existsActiveByLanguageAndSlug(lang, newSlug)) {
+                        throw new IllegalArgumentException(
+                                "A product with the name '" + newTitle + "' already exists");
+                    }
+                    freeDeletedSlug(lang, newSlug);
+                    translationRepository.flush();
+                    t.setSlug(newSlug);
+                }
+                t.setTitle(newTitle);
+            }
+            // A non-null description (including empty string) overwrites; null = unchanged
+            if (newDescription != null) {
+                t.setDescription(newDescription);
+            }
+        }
+        translationRepository.saveAll(translations);
+    }
+
+    /** Marks the given product-level media as primary and clears the flag on the rest. */
+    private void setPrimaryMedia(UUID productId, UUID primaryMediaId) {
+        List<ProductMedia> media = mediaRepository.findByProductIdAndColorOptionIsNull(productId);
+        boolean found = media.stream().anyMatch(m -> m.getId().equals(primaryMediaId));
+        if (!found) {
+            throw new IllegalArgumentException("Primary media not found on this product: " + primaryMediaId);
+        }
+        for (ProductMedia m : media) {
+            m.setIsPrimary(m.getId().equals(primaryMediaId));
+        }
+        mediaRepository.saveAll(media);
+    }
+
+    /** Ensures at least one product-level media is primary (used after removals). */
+    private void ensureSomePrimary(UUID productId) {
+        List<ProductMedia> media = mediaRepository.findByProductIdAndColorOptionIsNull(productId);
+        if (media.isEmpty() || media.stream().anyMatch(m -> Boolean.TRUE.equals(m.getIsPrimary()))) {
+            return;
+        }
+        media.stream()
+                .min(java.util.Comparator.comparingInt(ProductMedia::getOrderIndex))
+                .ifPresent(m -> {
+                    m.setIsPrimary(true);
+                    mediaRepository.save(m);
+                });
     }
 
     @Transactional
