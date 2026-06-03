@@ -1,39 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Don't break your streak!</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Keep your streak going — Buyology</title>
+  <style>
+    body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+    img { -ms-interpolation-mode:bicubic; border:0; outline:none; text-decoration:none; }
+    @media only screen and (max-width:620px) {
+      .wrap { padding:16px 0 !important; }
+      .card { width:100% !important; border-radius:0 !important; }
+      .body { padding:28px 24px !important; }
+      .cta  { width:100% !important; box-sizing:border-box !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#f4f4f4;font-family:sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:40px 0">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
-        <tr>
-          <td style="background:linear-gradient(135deg,#402F75,#6B5BBE);padding:40px;text-align:center">
-            <h1 style="color:#fff;margin:0;font-size:28px">🔥 Don't Break Your Streak!</h1>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:40px;text-align:center">
-            <div style="font-size:64px;margin-bottom:16px">🔥</div>
-            <h2 style="color:#402F75;font-size:24px;margin:0 0 12px">
-              You're on a <span style="color:#FF6B35">{{STREAK_COUNT}}-day streak!</span>
-            </h2>
-            <p style="color:#555;font-size:16px;line-height:1.6;margin:0 0 32px">
-              Don't let it end today. Play today's game on Buyology to keep your streak alive and earn more tokens!
-            </p>
-            <a href="#" style="display:inline-block;background:#402F75;color:#fff;padding:16px 40px;border-radius:8px;text-decoration:none;font-size:16px;font-weight:bold">
-              Play Now &rarr;
-            </a>
-            <p style="color:#aaa;font-size:12px;margin-top:40px">
-              You're receiving this because you have an active streak on Buyology.<br/>
-              Open the app to play and keep it going!
-            </p>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
+<body style="margin:0;padding:0;background-color:#f0f0f0;font-family:Arial,Helvetica,sans-serif;">
+  <table class="wrap" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f0f0;padding:40px 0;">
+    <tr>
+      <td align="center" style="padding:0 16px;">
+        <table class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;max-width:600px;width:100%;">
+          <tr>
+            <td align="center" style="background-color:#3a3180;padding:38px 40px 30px;">
+              <span style="font-size:24px;font-weight:700;letter-spacing:6px;color:#ffffff;font-family:Arial,sans-serif;text-transform:uppercase;">BUY<span style="color:#f5c842;">O</span>L<span style="color:#f5c842;">O</span>GY</span>
+              <div style="line-height:0;margin-top:8px;">
+                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEyIiB2aWV3Qm94PSIwIDAgMTYwIDEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxwYXRoIGQ9Ik0wIDZDMjAgNiAyMCAxIDQwIDFDNjAgMSA2MCAxMSA4MCAxMUMxMDAgMTEgMTAwIDEgMTIwIDFDMTQwIDEgMTQwIDYgMTYwIDYiIHN0cm9rZT0iI2Y1Yzg0MiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8L3N2Zz4=" alt="" width="160" height="12" style="display:inline-block;" />
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td class="body" style="padding:40px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 20px;">
+                <tr><td align="center" style="width:96px;height:96px;background-color:#f4f2fb;border-radius:48px;color:#3a3180;font-size:34px;font-weight:800;font-family:Arial,sans-serif;line-height:96px;">{{STREAK_COUNT}}</td></tr>
+              </table>
+              <h1 style="margin:0 0 14px;color:#1f1b3a;font-size:23px;font-weight:800;font-family:Arial,sans-serif;line-height:1.3;">Keep your {{STREAK_COUNT}}-day streak alive</h1>
+              <p style="margin:0 0 28px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">Don't let it end today. Play today's game on Buyology to keep your streak going and earn more tokens.</p>
+              <table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+                <tr><td align="center" style="border-radius:50px;background-color:#f5c842;">
+                  <a class="cta" href="#" style="display:inline-block;padding:15px 40px;color:#2e2a6e;font-size:15px;font-weight:700;font-family:Arial,sans-serif;text-decoration:none;border-radius:50px;">Play now</a>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="background-color:#faf9fd;padding:28px 40px;border-top:1px solid #efecf8;">
+              <p style="margin:0 0 8px;color:#9b96b8;font-size:12px;font-family:Arial,sans-serif;letter-spacing:2px;font-weight:700;">BUYOLOGY</p>
+              <p style="margin:0;color:#b3afc7;font-size:12px;line-height:1.6;font-family:Arial,sans-serif;">You're receiving this because you have an active streak on Buyology.<br />Open the app to play and keep it going.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
 </body>
 </html>
