@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.dto.CreateProductRequest;
 import com.buyology.ecommerce.product.dto.ProductResponse;
+import com.buyology.ecommerce.product.dto.UpdateProductRequest;
 import com.buyology.ecommerce.product.service.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -62,6 +63,25 @@ public class AdminProductController {
 
         CreateProductRequest request = objectMapper.readValue(requestJson, CreateProductRequest.class);
         return productService.createProduct(request, mediaFiles);
+    }
+
+    @Operation(summary = "Partially update a product (all fields optional) and edit its media")
+    @RequestBody(
+            content = @Content(
+                    mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
+                    schema = @Schema(implementation = AdminProductController.UpdateProductForm.class),
+                    encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
+            )
+    )
+    @PatchMapping(value = "/{productId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
+            @PathVariable UUID productId,
+            @Parameter(hidden = true) @RequestPart("request") String requestJson,
+            @Parameter(hidden = true) @RequestPart(value = "files", required = false) List<MultipartFile> newFiles)
+            throws Exception {
+
+        UpdateProductRequest request = objectMapper.readValue(requestJson, UpdateProductRequest.class);
+        return productService.updateProduct(productId, request, newFiles);
     }
 
     @Operation(summary = "Get all products (all statuses)")
@@ -133,6 +153,20 @@ public class AdminProductController {
                 type = "string",
                 format = "binary",
                 description = "Optional media files (images or videos)"))
+        public List<MultipartFile> files;
+    }
+
+    private static class UpdateProductForm {
+
+        @Schema(
+                description = "Partial product update as JSON (all fields optional)",
+                implementation = UpdateProductRequest.class)
+        public Object request;
+
+        @ArraySchema(schema = @Schema(
+                type = "string",
+                format = "binary",
+                description = "Optional new media files to append"))
         public List<MultipartFile> files;
     }
 }
