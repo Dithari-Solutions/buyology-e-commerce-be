@@ -48,6 +48,17 @@ public class FileValidationUtils {
             "/bin/bash"
     );
 
+    /** True if the given MIME type is an allowed image content type. */
+    public static boolean isAllowedImageContentType(String contentType) {
+        return contentType != null && ALLOWED_IMAGE_MIME_TYPES.contains(contentType);
+    }
+
+    /** True if the given MIME type is an allowed image OR video content type. */
+    public static boolean isAllowedMediaContentType(String contentType) {
+        return contentType != null
+                && (ALLOWED_IMAGE_MIME_TYPES.contains(contentType) || ALLOWED_VIDEO_MIME_TYPES.contains(contentType));
+    }
+
     /**
      * Validates that the file is a valid image and does not contain malicious scripts.
      */
