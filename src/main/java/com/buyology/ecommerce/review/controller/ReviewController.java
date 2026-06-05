@@ -93,7 +93,7 @@ public class ReviewController {
     @PutMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<ReviewResponse>> updateReview(
             @PathVariable UUID reviewId,
-            @RequestBody @Valid UpdateReviewRequest request) {
+            @org.springframework.web.bind.annotation.RequestBody @Valid UpdateReviewRequest request) {
         return reviewService.updateReview(reviewId, request);
     }
 
