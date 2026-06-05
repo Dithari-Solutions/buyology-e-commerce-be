@@ -8,7 +8,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -53,7 +52,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Create a new story")
-    @RequestBody(
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
         required = true,
         content = @Content(
             mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,

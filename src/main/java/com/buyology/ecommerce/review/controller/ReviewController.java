@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
@@ -69,7 +68,7 @@ public class ReviewController {
 
     @Operation(summary = "Submit a new product review",
             description = "Multipart request. Send 'request' as a JSON part and up to 2 image files as 'images'. The review starts in PENDING status awaiting moderation.")
-    @RequestBody(
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
             required = true,
             content = @Content(
                     mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -93,7 +92,7 @@ public class ReviewController {
     @PutMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<ReviewResponse>> updateReview(
             @PathVariable UUID reviewId,
-            @org.springframework.web.bind.annotation.RequestBody @Valid UpdateReviewRequest request) {
+            @RequestBody @Valid UpdateReviewRequest request) {
         return reviewService.updateReview(reviewId, request);
     }
 
