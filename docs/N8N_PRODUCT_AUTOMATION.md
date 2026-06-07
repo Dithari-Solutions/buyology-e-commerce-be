@@ -385,10 +385,10 @@ Capture `data.id` (and `data.sku`) for downstream steps in n8n.
      validation failures) — branch with an IF node and log/retry.
 
 ### n8n tips
-- Token expires in ~15 min: sign in at the start of each execution rather than caching.
+- Token expires in ~15 min: sign in at the start o
+ each execution rather than caching.
 - When sending multipart in the HTTP Request node, set **Body Content Type = Form-Data**,
   add `request` as a *Form Field* (value = JSON string) and `files` as *Binary File(s)*.
 - If you see a `400` complaining every field "is required" despite sending them, the
   `request` part likely wasn't sent as valid JSON text — verify it's a proper stringified
   object, not `[object Object]`.
-w

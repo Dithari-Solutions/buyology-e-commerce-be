@@ -35,6 +35,17 @@ public class PaymentController {
     /**
      * Get a single transaction by its ID.
      */
+    /**
+     * Re-initiate payment for an existing order still awaiting payment ("pay again").
+     */
+    @PreAuthorize("isAuthenticated()")
+    @PostMapping("/orders/{appOrderId}/repay")
+    public ResponseEntity<ApiResponse<PaymentInitiatedResponse>> repayOrder(
+            @PathVariable UUID appOrderId,
+            @Valid @RequestBody RepayOrderRequest request) {
+        return ApiResponse.success(paymentService.repayOrder(appOrderId, request), "Payment initiated successfully");
+    }
+
     @PreAuthorize("isAuthenticated()")
     @GetMapping("/transactions/{transactionId}")
     public ResponseEntity<ApiResponse<TransactionResponse>> getTransaction(

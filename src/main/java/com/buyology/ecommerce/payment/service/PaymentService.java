@@ -207,8 +207,35 @@ public class PaymentService {
         return finalizeTransactionWithProvider(tx.getId(), intention);
     }
 
+    /**
+     * Re-initiate payment for an existing order still awaiting payment ("pay again"
+     * from the orders page). Reuses {@link #initiatePayment} — which already binds the
+     * payer to the principal, checks order ownership, and reconciles the amount.
+     */
+    @Transactional
+    public PaymentInitiatedResponse repayOrder(UUID orderId, RepayOrderRequest req) {
+        var order = orderRepoProvider.getObject().findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+        if (order.getStatus() != com.buyology.ecommerce.order.domain.enums.OrderStatus.PENDING_PAYMENT) {
+            throw new IllegalStateException("This order is not awaiting payment");
+        }
+        // Ownership is enforced inside initiatePayment (order.userId == principal).
+        InitiatePaymentRequest ip = new InitiatePaymentRequest();
+        ip.setAppOrderId(orderId);
+        ip.setCartId(order.getCartId());
+        ip.setMethodType(req.getMethodType());
+        ip.setAmount(order.getTotalAmount());
+        ip.setCurrency(order.getCurrency());
+        ip.setCustomerEmail(req.getCustomerEmail());
+        ip.setCustomerPhone(order.getRecipientPhone());
+        ip.setBillingName(((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName())
+                + " " + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim());
+        ip.setRedirectionUrl(req.getRedirectionUrl());
+        return initiatePayment(ip);
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public PaymentTransaction savePendingTransaction(InitiatePaymentRequest req, 
+    public PaymentTransaction savePendingTransaction(InitiatePaymentRequest req,
                                                      PaymentProvider provider, 
                                                      PaymentMethodConfig config,
                                                      BigDecimal amount,
