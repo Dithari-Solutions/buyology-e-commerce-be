@@ -1,12 +1,10 @@
 -- Story display order: admin-controllable ordering for the stories feed.
--- Existing rows are backfilled by creation time so current ordering is preserved.
-ALTER TABLE stories ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0;
-
-WITH ordered AS (
-    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at)) - 1 AS rn
-    FROM stories
-)
-UPDATE stories s
-SET display_order = ordered.rn
-FROM ordered
-WHERE s.id = ordered.id;
+-- Flyway runs before Hibernate ddl-auto, so on a brand-new database the table may
+-- not exist yet — the to_regclass guard makes this a no-op in that case (Hibernate
+-- then creates the column from the entity). On an existing DB it adds the column.
+DO $$
+BEGIN
+    IF to_regclass('public.stories') IS NOT NULL THEN
+        ALTER TABLE stories ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;

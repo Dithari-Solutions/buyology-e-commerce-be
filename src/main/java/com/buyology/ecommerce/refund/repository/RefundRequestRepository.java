@@ -28,7 +28,7 @@ public interface RefundRequestRepository extends JpaRepository<RefundRequest, UU
      */
     @Query("""
             SELECT DISTINCT r FROM RefundRequest r, OrderItem i
-            WHERE i.orderId = r.orderId
+            WHERE i.order.id = r.orderId
               AND i.supplierId = :supplierId
               AND (:status IS NULL OR r.status = :status)
             """)
@@ -40,7 +40,7 @@ public interface RefundRequestRepository extends JpaRepository<RefundRequest, UU
     @Query("""
             SELECT DISTINCT r FROM RefundRequest r, OrderItem i
             WHERE r.id = :id
-              AND i.orderId = r.orderId
+              AND i.order.id = r.orderId
               AND i.supplierId = :supplierId
             """)
     Optional<RefundRequest> findByIdForSupplier(@Param("id") UUID id,
