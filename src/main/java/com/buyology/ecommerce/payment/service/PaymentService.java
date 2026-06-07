@@ -51,6 +51,7 @@ public class PaymentService {
     private final com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties;
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider;
+    private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepo;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -67,7 +68,8 @@ public class PaymentService {
             CurrencyExchangeService currencyExchangeService,
             com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties,
             org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider,
-            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider) {
+            org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider,
+            com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepo) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.transactionRepo = transactionRepo;
@@ -83,6 +85,23 @@ public class PaymentService {
         this.paymobProperties = paymobProperties;
         this.creditPaybackProvider = creditPaybackProvider;
         this.orderRepoProvider = orderRepoProvider;
+        this.authCredentialRepo = authCredentialRepo;
+    }
+
+    /**
+     * Resolves the {@code users.id} that owns a given {@code auth_credentials.id} and
+     * asserts it is the authenticated principal (admins bypass). {@code customerId}
+     * stored on transactions is an auth_credentials.id, whereas the JWT principal is a
+     * users.id — this bridges the two for ownership checks.
+     */
+    private void requireOwnsByCredentialId(UUID authCredentialId) {
+        if (authCredentialId == null) {
+            throw new org.springframework.security.access.AccessDeniedException("Not allowed");
+        }
+        UUID ownerUserId = authCredentialRepo.findById(authCredentialId)
+                .map(c -> c.getUserId())
+                .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Not allowed"));
+        SecurityUtils.requireSelfOrAdmin(ownerUserId);
     }
 
     // =========================================================================
@@ -91,10 +110,12 @@ public class PaymentService {
 
     @Transactional
     public PaymentInitiatedResponse initiatePayment(InitiatePaymentRequest req) {
-        // Bind the payer to the authenticated principal — never trust customerId from the
-        // request body (prevents initiating payments on behalf of another user).
+        // customerId from the client is an auth_credentials.id. checkPaymentReadiness
+        // resolves it to a user and asserts it belongs to the authenticated principal
+        // (its findUser does requireSelfOrAdmin), so paying on another user's behalf is
+        // already blocked — we must NOT overwrite it with the principal's users.id, which
+        // findUser cannot resolve.
         UUID currentUserId = SecurityUtils.currentUserId();
-        req.setCustomerId(currentUserId);
         userProfileService.checkPaymentReadiness(req.getCustomerId());
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
@@ -223,6 +244,8 @@ public class PaymentService {
         InitiatePaymentRequest ip = new InitiatePaymentRequest();
         ip.setAppOrderId(orderId);
         ip.setCartId(order.getCartId());
+        // customerId is an auth_credentials.id (what checkPaymentReadiness resolves).
+        ip.setCustomerId(order.getAuthCredentialId());
         ip.setMethodType(req.getMethodType());
         ip.setAmount(order.getTotalAmount());
         ip.setCurrency(order.getCurrency());
@@ -534,14 +557,15 @@ public class PaymentService {
 
     public TransactionResponse getTransaction(UUID transactionId) {
         PaymentTransaction tx = transactionRepo.findById(transactionId).orElseThrow();
-        SecurityUtils.requireSelfOrAdmin(tx.getCustomerId());
+        // tx.customerId is an auth_credentials.id; resolve to its owner and verify it's the caller.
+        requireOwnsByCredentialId(tx.getCustomerId());
         return toTransactionResponse(tx);
     }
 
     public List<TransactionResponse> getTransactionsByOrder(UUID appOrderId) {
         List<PaymentTransaction> txs = transactionRepo.findAllByAppOrderId(appOrderId);
         // Enforce ownership: a customer may only read their own order's transactions.
-        txs.forEach(tx -> SecurityUtils.requireSelfOrAdmin(tx.getCustomerId()));
+        txs.forEach(tx -> requireOwnsByCredentialId(tx.getCustomerId()));
         return txs.stream().map(this::toTransactionResponse).toList();
     }
 
