@@ -37,9 +37,11 @@ public class TwilioVerifyService {
             Verification.creator(props.getVerifyServiceSid(), phoneNumber, "sms").create();
             log.info("Twilio Verify code sent to {}", mask(phoneNumber));
         } catch (ApiException e) {
-            log.error("Twilio Verify start failed for {}: {}", mask(phoneNumber), e.getMessage());
+            log.error("Twilio Verify start failed for {} — code={}, status={}, msg={}, moreInfo={}",
+                    mask(phoneNumber), e.getCode(), e.getStatusCode(), e.getMessage(), e.getMoreInfo());
             throw new IllegalStateException(
-                    "Could not send the verification code. Please check the number and try again.");
+                    "Could not send the verification code (Twilio error " + e.getCode()
+                    + "). Please check the number and try again.");
         }
     }
 
@@ -54,7 +56,8 @@ public class TwilioVerifyService {
             return "approved".equalsIgnoreCase(check.getStatus());
         } catch (ApiException e) {
             // Twilio returns 404 when there's no pending verification (e.g. attempts exhausted).
-            log.warn("Twilio Verify check failed for {}: {}", mask(phoneNumber), e.getMessage());
+            log.warn("Twilio Verify check failed for {} — code={}, status={}, msg={}",
+                    mask(phoneNumber), e.getCode(), e.getStatusCode(), e.getMessage());
             return false;
         }
     }
