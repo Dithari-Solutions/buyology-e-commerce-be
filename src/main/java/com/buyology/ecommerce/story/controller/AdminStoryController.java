@@ -113,6 +113,15 @@ public class AdminStoryController {
         return ApiResponse.success(null, "Story deactivated successfully.");
     }
 
+    @Operation(summary = "Set the display order of a story (lower is shown first)")
+    @PatchMapping("/{storyId}/display-order")
+    public ResponseEntity<ApiResponse<Void>> setDisplayOrder(
+            @PathVariable UUID storyId,
+            @RequestParam int order) {
+        storyService.updateDisplayOrder(storyId, order);
+        return ApiResponse.success(null, "Display order updated.");
+    }
+
     @Operation(summary = "Delete a story with all its translations and media")
     @DeleteMapping("/{storyId}")
     public ResponseEntity<ApiResponse<Void>> deleteStory(@PathVariable UUID storyId) {

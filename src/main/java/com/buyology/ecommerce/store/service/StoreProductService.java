@@ -227,16 +227,7 @@ public class StoreProductService {
     }
 
     private BigDecimal computeEffectivePrice(StoreProduct sp) {
-        if (sp.getDiscountType() == null || sp.getDiscountValue() == null) {
-            return sp.getStorePrice();
-        }
-        return switch (sp.getDiscountType()) {
-            case FIXED -> sp.getDiscountValue();
-            case PERCENTAGE -> sp.getStorePrice()
-                    .multiply(BigDecimal.ONE.subtract(
-                            sp.getDiscountValue().divide(new BigDecimal("100"))))
-                    .setScale(2, java.math.RoundingMode.HALF_UP);
-        };
+        return sp.effectivePrice();
     }
 
     private StoreProductResponse toResponse(StoreProduct sp) {

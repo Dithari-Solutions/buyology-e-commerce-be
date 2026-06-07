@@ -180,6 +180,24 @@ public class RefundRequestService {
         return toResponse(req);
     }
 
+    // ── Supplier (read-only) ──────────────────────────────────────────────────
+
+    /** Refunds that involve the given supplier's products. Read-only visibility. */
+    @Transactional(readOnly = true)
+    public Page<RefundRequestResponse> listForSupplier(UUID supplierId, RefundRequestStatus status,
+                                                       int page, int size) {
+        return repository.findAllForSupplier(supplierId, status,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public RefundRequestResponse getForSupplier(UUID id, UUID supplierId) {
+        RefundRequest req = repository.findByIdForSupplier(id, supplierId)
+                .orElseThrow(() -> new RefundException("Refund request not found"));
+        return toResponse(req);
+    }
+
     @Transactional
     public RefundRequestResponse setReturnMethod(UUID id, UUID userId, SetReturnMethodRequest request) {
         RefundRequest req = repository.findByIdAndUserId(id, userId)

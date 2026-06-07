@@ -69,7 +69,7 @@ public class ReviewAdminService {
 
     @Transactional
     public ResponseEntity<ApiResponse<ReviewResponse>> moderateReview(
-            UUID reviewId, ModerateReviewRequest request) {
+            UUID reviewId, ModerateReviewRequest request, UUID adminId) {
 
         ProductReview review = reviewRepository.findById(reviewId).orElse(null);
         if (review == null) {
@@ -82,7 +82,8 @@ public class ReviewAdminService {
 
         ModerationStatus previousStatus = review.getStatus();
         review.setStatus(request.getStatus());
-        review.setModeratedBy(request.getModeratedBy());
+        // Attribute moderation to the authenticated admin (JWT principal), not the body.
+        review.setModeratedBy(adminId);
         review.setModeratedAt(Instant.now());
         review.setRejectionReason(request.getRejectionReason());
 
@@ -119,7 +120,7 @@ public class ReviewAdminService {
 
     @Transactional
     public ResponseEntity<ApiResponse<ReviewResponse>> addReply(
-            UUID reviewId, CreateReviewReplyRequest request) {
+            UUID reviewId, CreateReviewReplyRequest request, UUID adminId) {
 
         ProductReview review = reviewRepository.findByIdAndDeletedAtIsNull(reviewId).orElse(null);
         if (review == null) {
@@ -130,12 +131,15 @@ public class ReviewAdminService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "A reply already exists for this review. Use PUT to update it.");
         }
 
-        Users admin = userRepository.findById(request.getAdminId()).orElse(null);
+        // Resolve the replying admin from the authenticated JWT principal, never from
+        // the request body (the dashboard previously sent a stale/empty adminId → 404).
+        Users admin = userRepository.findById(adminId).orElse(null);
         if (admin == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin user not found");
         }
 
-        ProductReviewReply reply = new ProductReviewReply(review, admin, request.getBody());
+        ProductReviewReply reply = new ProductReviewReply(review, admin,
+                com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         replyRepository.save(reply);
 
         return ApiResponse.created(reviewService.toResponse(review, true), "Reply added successfully");

@@ -21,6 +21,10 @@ public class Story {
     @Column(name = "thumbnail_url", columnDefinition = "TEXT")
     private String thumbnailUrl;
 
+    /** Lower values are shown first in both the public feed and the admin list. */
+    @Column(name = "display_order", nullable = false)
+    private Integer displayOrder = 0;
+
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
@@ -73,6 +77,9 @@ public class Story {
         if (this.status == null) {
             this.status = StoryStatus.ACTIVE;
         }
+        if (this.displayOrder == null) {
+            this.displayOrder = 0;
+        }
     }
 
     @PreUpdate
@@ -122,6 +129,14 @@ public class Story {
 
     public void setThumbnailUrl(String thumbnailUrl) {
         this.thumbnailUrl = thumbnailUrl;
+    }
+
+    public Integer getDisplayOrder() {
+        return displayOrder;
+    }
+
+    public void setDisplayOrder(Integer displayOrder) {
+        this.displayOrder = displayOrder;
     }
 
     public UUID getCreatedBy() {

@@ -391,3 +391,4 @@ Capture `data.id` (and `data.sku`) for downstream steps in n8n.
 - If you see a `400` complaining every field "is required" despite sending them, the
   `request` part likely wasn't sent as valid JSON text — verify it's a proper stringified
   object, not `[object Object]`.
+w

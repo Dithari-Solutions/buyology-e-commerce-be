@@ -88,6 +88,10 @@ public class OrderService {
     private final ContaboObjectService contaboObjectService;
     private final OutboxEventRepository outboxEventRepository;
     private final PromoCodeService promoCodeService;
+    private final com.buyology.ecommerce.notification.service.PushNotificationService pushService;
+    private final com.buyology.ecommerce.supplier.repository.SupplierRepository supplierRepository;
+    private final com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository;
+    private final com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -106,7 +110,11 @@ public class OrderService {
                         SimpMessagingTemplate messagingTemplate,
                         ContaboObjectService contaboObjectService,
                         OutboxEventRepository outboxEventRepository,
-                        PromoCodeService promoCodeService) {
+                        PromoCodeService promoCodeService,
+                        com.buyology.ecommerce.notification.service.PushNotificationService pushService,
+                        com.buyology.ecommerce.supplier.repository.SupplierRepository supplierRepository,
+                        com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository,
+                        com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -125,6 +133,10 @@ public class OrderService {
         this.contaboObjectService = contaboObjectService;
         this.outboxEventRepository = outboxEventRepository;
         this.promoCodeService = promoCodeService;
+        this.pushService = pushService;
+        this.supplierRepository = supplierRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.courierProfileRepository = courierProfileRepository;
     }
 
     // =========================================================================
@@ -338,11 +350,8 @@ public class OrderService {
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
 
-                    // Courier-backend integration disabled — orders are now managed
-                    // entirely by admin from the dashboard.
-                    // if (order.getDeliveryMethod() == DeliveryMethod.EXPRESS) {
-                    //     pushToCourier(order);
-                    // }
+                    // Notify suppliers (owning items) + superadmins of the new paid order.
+                    notifyNewOrder(order);
 
                     // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
@@ -447,6 +456,8 @@ public class OrderService {
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
+                    // Notify suppliers + superadmins of the new paid order.
+                    notifyNewOrder(order);
                 }
             }
 
@@ -756,13 +767,7 @@ public class OrderService {
 
         Order saved = orderRepo.save(order);
         broadcastStatusUpdate(saved, null);
-
-        // Courier-backend integration disabled — admin manages cancellations directly.
-        // if (req.getStatus() == OrderStatus.CANCELLED
-        //         && order.getDeliveryMethod() == DeliveryMethod.EXPRESS
-        //         && order.getDeliveryOrderId() != null) {
-        //     publishOrderCancelledEvent(order.getId(), req.getNotes());
-        // }
+        notifyCustomerStatus(saved);
 
         return toOrderResponse(saved);
     }
@@ -1033,6 +1038,109 @@ public class OrderService {
         messagingTemplate.convertAndSend((String) destination, (Object) payload);
         log.debug("[ORDER-WS] Status broadcast orderId={} status={}", order.getId(), order.getStatus());
     }
+
+    // =========================================================================
+    // #1 — Notifications, supplier status updates, store-courier assignment
+    // =========================================================================
+
+    /** Notify suppliers whose products are in the order, plus all superadmins. */
+    private void notifyNewOrder(Order order) {
+        try {
+            java.util.Map<String, String> data = java.util.Map.of(
+                    "orderId", order.getId().toString(), "type", "NEW_ORDER");
+            order.getItems().stream()
+                    .map(OrderItem::getSupplierId)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .forEach(supplierId -> supplierRepository.findById(supplierId).ifPresent(sup -> {
+                        if (sup.getUserId() != null) {
+                            pushService.sendToUser(sup.getUserId(), "New order received",
+                                    "You have a new order to fulfil.", "NEW_ORDER", data);
+                        }
+                    }));
+            userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
+                    pushService.sendToUser(uid, "New order placed",
+                            "A new order has been placed.", "NEW_ORDER", data));
+        } catch (Exception e) {
+            log.warn("[ORDER] Failed to send new-order notifications for {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /** Notify the customer that their order's status changed (in-app feed + push). */
+    private void notifyCustomerStatus(Order order) {
+        try {
+            if (order.getUserId() == null) return;
+            pushService.sendToUser(order.getUserId(), "Order update",
+                    "Your order is now " + order.getStatus().name().replace('_', ' ').toLowerCase() + ".",
+                    "ORDER_STATUS",
+                    java.util.Map.of("orderId", order.getId().toString(), "type", "ORDER_STATUS"));
+        } catch (Exception e) {
+            log.warn("[ORDER] Failed to notify customer of status for {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Supplier advances the status of an order containing their products. Suppliers
+     * own fulfilment for their items but cannot cancel/fail orders. Same transition
+     * rules as the admin flow (PACKAGING → IN_COURIER → IN_TRANSIT → DELIVERED).
+     */
+    @Transactional
+    public OrderResponse supplierUpdateStatus(UUID orderId, UUID supplierUserId,
+                                              OrderStatus newStatus, String notes) {
+        com.buyology.ecommerce.supplier.domain.Supplier supplier =
+                supplierRepository.findByUserId(supplierUserId).orElse(null);
+        if (supplier == null) {
+            throw new org.springframework.security.access.AccessDeniedException("Supplier account not found");
+        }
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        boolean owns = order.getItems().stream()
+                .anyMatch(i -> supplier.getId().equals(i.getSupplierId()));
+        if (!owns) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "This order does not contain your products");
+        }
+        if (newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.FAILED) {
+            throw new IllegalArgumentException("Suppliers cannot cancel or fail orders");
+        }
+        validateTransition(order.getStatus(), newStatus);
+        applyMilestoneTimestamp(order, newStatus);
+        order.setStatus(newStatus);
+        appendTrackingEvent(order, newStatus, notes, null, null, null, supplier.getId(), "SUPPLIER");
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, null);
+        notifyCustomerStatus(saved);
+        return toOrderResponse(saved);
+    }
+
+    /**
+     * Assigns one of the order's store's courier profiles to the order, stamping the
+     * existing courier_* columns. Validates the courier belongs to the order's store.
+     */
+    @Transactional
+    public OrderResponse assignStoreCourier(UUID orderId, UUID adminId, UUID courierProfileId) {
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        com.buyology.ecommerce.courier.profile.domain.CourierProfile cp =
+                courierProfileRepository.findById(courierProfileId)
+                        .orElseThrow(() -> new IllegalArgumentException("Courier not found"));
+        UUID orderStoreId = (order.getItems() == null || order.getItems().isEmpty())
+                ? null : order.getItems().get(0).getStoreId();
+        if (orderStoreId != null && cp.getStoreId() != null && !cp.getStoreId().equals(orderStoreId)) {
+            throw new IllegalArgumentException("Courier does not belong to this order's store");
+        }
+        order.setCourierUserId(cp.getId());
+        order.setCourierName((safe(cp.getFirstName()) + " " + safe(cp.getLastName())).trim());
+        order.setCourierPhone(cp.getPhone());
+        appendTrackingEvent(order, order.getStatus(),
+                "Courier assigned: " + order.getCourierName(), null, null, null, adminId, "ADMIN");
+        Order saved = orderRepo.save(order);
+        broadcastStatusUpdate(saved, null);
+        notifyCustomerStatus(saved);
+        return toOrderResponse(saved);
+    }
+
+    private static String safe(String s) { return s == null ? "" : s; }
 
     /**
      * Returns the {@code userId} of the customer who placed the given order,

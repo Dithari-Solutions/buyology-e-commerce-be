@@ -105,6 +105,25 @@ public class SupplierPortalService {
         return ApiResponse.success(page.map(SupplierProductSummary::from), "Products");
     }
 
+    /**
+     * Full detail of one of the supplier's OWN products — same {@link ProductResponse}
+     * shape the admin sees, but ownership-guarded so a supplier can only view products
+     * tagged with their own supplierId.
+     */
+    @Transactional(readOnly = true)
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.product.dto.ProductResponse>> getMyProductDetail(
+            UUID productId, String lang) {
+        Supplier supplier = resolveCurrentSupplier();
+        if (supplier == null) {
+            return ApiResponse.failure(HttpStatus.FORBIDDEN, "Supplier account not found");
+        }
+        Product product = productRepository.findById(productId).orElse(null);
+        if (product == null || !supplier.getId().equals(product.getSupplierId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
+        }
+        return productService.getProductByIdAdmin(productId, lang);
+    }
+
     // ── Submit product (FULL — mirrors admin /api/admin/product/create) ──────
 
     /**

@@ -142,6 +142,35 @@ public class WalletService {
         return toResponse(wallet);
     }
 
+    /**
+     * Wallet view with balance / credit limit / min-order converted into
+     * {@code targetCurrency}. B2B credit is spendable in any branch currency — the
+     * actual deduction is converted server-side at payment time, so this lets the
+     * client present and gate the credit option in the order's currency instead of
+     * incorrectly rejecting a currency mismatch.
+     */
+    public WalletResponse getWallet(UUID userId, String targetCurrency) {
+        Wallet wallet = walletRepo.findByUserId(userId)
+                .orElseThrow(() -> new NoSuchElementException("Wallet not found for user: " + userId));
+        WalletResponse r = toResponse(wallet);
+        if (targetCurrency == null || targetCurrency.isBlank()
+                || targetCurrency.equalsIgnoreCase(wallet.getCurrency())) {
+            return r;
+        }
+        String from = wallet.getCurrency();
+        String to = targetCurrency.toUpperCase();
+        r.setBalance(convertScaled(r.getBalance(), from, to));
+        if (r.getCreditLimit() != null) r.setCreditLimit(convertScaled(r.getCreditLimit(), from, to));
+        if (r.getMinOrderAmount() != null) r.setMinOrderAmount(convertScaled(r.getMinOrderAmount(), from, to));
+        r.setCurrency(to);
+        return r;
+    }
+
+    private BigDecimal convertScaled(BigDecimal amount, String from, String to) {
+        if (amount == null) return null;
+        return currencyExchangeService.convert(amount, from, to).setScale(2, RoundingMode.HALF_UP);
+    }
+
     public List<WalletTransactionResponse> getTransactions(UUID userId) {
         return txRepo.findByUserIdOrderByCreatedAtDesc(userId)
                 .stream().map(this::toTxResponse).collect(Collectors.toList());

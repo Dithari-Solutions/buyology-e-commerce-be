@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -47,8 +48,9 @@ public class QuestionAdminController {
     @PatchMapping("/{questionId}/moderate")
     public ResponseEntity<ApiResponse<QuestionResponse>> moderateQuestion(
             @PathVariable UUID questionId,
+            @AuthenticationPrincipal UUID adminId,
             @RequestBody @Valid ModerateQuestionRequest request) {
-        return questionAdminService.moderateQuestion(questionId, request);
+        return questionAdminService.moderateQuestion(questionId, request, adminId);
     }
 
     @Operation(summary = "Delete a question (soft-delete)")
@@ -63,8 +65,9 @@ public class QuestionAdminController {
     @PostMapping("/{questionId}/answer")
     public ResponseEntity<ApiResponse<QuestionResponse>> addAnswer(
             @PathVariable UUID questionId,
+            @AuthenticationPrincipal UUID adminId,
             @RequestBody @Valid CreateQuestionAnswerRequest request) {
-        return questionAdminService.addAnswer(questionId, request);
+        return questionAdminService.addAnswer(questionId, request, adminId);
     }
 
     @Operation(summary = "Update the admin answer for a question")

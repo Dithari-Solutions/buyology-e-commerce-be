@@ -32,4 +32,9 @@ public interface StoryRepository extends JpaRepository<Story, UUID> {
 
     List<Story> findByStatus(StoryStatus status);
 
+    /** Public/admin feed ordering: by display order, newest first as a tiebreaker. */
+    List<Story> findByStatusOrderByDisplayOrderAscCreatedAtDesc(StoryStatus status);
+
+    List<Story> findAllByOrderByDisplayOrderAscCreatedAtDesc();
+
 }

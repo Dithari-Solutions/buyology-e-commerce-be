@@ -57,11 +57,12 @@ public class B2bMembershipController {
 
     @GetMapping("/wallet")
     public ResponseEntity<ApiResponse<WalletResponse>> getWallet(
-            @RequestParam UUID userId) {
+            @RequestParam UUID userId,
+            @RequestParam(required = false) String currency) {
         UUID resolved = membershipService.resolveUsersId(userId);
         SecurityUtils.requireSelf(resolved);
         return ApiResponse.success(
-                walletService.getWallet(resolved),
+                walletService.getWallet(resolved, currency),
                 "Wallet fetched");
     }
 

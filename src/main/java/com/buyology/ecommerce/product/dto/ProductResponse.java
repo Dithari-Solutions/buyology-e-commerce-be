@@ -51,6 +51,13 @@ public class ProductResponse {
     private BigDecimal storePrice;
 
     /**
+     * Pre-discount price of the primary store option (struck-through in the UI),
+     * already converted to the display currency. Null when there is no discount.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal originalPrice;
+
+    /**
      * ISO 4217 currency code the storePrice is expressed in (e.g. "AZN", "AED").
      * Null when storePrice is null.
      */
@@ -94,6 +101,9 @@ public class ProductResponse {
 
         private UUID storeId;
         private BigDecimal storePrice;
+        /** Pre-discount price (struck-through). Null when this option has no discount. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private BigDecimal originalPrice;
         private String currency;
         private Boolean expressDelivery;
 
@@ -110,6 +120,8 @@ public class ProductResponse {
         public void setStoreId(UUID storeId) { this.storeId = storeId; }
         public BigDecimal getStorePrice() { return storePrice; }
         public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
+        public BigDecimal getOriginalPrice() { return originalPrice; }
+        public void setOriginalPrice(BigDecimal originalPrice) { this.originalPrice = originalPrice; }
         public String getCurrency() { return currency; }
         public void setCurrency(String currency) { this.currency = currency; }
         public Boolean getExpressDelivery() { return expressDelivery; }
@@ -303,6 +315,8 @@ public class ProductResponse {
 
     public BigDecimal getStorePrice() { return storePrice; }
     public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
+    public BigDecimal getOriginalPrice() { return originalPrice; }
+    public void setOriginalPrice(BigDecimal originalPrice) { this.originalPrice = originalPrice; }
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
     public Boolean getAvailableInSelectedCountry() { return availableInSelectedCountry; }

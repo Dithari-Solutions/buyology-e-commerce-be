@@ -6,6 +6,7 @@ import com.buyology.ecommerce.review.domain.ProductReview;
 import com.buyology.ecommerce.review.domain.ProductReviewStats;
 import com.buyology.ecommerce.supplier.service.SupplierLifecycleService;
 import com.buyology.ecommerce.supplier.service.SupplierPortalService;
+import com.buyology.ecommerce.supplier.service.SupplierProductChangeService;
 import com.buyology.ecommerce.supplier.service.SupplierProductImageService;
 import com.buyology.ecommerce.supplier.service.SupplierReviewService;
 import org.springframework.web.multipart.MultipartFile;
@@ -29,17 +30,20 @@ public class SupplierPortalController {
     private final SupplierLifecycleService lifecycleService;
     private final SupplierReviewService reviewService;
     private final SupplierProductImageService imageService;
+    private final SupplierProductChangeService changeService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public SupplierPortalController(SupplierPortalService supplierPortalService,
                                     SupplierLifecycleService lifecycleService,
                                     SupplierReviewService reviewService,
                                     SupplierProductImageService imageService,
+                                    SupplierProductChangeService changeService,
                                     com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.supplierPortalService = supplierPortalService;
         this.lifecycleService = lifecycleService;
         this.reviewService = reviewService;
         this.imageService = imageService;
+        this.changeService = changeService;
         this.objectMapper = objectMapper;
     }
 
@@ -66,6 +70,15 @@ public class SupplierPortalController {
             @RequestParam(required = false) Product.SupplierStatus supplierStatus,
             @PageableDefault(size = 20) Pageable pageable) {
         return supplierPortalService.getMyProducts(supplierStatus, pageable);
+    }
+
+    /** Full detail of one of the supplier's OWN products (read-only, mirrors the admin view). */
+    @GetMapping("/products/{id}")
+    @PreAuthorize("hasAuthority('supplier:product:read')")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.product.dto.ProductResponse>> getMyProductDetail(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "EN") String lang) {
+        return supplierPortalService.getMyProductDetail(id, lang);
     }
 
     @PostMapping("/products")
@@ -128,10 +141,12 @@ public class SupplierPortalController {
         return supplierPortalService.draftProduct(id);
     }
 
+    /** Delete now requires superadmin approval — files a DELETE change request. */
     @DeleteMapping("/products/{id}")
     @PreAuthorize("hasAuthority('supplier:product:update')")
-    public ResponseEntity<ApiResponse<Void>> softDeleteProduct(@PathVariable UUID id) {
-        return supplierPortalService.softDeleteOwnProduct(id);
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.supplier.dto.SupplierProductChangeResponse>> requestDeleteProduct(
+            @PathVariable UUID id) {
+        return changeService.requestDelete(id);
     }
 
     @GetMapping("/products/trash")
@@ -141,10 +156,29 @@ public class SupplierPortalController {
         return supplierPortalService.listOwnTrash(pageable);
     }
 
+    /** Restore now requires superadmin approval — files a RESTORE change request. */
     @PostMapping("/products/{id}/restore")
     @PreAuthorize("hasAuthority('supplier:product:update')")
-    public ResponseEntity<ApiResponse<String>> restoreProduct(@PathVariable UUID id) {
-        return supplierPortalService.restoreOwnProduct(id);
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.supplier.dto.SupplierProductChangeResponse>> requestRestoreProduct(
+            @PathVariable UUID id) {
+        return changeService.requestRestore(id);
+    }
+
+    /** Edit now requires superadmin approval — files an EDIT change request with the proposed update. */
+    @PatchMapping("/products/{id}/request-edit")
+    @PreAuthorize("hasAuthority('supplier:product:update')")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.supplier.dto.SupplierProductChangeResponse>> requestEditProduct(
+            @PathVariable UUID id,
+            @RequestBody com.buyology.ecommerce.product.dto.UpdateProductRequest request) {
+        return changeService.requestEdit(id, request);
+    }
+
+    /** The supplier's own change requests (pending/approved/rejected). */
+    @GetMapping("/product-changes")
+    @PreAuthorize("hasAuthority('supplier:product:read')")
+    public ResponseEntity<ApiResponse<Page<com.buyology.ecommerce.supplier.dto.SupplierProductChangeResponse>>> myChangeRequests(
+            @PageableDefault(size = 20) Pageable pageable) {
+        return changeService.listForSupplier(pageable);
     }
 
     // ── Reviews ─────────────────────────────────────────────────────────────

@@ -24,6 +24,9 @@ public class CreateStoryWithKeysRequest {
     @Schema(description = "Status of the story", example = "ACTIVE", enumAsRef = true)
     private StoryStatus status;
 
+    @Schema(description = "Display order in the feed (lower shown first). Defaults to 0.", example = "0")
+    private Integer displayOrder;
+
     @NotBlank(message = "thumbnailKey is required")
     @Schema(description = "Storage key of the already-uploaded thumbnail image")
     private String thumbnailKey;
@@ -46,6 +49,14 @@ public class CreateStoryWithKeysRequest {
 
     public void setStatus(StoryStatus status) {
         this.status = status;
+    }
+
+    public Integer getDisplayOrder() {
+        return displayOrder;
+    }
+
+    public void setDisplayOrder(Integer displayOrder) {
+        this.displayOrder = displayOrder;
     }
 
     public String getThumbnailKey() {

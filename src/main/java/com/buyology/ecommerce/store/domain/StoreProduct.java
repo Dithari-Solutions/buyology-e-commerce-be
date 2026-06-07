@@ -130,6 +130,38 @@ public class StoreProduct {
         this.discountValue = discountValue;
     }
 
+    /**
+     * The price the customer actually pays after any store-level discount.
+     * FIXED → {@code discountValue} is the final price; PERCENTAGE → percent off
+     * {@code storePrice}. No discount → {@code storePrice}. Single source of truth
+     * for discount math (used by the product API, cart and store-admin view).
+     */
+    public BigDecimal effectivePrice() {
+        return effectivePrice(storePrice, discountType, discountValue);
+    }
+
+    /** Static variant for callers that only have the raw price + discount columns
+     *  (e.g. projection query rows) and not a managed entity. */
+    public static BigDecimal effectivePrice(BigDecimal storePrice,
+                                            Product.DiscountType discountType,
+                                            BigDecimal discountValue) {
+        if (storePrice == null || discountType == null || discountValue == null) {
+            return storePrice;
+        }
+        return switch (discountType) {
+            case FIXED -> discountValue;
+            case PERCENTAGE -> storePrice
+                    .multiply(BigDecimal.ONE.subtract(discountValue.divide(new BigDecimal("100"))))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        };
+    }
+
+    /** True when a discount is configured and actually lowers the price. */
+    public boolean hasDiscount() {
+        BigDecimal eff = effectivePrice();
+        return eff != null && storePrice != null && eff.compareTo(storePrice) < 0;
+    }
+
     public Boolean getIsActive() {
         return isActive;
     }

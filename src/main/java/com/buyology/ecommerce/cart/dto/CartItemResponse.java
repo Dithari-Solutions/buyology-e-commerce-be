@@ -16,6 +16,9 @@ public class CartItemResponse {
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal totalPrice;
+    /** Pre-discount unit/total price for strike-through display. Null when not discounted. */
+    private BigDecimal originalUnitPrice;
+    private BigDecimal originalTotalPrice;
     /** True when the item's store is within the 30-minute delivery radius of the user's location. */
     private boolean quickDelivery;
     private List<CartItemSpecSelectionResponse> selectedSpecs;
@@ -51,6 +54,12 @@ public class CartItemResponse {
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+
+    public BigDecimal getOriginalUnitPrice() { return originalUnitPrice; }
+    public void setOriginalUnitPrice(BigDecimal originalUnitPrice) { this.originalUnitPrice = originalUnitPrice; }
+
+    public BigDecimal getOriginalTotalPrice() { return originalTotalPrice; }
+    public void setOriginalTotalPrice(BigDecimal originalTotalPrice) { this.originalTotalPrice = originalTotalPrice; }
 
     public boolean isQuickDelivery() { return quickDelivery; }
     public void setQuickDelivery(boolean quickDelivery) { this.quickDelivery = quickDelivery; }

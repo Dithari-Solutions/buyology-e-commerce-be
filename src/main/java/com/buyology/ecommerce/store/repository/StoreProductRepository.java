@@ -69,7 +69,7 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
      * first one by insertion order is returned.
      */
     @Query("""
-            SELECT sp.store.id, sp.storePrice FROM StoreProduct sp
+            SELECT sp.store.id, sp.storePrice, sp.discountType, sp.discountValue FROM StoreProduct sp
             WHERE sp.product.id = :productId
               AND sp.store.country.code = :countryCode
               AND sp.isActive = true
@@ -102,7 +102,7 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
      * Returns [storePrice (BigDecimal), currency (String)] for the globally cheapest store for a product.
      */
     @Query("""
-            SELECT sp.storePrice, sp.store.country.currency FROM StoreProduct sp
+            SELECT sp.storePrice, sp.store.country.currency, sp.discountType, sp.discountValue FROM StoreProduct sp
             WHERE sp.product.id = :productId
               AND sp.isActive = true
               AND sp.deletedAt IS NULL
@@ -117,7 +117,7 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
      * Returns [productId (UUID), storePrice (BigDecimal), currency (String)] for the globally cheapest store per product.
      */
     @Query("""
-            SELECT sp.product.id, sp.storePrice, sp.store.country.currency FROM StoreProduct sp
+            SELECT sp.product.id, sp.storePrice, sp.store.country.currency, sp.discountType, sp.discountValue FROM StoreProduct sp
             WHERE sp.product.id IN :productIds
               AND sp.isActive = true
               AND sp.deletedAt IS NULL
@@ -138,7 +138,7 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
      * Use this when you need to show every store option with its own delivery badge.
      */
     @Query("""
-            SELECT sp.product.id, sp.store.id, sp.storePrice FROM StoreProduct sp
+            SELECT sp.product.id, sp.store.id, sp.storePrice, sp.discountType, sp.discountValue FROM StoreProduct sp
             WHERE sp.product.id IN :productIds
               AND sp.store.country.code = :countryCode
               AND sp.isActive = true

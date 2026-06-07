@@ -85,6 +85,9 @@ public class StoryService {
         FileValidationUtils.validateMediaList(mediaFiles);
 
         Story story = new Story(createdBy);
+        if (request.getDisplayOrder() != null) {
+            story.setDisplayOrder(request.getDisplayOrder());
+        }
 
         // Build and add translations from single translation object
         for (StoryTranslation translation : buildTranslations(story, request.getTranslation())) {
@@ -167,6 +170,9 @@ public class StoryService {
         validateStagingKey(request.getThumbnailKey());
 
         Story story = new Story(createdBy);
+        if (request.getDisplayOrder() != null) {
+            story.setDisplayOrder(request.getDisplayOrder());
+        }
         for (StoryTranslation translation : buildTranslations(story, request.getTranslation())) {
             story.addTranslation(translation);
         }
@@ -254,7 +260,8 @@ public class StoryService {
 
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getPublicStories(Language language, UUID currentUserId) {
-        List<StorySummaryResponse> responses = storyRepository.findByStatus(StoryStatus.ACTIVE)
+        List<StorySummaryResponse> responses = storyRepository
+                .findByStatusOrderByDisplayOrderAscCreatedAtDesc(StoryStatus.ACTIVE)
                 .stream()
                 .map(story -> toSummaryResponse(story, language, currentUserId))
                 .filter(r -> r != null)
@@ -275,7 +282,8 @@ public class StoryService {
 
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getAdminStories(Language language) {
-        List<StorySummaryResponse> responses = storyRepository.findAll()
+        List<StorySummaryResponse> responses = storyRepository
+                .findAllByOrderByDisplayOrderAscCreatedAtDesc()
                 .stream()
                 .map(story -> toSummaryResponse(story, language, null))
                 .filter(r -> r != null)
@@ -371,7 +379,8 @@ public class StoryService {
                 mediaItems,
                 viewCount,
                 likeCount,
-                likedByMe);
+                likedByMe,
+                story.getDisplayOrder());
     }
 
     private StoryResponse mapToResponse(Story story, Language language, UUID currentUserId) {
@@ -425,6 +434,14 @@ public class StoryService {
         }
 
         story.activate();
+        storyRepository.save(story);
+    }
+
+    @Transactional
+    public void updateDisplayOrder(UUID storyId, int order) {
+        Story story = storyRepository.findById(storyId)
+                .orElseThrow(() -> new StoryNotFoundException(storyId));
+        story.setDisplayOrder(order);
         storyRepository.save(story);
     }
 

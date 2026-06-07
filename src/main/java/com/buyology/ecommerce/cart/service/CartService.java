@@ -195,8 +195,11 @@ public class CartService {
                     "Current cart country: " + cart.getCountryCode() + ", item country: " + itemCountryCode);
         }
 
-        // Determine base price
-        BigDecimal basePrice;
+        // Determine base price. Apply the store-level discount to the product price so
+        // the cart charges (and later checks out at) the discounted price — not the raw
+        // price. Variants carry their own price and have no discount in the data model.
+        BigDecimal unitPrice;
+        BigDecimal originalUnitPrice = null; // pre-discount price, only set when discounted
         if (variant != null) {
             StoreProductVariant storeVariant = storeProductVariantRepository
                     .findByStoreProduct_IdAndVariant_Id(storeProduct.getId(), variant.getId())
@@ -206,12 +209,13 @@ public class CartService {
                         variant.getId(), request.getStoreId(), authCredentialId, request.getProductId());
                 return ApiResponse.failure(HttpStatus.NOT_FOUND, "Variant is not available in the selected store");
             }
-            basePrice = storeVariant.getStorePrice();
+            unitPrice = storeVariant.getStorePrice();
         } else {
-            basePrice = storeProduct.getStorePrice();
+            unitPrice = storeProduct.effectivePrice();
+            if (storeProduct.hasDiscount()) {
+                originalUnitPrice = storeProduct.getStorePrice();
+            }
         }
-
-        BigDecimal unitPrice = basePrice;
 
         // Stamp the cart with country + currency on first item
         if (cart.getCountryCode() == null) {
@@ -243,6 +247,7 @@ public class CartService {
                 product.getId(), variant != null ? variant.getId() : null,
                 request.getQuantity(), unitPrice, request.getStoreId(), cart.getId());
         CartItem cartItem = new CartItem(cart, product, variant, request.getQuantity(), unitPrice, request.getStoreId());
+        cartItem.setOriginalUnitPrice(originalUnitPrice);
         cartItemRepository.save(cartItem);
 
         // Save spec selections
@@ -503,6 +508,12 @@ public class CartService {
         response.setQuantity(item.getQuantity());
         response.setUnitPrice(item.getUnitPrice());
         response.setTotalPrice(item.getTotalPrice());
+        // Pre-discount prices for strike-through display (null when not discounted).
+        if (item.getOriginalUnitPrice() != null) {
+            response.setOriginalUnitPrice(item.getOriginalUnitPrice());
+            response.setOriginalTotalPrice(
+                    item.getOriginalUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+        }
         response.setQuickDelivery(item.getStoreId() != null && nearbyStoreIds.contains(item.getStoreId()));
         response.setCreatedAt(item.getCreatedAt());
         response.setUpdatedAt(item.getUpdatedAt());

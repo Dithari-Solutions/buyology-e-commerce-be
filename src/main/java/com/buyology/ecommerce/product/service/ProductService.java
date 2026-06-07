@@ -49,6 +49,7 @@ import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.common.utils.HtmlSanitizer;
+import com.buyology.ecommerce.store.domain.StoreProduct;
 import com.buyology.ecommerce.product.repository.ProductVariantOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
 import com.buyology.ecommerce.store.domain.Country;
@@ -1339,9 +1340,9 @@ public class ProductService {
             List<ProductResponse.StoreOptionDto> options = new java.util.ArrayList<>();
             for (Object[] row : allStores) {
                 UUID sid = (UUID) row[0];
-                BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[1], storeCurrency, target);
                 Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
-                options.add(new ProductResponse.StoreOptionDto(sid, converted, target, express));
+                options.add(buildStoreOption(sid, (BigDecimal) row[1], row[2], (BigDecimal) row[3],
+                        storeCurrency, target, express));
             }
             response.setStoreOptions(options);
 
@@ -1352,6 +1353,7 @@ public class ProductService {
                     .orElse(options.get(0));
             response.setStoreId(primary.getStoreId());
             response.setStorePrice(primary.getStorePrice());
+            response.setOriginalPrice(primary.getOriginalPrice());
             response.setCurrency(target);
             response.setExpressDelivery(primary.getExpressDelivery());
         } else {
@@ -1363,14 +1365,37 @@ public class ProductService {
     private void setGlobalPrice(ProductResponse response, UUID productId, String displayCurrency) {
         List<Object[]> globalPrice = storeProductRepository.findCheapestStoreGlobally(productId);
         if (!globalPrice.isEmpty()) {
-            BigDecimal rawPrice = (BigDecimal) globalPrice.get(0)[0];
-            String storeCurrency = (String) globalPrice.get(0)[1];
+            Object[] row = globalPrice.get(0);
+            BigDecimal rawPrice = (BigDecimal) row[0];
+            String storeCurrency = (String) row[1];
             String target = (displayCurrency != null && !displayCurrency.isBlank()) ? displayCurrency.toUpperCase() : storeCurrency;
-            
-            BigDecimal converted = currencyExchangeService.convert(rawPrice, storeCurrency, target);
-            response.setStorePrice(converted);
+
+            BigDecimal effective = StoreProduct.effectivePrice(rawPrice, (Product.DiscountType) row[2], (BigDecimal) row[3]);
+            response.setStorePrice(currencyExchangeService.convert(effective, storeCurrency, target));
+            if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
+                response.setOriginalPrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
+            }
             response.setCurrency(target);
         }
+    }
+
+    /**
+     * Builds a store option with discount applied: storePrice = effective (discounted)
+     * price converted to the display currency, originalPrice = pre-discount price (only
+     * when an actual discount lowers the price). Single place the read-path discount math lives.
+     */
+    private ProductResponse.StoreOptionDto buildStoreOption(
+            UUID storeId, BigDecimal rawPrice, Object discountType, BigDecimal discountValue,
+            String fromCurrency, String toCurrency, Boolean express) {
+        Product.DiscountType dType = (Product.DiscountType) discountType;
+        BigDecimal effective = StoreProduct.effectivePrice(rawPrice, dType, discountValue);
+        BigDecimal convEffective = currencyExchangeService.convert(effective, fromCurrency, toCurrency);
+        ProductResponse.StoreOptionDto opt =
+                new ProductResponse.StoreOptionDto(storeId, convEffective, toCurrency, express);
+        if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
+            opt.setOriginalPrice(currencyExchangeService.convert(rawPrice, fromCurrency, toCurrency));
+        }
+        return opt;
     }
 
     /**
@@ -1432,9 +1457,9 @@ public class ProductService {
                 List<ProductResponse.StoreOptionDto> options = new java.util.ArrayList<>();
                 for (Object[] row : productRows) {
                     UUID sid = (UUID) row[1];
-                    BigDecimal converted = currencyExchangeService.convert((java.math.BigDecimal) row[2], countryStoreCurrency, targetCurrency);
                     Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
-                    options.add(new ProductResponse.StoreOptionDto(sid, converted, targetCurrency, express));
+                    options.add(buildStoreOption(sid, (BigDecimal) row[2], row[3], (BigDecimal) row[4],
+                            countryStoreCurrency, targetCurrency, express));
                 }
                 resp.setStoreOptions(options);
 
@@ -1444,6 +1469,7 @@ public class ProductService {
                         .orElse(options.get(0));
                 resp.setStoreId(primary.getStoreId());
                 resp.setStorePrice(primary.getStorePrice());
+                resp.setOriginalPrice(primary.getOriginalPrice());
                 resp.setCurrency(targetCurrency);
                 resp.setExpressDelivery(primary.getExpressDelivery());
             } else {
@@ -1453,7 +1479,12 @@ public class ProductService {
                     BigDecimal rawPrice = (BigDecimal) gPrice[1];
                     String gCurrency = (String) gPrice[2];
                     String finalTarget = targetCurrency != null ? targetCurrency : gCurrency;
-                    resp.setStorePrice(currencyExchangeService.convert(rawPrice, gCurrency, finalTarget));
+                    BigDecimal effective = StoreProduct.effectivePrice(
+                            rawPrice, (Product.DiscountType) gPrice[3], (BigDecimal) gPrice[4]);
+                    resp.setStorePrice(currencyExchangeService.convert(effective, gCurrency, finalTarget));
+                    if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
+                        resp.setOriginalPrice(currencyExchangeService.convert(rawPrice, gCurrency, finalTarget));
+                    }
                     resp.setCurrency(finalTarget);
                 }
             }

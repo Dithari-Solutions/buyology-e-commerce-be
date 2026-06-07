@@ -69,7 +69,7 @@ public class QuestionAdminService {
 
     @Transactional
     public ResponseEntity<ApiResponse<QuestionResponse>> moderateQuestion(
-            UUID questionId, ModerateQuestionRequest request) {
+            UUID questionId, ModerateQuestionRequest request, UUID adminId) {
 
         ProductQuestion question = questionRepository.findById(questionId).orElse(null);
         if (question == null) {
@@ -77,7 +77,8 @@ public class QuestionAdminService {
         }
 
         question.setStatus(request.getStatus());
-        question.setModeratedBy(request.getModeratedBy());
+        // Attribute moderation to the authenticated admin (JWT principal), not the body.
+        question.setModeratedBy(adminId);
         question.setModeratedAt(Instant.now());
 
         ProductQuestion saved = questionRepository.save(question);
@@ -101,7 +102,7 @@ public class QuestionAdminService {
 
     @Transactional
     public ResponseEntity<ApiResponse<QuestionResponse>> addAnswer(
-            UUID questionId, CreateQuestionAnswerRequest request) {
+            UUID questionId, CreateQuestionAnswerRequest request, UUID adminId) {
 
         ProductQuestion question = questionRepository.findByIdAndDeletedAtIsNull(questionId).orElse(null);
         if (question == null) {
@@ -112,12 +113,14 @@ public class QuestionAdminService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "An answer already exists for this question. Use PUT to update it.");
         }
 
-        Users admin = userRepository.findById(request.getAdminId()).orElse(null);
+        // Resolve the answering admin from the authenticated JWT principal, never the body.
+        Users admin = userRepository.findById(adminId).orElse(null);
         if (admin == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin user not found");
         }
 
-        ProductQuestionAnswer answer = new ProductQuestionAnswer(question, admin, request.getBody());
+        ProductQuestionAnswer answer = new ProductQuestionAnswer(question, admin,
+                com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         answerRepository.save(answer);
 
         return ApiResponse.created(questionService.toResponse(question, true), "Answer added successfully");

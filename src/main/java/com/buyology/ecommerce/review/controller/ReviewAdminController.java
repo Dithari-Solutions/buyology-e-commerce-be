@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -48,8 +49,9 @@ public class ReviewAdminController {
     @PatchMapping("/{reviewId}/moderate")
     public ResponseEntity<ApiResponse<ReviewResponse>> moderateReview(
             @PathVariable UUID reviewId,
+            @AuthenticationPrincipal UUID adminId,
             @RequestBody @Valid ModerateReviewRequest request) {
-        return reviewAdminService.moderateReview(reviewId, request);
+        return reviewAdminService.moderateReview(reviewId, request, adminId);
     }
 
     @Operation(summary = "Delete a review (soft-delete)")
@@ -64,8 +66,9 @@ public class ReviewAdminController {
     @PostMapping("/{reviewId}/reply")
     public ResponseEntity<ApiResponse<ReviewResponse>> addReply(
             @PathVariable UUID reviewId,
+            @AuthenticationPrincipal UUID adminId,
             @RequestBody @Valid CreateReviewReplyRequest request) {
-        return reviewAdminService.addReply(reviewId, request);
+        return reviewAdminService.addReply(reviewId, request, adminId);
     }
 
     @Operation(summary = "Update the admin reply on a review")

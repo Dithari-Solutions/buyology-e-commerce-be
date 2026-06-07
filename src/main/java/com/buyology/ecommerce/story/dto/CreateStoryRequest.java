@@ -16,9 +16,20 @@ public class CreateStoryRequest {
     @Schema(description = "Status of the story", example = "ACTIVE", enumAsRef = true)
     private StoryStatus status;
 
+    @Schema(description = "Display order in the feed (lower shown first). Defaults to 0.", example = "0")
+    private Integer displayOrder;
+
     // ========================
     // Getters & Setters
     // ========================
+
+    public Integer getDisplayOrder() {
+        return displayOrder;
+    }
+
+    public void setDisplayOrder(Integer displayOrder) {
+        this.displayOrder = displayOrder;
+    }
 
     public StoryTranslationRequest getTranslation() {
         return translation;

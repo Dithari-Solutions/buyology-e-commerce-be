@@ -11,5 +11,6 @@ public record StorySummaryResponse(
         List<StoryResponse.MediaItem> media,
         long viewCount,
         long likeCount,
-        boolean likedByMe) {
+        boolean likedByMe,
+        Integer displayOrder) {
 }

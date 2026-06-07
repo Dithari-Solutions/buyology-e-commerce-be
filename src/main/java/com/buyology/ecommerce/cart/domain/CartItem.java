@@ -37,6 +37,11 @@ public class CartItem {
     @Column(name = "unit_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal unitPrice;
 
+    /** Pre-discount unit price, locked at add time. Null when there was no discount.
+     *  Lets the cart render the original (struck-through) price next to the paid price. */
+    @Column(name = "original_unit_price", precision = 12, scale = 2)
+    private BigDecimal originalUnitPrice;
+
     @Column(name = "total_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal totalPrice;
 
@@ -98,6 +103,9 @@ public class CartItem {
 
     public BigDecimal getUnitPrice() { return unitPrice; }
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+
+    public BigDecimal getOriginalUnitPrice() { return originalUnitPrice; }
+    public void setOriginalUnitPrice(BigDecimal originalUnitPrice) { this.originalUnitPrice = originalUnitPrice; }
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }

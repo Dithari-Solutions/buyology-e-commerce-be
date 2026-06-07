@@ -92,6 +92,22 @@ public class AdminOrderController {
     }
 
     /**
+     * Assign one of the order's store's couriers to the order (stamps courier name/phone).
+     * Body: { "courierProfileId": "<uuid>" }.
+     */
+    @PatchMapping("/{orderId}/courier")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN', 'STORE_ADMIN')")
+    public ResponseEntity<ApiResponse<OrderResponse>> assignCourier(
+            @AuthenticationPrincipal UUID adminUserId,
+            @PathVariable UUID orderId,
+            @RequestBody java.util.Map<String, java.util.UUID> body) {
+        java.util.UUID courierProfileId = body.get("courierProfileId");
+        return ApiResponse.success(
+                orderService.assignStoreCourier(orderId, adminUserId, courierProfileId),
+                "Courier assigned successfully");
+    }
+
+    /**
      * Add a tracking event and optionally set carrier tracking code.
      * For REGULAR orders being marked as SHIPPED, trackingCode is required.
      */
