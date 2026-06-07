@@ -17,6 +17,8 @@ import com.buyology.ecommerce.membership.repository.WalletRepository;
 import com.buyology.ecommerce.membership.repository.CreditUsageRepository;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import com.buyology.ecommerce.verification.domain.ContactVerification.Channel;
+import com.buyology.ecommerce.verification.service.ContactVerificationService;
 import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +51,7 @@ public class B2bMembershipService {
     private final UserRepository userRepository;
     private final AuthCredentialRepository authCredentialRepository;
     private final CreditUsageRepository creditUsageRepository;
+    private final ContactVerificationService verificationService;
 
     @Value("${app.web-base-url:https://buyology.online}")
     private String webBaseUrl;
@@ -62,7 +65,8 @@ public class B2bMembershipService {
                                  B2bSetupTokenRepository setupTokenRepo,
                                  UserRepository userRepository,
                                  AuthCredentialRepository authCredentialRepository,
-                                 CreditUsageRepository creditUsageRepository) {
+                                 CreditUsageRepository creditUsageRepository,
+                                 ContactVerificationService verificationService) {
         this.appRepo = appRepo;
         this.membershipRepo = membershipRepo;
         this.walletRepo = walletRepo;
@@ -73,6 +77,7 @@ public class B2bMembershipService {
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
         this.creditUsageRepository = creditUsageRepository;
+        this.verificationService = verificationService;
     }
 
     // ── Customer endpoints ───────────────────────────────────────────────────
@@ -80,6 +85,12 @@ public class B2bMembershipService {
     @Transactional
     public MembershipApplicationResponse submitApplication(MembershipApplicationRequest req, UUID userId) {
         String email = req.getContactEmail() == null ? null : req.getContactEmail().trim().toLowerCase();
+        String mobile = req.getContactMobile() == null ? null : req.getContactMobile().trim();
+
+        // Both the contact email (SendGrid OTP) and mobile (Twilio Verify) must be
+        // verified via /api/verify/* before the membership application can be submitted.
+        verificationService.requireVerified(Channel.EMAIL, email, "email address");
+        verificationService.requireVerified(Channel.PHONE, mobile, "phone number");
 
         if (userId != null && membershipRepo.existsByUserId(userId)) {
             throw new IllegalStateException("This account already has an active B2B membership");
@@ -123,12 +134,16 @@ public class B2bMembershipService {
         app.setContactFullName(req.getContactFullName());
         app.setContactDesignation(req.getContactDesignation());
         app.setContactEmail(email);
-        app.setContactMobile(req.getContactMobile());
+        app.setContactMobile(mobile);
         app.setTermsAccepted(req.isTermsAccepted());
         if (req.getBusinessNeeds() != null) {
             app.setBusinessNeeds(String.join(",", req.getBusinessNeeds()));
         }
         app = appRepo.save(app);
+
+        // Burn the verification proofs so they can't be reused for another application.
+        verificationService.consume(Channel.EMAIL, email);
+        verificationService.consume(Channel.PHONE, mobile);
 
         // Internal notification to ops
         try {

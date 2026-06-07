@@ -4,8 +4,10 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.user.dto.ProfileResponse;
 import com.buyology.ecommerce.user.dto.UpdateProfileRequest;
 import com.buyology.ecommerce.user.service.UserProfileService;
+import com.buyology.ecommerce.verification.dto.VerifyPhoneRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -70,5 +72,34 @@ public class UserProfileController {
         return ApiResponse.success(
                 profileService.updateCountryPreference(userId, countryCode, currency),
                 "Country preference updated successfully");
+    }
+
+    /**
+     * Send an SMS verification code (Twilio Verify) to the given phone number.
+     * The number is saved on the profile as unverified until the code is confirmed.
+     */
+    @Operation(summary = "Send phone verification code via Twilio Verify")
+    @PostMapping("/phone/send-otp")
+    public ResponseEntity<ApiResponse<String>> sendPhoneOtp(
+            @PathVariable UUID userId,
+            @Valid @RequestBody VerifyPhoneRequest request) {
+        profileService.sendPhoneOtp(userId, request.getPhoneNumber());
+        return ApiResponse.success("sent", "Verification code sent via SMS.");
+    }
+
+    /**
+     * Confirm the SMS code and mark the profile phone number as verified.
+     */
+    @Operation(summary = "Verify phone number with the SMS code")
+    @PostMapping("/phone/verify")
+    public ResponseEntity<ApiResponse<ProfileResponse>> verifyPhone(
+            @PathVariable UUID userId,
+            @Valid @RequestBody VerifyPhoneRequest request) {
+        if (request.getCode() == null || request.getCode().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Verification code is required.");
+        }
+        return ApiResponse.success(
+                profileService.verifyPhone(userId, request.getPhoneNumber(), request.getCode()),
+                "Phone number verified successfully.");
     }
 }

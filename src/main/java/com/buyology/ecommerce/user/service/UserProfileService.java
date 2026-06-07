@@ -14,6 +14,7 @@ import com.buyology.ecommerce.user.dto.UpdateProfileRequest;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import com.buyology.ecommerce.verification.service.TwilioVerifyService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,19 +33,22 @@ public class UserProfileService {
     private final AuthCredentialRepository authCredentialRepo;
     private final CountryRepository countryRepo;
     private final ContaboObjectService contaboObjectService;
+    private final TwilioVerifyService twilioVerifyService;
 
     public UserProfileService(UserRepository userRepo,
                                UserProfilesRepository profilesRepo,
                                UserAddressRepository addressRepo,
                                AuthCredentialRepository authCredentialRepo,
                                CountryRepository countryRepo,
-                               ContaboObjectService contaboObjectService) {
+                               ContaboObjectService contaboObjectService,
+                               TwilioVerifyService twilioVerifyService) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
         this.addressRepo = addressRepo;
         this.authCredentialRepo = authCredentialRepo;
         this.countryRepo = countryRepo;
         this.contaboObjectService = contaboObjectService;
+        this.twilioVerifyService = twilioVerifyService;
     }
 
     // =========================================================================
@@ -75,7 +79,12 @@ public class UserProfileService {
         userRepo.save(user);
 
         if (req.getPhoneNumber() != null && !req.getPhoneNumber().isBlank()) {
-            profile.setPhoneNumber(req.getPhoneNumber());
+            String newPhone = req.getPhoneNumber().trim();
+            // Changing the number invalidates any prior verification — they must re-verify.
+            if (!newPhone.equals(profile.getPhoneNumber())) {
+                profile.setPhoneVerified(false);
+            }
+            profile.setPhoneNumber(newPhone);
         }
         if (req.getDateOfBirth() != null) {
             profile.setDateOfBirth(req.getDateOfBirth());
@@ -120,6 +129,52 @@ public class UserProfileService {
             profile.setPreferredCurrency(country.getCurrency());
         }
         profilesRepo.save(profile);
+        return toResponse(user, profile);
+    }
+
+    // =========================================================================
+    // Phone verification (Twilio Verify)
+    // =========================================================================
+
+    /**
+     * Sends an SMS verification code to the given E.164 number via Twilio Verify.
+     * The number is persisted on the profile (unverified) so the subsequent
+     * verify call confirms the same number the user is changing to.
+     */
+    @Transactional
+    public void sendPhoneOtp(UUID userId, String phoneNumber) {
+        Users user = findUser(userId);
+        UserProfiles profile = findOrCreateProfile(user);
+
+        String phone = phoneNumber.trim();
+        if (!phone.equals(profile.getPhoneNumber())) {
+            profile.setPhoneNumber(phone);
+            profile.setPhoneVerified(false);
+            profilesRepo.save(profile);
+        }
+
+        twilioVerifyService.startVerification(phone);
+    }
+
+    /**
+     * Confirms the SMS code via Twilio Verify and marks the profile phone verified.
+     * Returns the refreshed profile.
+     */
+    @Transactional
+    public ProfileResponse verifyPhone(UUID userId, String phoneNumber, String code) {
+        Users user = findUser(userId);
+        UserProfiles profile = findOrCreateProfile(user);
+
+        String phone = phoneNumber.trim();
+        boolean approved = twilioVerifyService.checkVerification(phone, code);
+        if (!approved) {
+            throw new IllegalArgumentException("Invalid or expired verification code.");
+        }
+
+        profile.setPhoneNumber(phone);
+        profile.setPhoneVerified(true);
+        profilesRepo.save(profile);
+
         return toResponse(user, profile);
     }
 
@@ -172,6 +227,7 @@ public class UserProfileService {
         if (isBlank(user.getFirstName()))         missing.add("firstName");
         if (isBlank(user.getLastName()))          missing.add("lastName");
         if (isBlank(profile.getPhoneNumber()))    missing.add("phoneNumber");
+        else if (!profile.isPhoneVerified())      missing.add("phoneVerification");
         if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
 
         if (!missing.isEmpty()) {
@@ -225,6 +281,7 @@ public class UserProfileService {
         res.setFirstName(user.getFirstName());
         res.setLastName(user.getLastName());
         res.setPhoneNumber(profile.getPhoneNumber());
+        res.setPhoneVerified(profile.isPhoneVerified());
         res.setDateOfBirth(profile.getDateOfBirth());
         String avatarUrl = null;
         if (profile.getAvatarUrl() != null) {
@@ -247,6 +304,7 @@ public class UserProfileService {
         if (isBlank(user.getFirstName()))      missing.add("firstName");
         if (isBlank(user.getLastName()))       missing.add("lastName");
         if (isBlank(profile.getPhoneNumber())) missing.add("phoneNumber");
+        else if (!profile.isPhoneVerified())   missing.add("phoneVerification");
         if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
         return missing;
     }

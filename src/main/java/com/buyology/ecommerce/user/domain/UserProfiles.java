@@ -25,6 +25,10 @@ public class UserProfiles {
     @Column(name = "phone_number", length = 20)
     private String phoneNumber;
 
+    /** True once the phone number has been verified via Twilio Verify. Reset to false whenever the number changes. */
+    @Column(name = "phone_verified", nullable = false)
+    private boolean phoneVerified = false;
+
     @Column(name = "address")
     private String address;
 
@@ -117,6 +121,14 @@ public class UserProfiles {
 
     public void setPhoneNumber(String phoneNumber) {
         this.phoneNumber = phoneNumber;
+    }
+
+    public boolean isPhoneVerified() {
+        return phoneVerified;
+    }
+
+    public void setPhoneVerified(boolean phoneVerified) {
+        this.phoneVerified = phoneVerified;
     }
 
     public String getAddress() {

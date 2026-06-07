@@ -118,6 +118,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/newsletter/**").permitAll()
                         // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
+                        // Contact verification (email/phone OTP) used by public supplier & B2B apply forms
+                        .requestMatchers("/api/verify/**").permitAll()
                         // Payment webhook — must be reachable by Paymob without a JWT
                         .requestMatchers("/api/payments/webhook").permitAll()
                         // All other payment endpoints require authentication; ownership /

@@ -14,6 +14,8 @@ import com.buyology.ecommerce.supplier.dto.*;
 import com.buyology.ecommerce.supplier.repository.SupplierApplicationRepository;
 import com.buyology.ecommerce.supplier.repository.SupplierOtpRepository;
 import com.buyology.ecommerce.user.service.SmsService;
+import com.buyology.ecommerce.verification.domain.ContactVerification.Channel;
+import com.buyology.ecommerce.verification.service.ContactVerificationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -44,6 +46,7 @@ public class SupplierApplicationService {
     private final ContaboObjectService contaboObjectService;
     private final OtpProperties otpProperties;
     private final ObjectMapper objectMapper;
+    private final ContactVerificationService verificationService;
 
     public SupplierApplicationService(
             SupplierApplicationRepository applicationRepository,
@@ -52,7 +55,8 @@ public class SupplierApplicationService {
             SmsService smsService,
             ContaboObjectService contaboObjectService,
             OtpProperties otpProperties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ContactVerificationService verificationService) {
         this.applicationRepository = applicationRepository;
         this.otpRepository = otpRepository;
         this.emailService = emailService;
@@ -60,6 +64,7 @@ public class SupplierApplicationService {
         this.contaboObjectService = contaboObjectService;
         this.otpProperties = otpProperties;
         this.objectMapper = objectMapper;
+        this.verificationService = verificationService;
     }
 
     // ── Step 1: Create application + send OTP ────────────────────────────────
@@ -72,6 +77,7 @@ public class SupplierApplicationService {
         }
 
         String email = request.getEmail().trim().toLowerCase();
+        String phone = request.getPhoneNumber() == null ? null : request.getPhoneNumber().trim();
 
         boolean alreadyExists = applicationRepository
                 .existsByEmailAndStatusNot(email, ApplicationStatus.REJECTED);
@@ -80,13 +86,20 @@ public class SupplierApplicationService {
                     "A supplier application with this email already exists");
         }
 
-/*
-        if (request.getPreferredContact() != PreferredContact.EMAIL
-                && (request.getPhoneNumber() == null || request.getPhoneNumber().isBlank())) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
-                    "Phone number is required for WhatsApp or Phone Call contact preference");
+        if (phone == null || phone.isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Phone number is required");
         }
-*/
+
+        // Both contacts must be verified (email via SendGrid, phone via Twilio Verify)
+        // through /api/verify/* before the application can be created.
+        if (!verificationService.isVerified(Channel.EMAIL, email)) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "Please verify your email address before continuing.");
+        }
+        if (!verificationService.isVerified(Channel.PHONE, phone)) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST,
+                    "Please verify your phone number before continuing.");
+        }
 
         SupplierApplication app = new SupplierApplication();
         app.setFullName(request.getFullName());
@@ -95,12 +108,14 @@ public class SupplierApplicationService {
         app.setCountry(request.getCountry());
         app.setCity(request.getCity());
         app.setEmail(email);
-        app.setPhoneNumber(request.getPhoneNumber());
+        app.setPhoneNumber(phone);
         app.setPreferredContact(request.getPreferredContact());
-        app.setOtpVerified(true);
+        app.setOtpVerified(true); // email + phone already verified above
         applicationRepository.save(app);
 
-        // sendOtp(app);
+        // Burn the verification proofs so they can't be reused for another application.
+        verificationService.consume(Channel.EMAIL, email);
+        verificationService.consume(Channel.PHONE, phone);
 
         return ApiResponse.success(app.getId(), "Application initiated. Please proceed to step 2.");
     }
