@@ -17,5 +17,11 @@ CREATE INDEX IF NOT EXISTS idx_contact_verif_channel_target ON contact_verificat
 CREATE INDEX IF NOT EXISTS idx_contact_verif_expires_at ON contact_verifications (expires_at);
 
 -- Track whether a customer's profile phone number has been verified via Twilio Verify.
-ALTER TABLE user_profiles
-    ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
+-- Guarded with to_regclass because Flyway runs before Hibernate ddl-auto creates the
+-- table on a fresh database (Hibernate then adds the column from the entity).
+DO $$
+BEGIN
+    IF to_regclass('public.user_profiles') IS NOT NULL THEN
+        ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
