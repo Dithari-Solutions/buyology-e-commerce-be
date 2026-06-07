@@ -177,7 +177,8 @@ public class ReviewService {
         boolean isVerifiedPurchase = cartItemRepository
                 .existsCheckedOutPurchaseByUserAndProduct(user.getId(), request.getProductId());
 
-        ProductReview review = new ProductReview(product, user, request.getRating(), request.getBody());
+        ProductReview review = new ProductReview(product, user, request.getRating(),
+                com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         review.setIsVerifiedPurchase(isVerifiedPurchase);
 
         review.setStatus(ModerationStatus.APPROVED);
@@ -225,7 +226,7 @@ public class ReviewService {
             if (filterError != null) {
                 return ApiResponse.failure(HttpStatus.BAD_REQUEST, filterError);
             }
-            review.setBody(request.getBody());
+            review.setBody(com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         }
         if (request.getRating() != null) review.setRating(request.getRating());
 

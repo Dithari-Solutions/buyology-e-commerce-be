@@ -31,6 +31,7 @@ import com.buyology.ecommerce.user.domain.Users;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/auth")
@@ -65,7 +66,7 @@ public class AuthController {
     @Operation(summary = "Initiate registration",
             description = "Validates credentials and sends an OTP to the user's email")
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<String>> signup(@RequestBody SignUpRequest request) {
+    public ResponseEntity<ApiResponse<String>> signup(@Valid @RequestBody SignUpRequest request) {
         return authService.signup(request);
     }
 

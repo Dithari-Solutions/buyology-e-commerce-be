@@ -152,7 +152,7 @@ public class ReviewAdminService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Reply not found for this review");
         }
 
-        reply.setBody(request.getBody());
+        reply.setBody(com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         replyRepository.save(reply);
 
         ProductReview review = reviewRepository.findByIdAndDeletedAtIsNull(reviewId).orElseThrow();

@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -42,6 +43,7 @@ public class StoreController {
 
     @Operation(summary = "Create a store",
             description = "Multipart form: 'request' part is JSON, 'banner' part is an optional image file.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> createStore(
             @RequestPart("request") String requestJson,
@@ -70,6 +72,7 @@ public class StoreController {
 
     @Operation(summary = "Update a store",
             description = "Multipart form: 'request' part is JSON (all fields optional), 'banner' part is an optional new image file.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> updateStore(
             @PathVariable UUID id,
@@ -80,6 +83,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Soft-delete a store")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteStore(@PathVariable UUID id) {
         return storeService.deleteStore(id);
@@ -88,6 +92,7 @@ public class StoreController {
     // ── Translation sub-resource ─────────────────────────────────────────────
 
     @Operation(summary = "Add a translation to a store")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PostMapping("/{storeId}/translations")
     public ResponseEntity<ApiResponse<StoreTranslationResponse>> addTranslation(
             @PathVariable UUID storeId,
@@ -96,6 +101,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Update a store translation by language code")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PatchMapping("/{storeId}/translations/{language}")
     public ResponseEntity<ApiResponse<StoreTranslationResponse>> updateTranslation(
             @PathVariable UUID storeId,
@@ -105,6 +111,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Delete a store translation by language code")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @DeleteMapping("/{storeId}/translations/{language}")
     public ResponseEntity<ApiResponse<Void>> deleteTranslation(
             @PathVariable UUID storeId,

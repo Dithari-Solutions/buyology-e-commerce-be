@@ -20,6 +20,12 @@ public class FileValidationUtils {
     private static final Set<String> ALLOWED_VIDEO_EXTENSIONS = Set.of("mp4", "mov", "avi", "mkv", "webm");
     private static final Set<String> ALLOWED_VIDEO_MIME_TYPES = Set.of("video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/webm");
 
+    // Documents (e.g. supplier trade licenses): PDFs or images.
+    private static final Set<String> ALLOWED_DOCUMENT_EXTENSIONS = Set.of("pdf", "jpg", "jpeg", "png", "webp");
+    private static final Set<String> ALLOWED_DOCUMENT_MIME_TYPES = Set.of(
+            "application/pdf", "image/jpeg", "image/png", "image/webp");
+    private static final long DOCUMENT_MAX_BYTES = 10L * 1024 * 1024; // 10 MB
+
     private static final Set<String> SUPPLIER_PRODUCT_IMAGE_EXTENSIONS = Set.of("png", "webp");
     private static final Set<String> SUPPLIER_PRODUCT_IMAGE_MIME_TYPES = Set.of("image/png", "image/webp");
     private static final long SUPPLIER_PRODUCT_MAX_BYTES = 5L * 1024 * 1024; // 5 MB
@@ -99,11 +105,53 @@ public class FileValidationUtils {
         // Scan for malicious content (scripts)
         scanForMaliciousContent(file);
 
-        // Verify Integrity for images
+        // Magic-byte verification — do NOT trust the client-declared extension/MIME.
+        // Covers webp and all video formats that the ImageIO check below cannot.
+        verifyMediaMagic(file, allowVideo);
+
+        // Extra integrity decode for raster images (skips webp — stock ImageIO can't read it).
         if (isImage && !extension.equals("webp")) {
             verifyImageIntegrity(file);
         }
     }
+
+    /**
+     * Verifies the file's leading bytes match an allowed image (or, when permitted,
+     * video) container signature. Defeats content-type spoofing — e.g. a script or
+     * executable renamed to .png with a forged image/png MIME.
+     */
+    private static void verifyMediaMagic(MultipartFile file, boolean allowVideo) {
+        byte[] h;
+        try (InputStream is = file.getInputStream()) {
+            h = is.readNBytes(16);
+        } catch (IOException e) {
+            throw new FileValidationException("Failed to read file for validation");
+        }
+        boolean image = isPng(h) || isJpeg(h) || isGif(h) || isWebp(h);
+        boolean video = allowVideo && (isMp4(h) || isAvi(h) || isMatroska(h));
+        if (!image && !video) {
+            throw new FileValidationException(
+                    "File content does not match an allowed " + (allowVideo ? "image or video" : "image") + " format.");
+        }
+    }
+
+    private static boolean startsWith(byte[] h, int off, int... sig) {
+        if (h.length < off + sig.length) return false;
+        for (int i = 0; i < sig.length; i++) {
+            if ((h[off + i] & 0xFF) != (sig[i] & 0xFF)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isPng(byte[] h)  { return startsWith(h, 0, 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A); }
+    private static boolean isJpeg(byte[] h) { return startsWith(h, 0, 0xFF, 0xD8, 0xFF); }
+    private static boolean isGif(byte[] h)  { return startsWith(h, 0, 0x47, 0x49, 0x46, 0x38); } // "GIF8"
+    private static boolean isMatroska(byte[] h) { return startsWith(h, 0, 0x1A, 0x45, 0xDF, 0xA3); } // mkv/webm
+    // RIFF container: "RIFF" then 4 size bytes then the form type at offset 8.
+    private static boolean isWebp(byte[] h) { return startsWith(h, 0, 0x52, 0x49, 0x46, 0x46) && startsWith(h, 8, 0x57, 0x45, 0x42, 0x50); } // WEBP
+    private static boolean isAvi(byte[] h)  { return startsWith(h, 0, 0x52, 0x49, 0x46, 0x46) && startsWith(h, 8, 0x41, 0x56, 0x49, 0x20); } // "AVI "
+    // ISO-BMFF (mp4/mov/m4v): "ftyp" box type at offset 4.
+    private static boolean isMp4(byte[] h)  { return startsWith(h, 4, 0x66, 0x74, 0x79, 0x70); }
 
     public static void validateImages(List<MultipartFile> files) {
         if (files == null) return;
@@ -155,6 +203,7 @@ public class FileValidationUtils {
         }
 
         scanForMaliciousContent(file);
+        verifyMediaMagic(file, false); // reject content that isn't really an image
 
         if ("png".equals(extension)) {
             verifyHasTransparency(file);
@@ -193,6 +242,72 @@ public class FileValidationUtils {
         } catch (IOException e) {
             throw new FileValidationException("Failed to verify image transparency");
         }
+    }
+
+    /**
+     * Validates an uploaded document (PDF or image): extension + declared MIME on an
+     * allowlist, size cap, malicious-content scan, and magic-byte verification (so a
+     * renamed executable / script cannot pass as a PDF or image).
+     */
+    public static void validateDocument(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return;
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !originalFilename.contains(".")) {
+            throw new FileValidationException("File must have an extension");
+        }
+        String extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
+        String contentType = file.getContentType();
+
+        if (!ALLOWED_DOCUMENT_EXTENSIONS.contains(extension)
+                || contentType == null
+                || !ALLOWED_DOCUMENT_MIME_TYPES.contains(contentType)) {
+            throw new FileValidationException("Invalid document type. Only PDF or image files are allowed.");
+        }
+        if (file.getSize() > DOCUMENT_MAX_BYTES) {
+            throw new FileValidationException(
+                    "Document exceeds 10 MB limit (" + (file.getSize() / 1024 / 1024) + " MB).");
+        }
+
+        scanForMaliciousContent(file);
+
+        // Magic-byte check — do not trust the client-declared extension/MIME alone.
+        if ("pdf".equals(extension)) {
+            verifyPdfMagic(file);
+        } else if (!"webp".equals(extension)) {
+            verifyImageIntegrity(file);
+        }
+    }
+
+    private static void verifyPdfMagic(MultipartFile file) {
+        try (InputStream is = file.getInputStream()) {
+            byte[] header = is.readNBytes(5);
+            // "%PDF-"
+            if (header.length < 5 || header[0] != '%' || header[1] != 'P'
+                    || header[2] != 'D' || header[3] != 'F' || header[4] != '-') {
+                throw new FileValidationException("File is not a valid PDF document");
+            }
+        } catch (IOException e) {
+            throw new FileValidationException("Failed to verify document");
+        }
+    }
+
+    /**
+     * Strips a filename to a safe set of characters and removes any path components,
+     * preventing path traversal / object-key injection when the name is used to build
+     * a storage key. Returns "file" when nothing safe remains.
+     */
+    public static String sanitizeFilename(String name) {
+        if (name == null) return "file";
+        // Drop any directory parts a client may have included.
+        String base = name.replace('\\', '/');
+        int slash = base.lastIndexOf('/');
+        if (slash >= 0) base = base.substring(slash + 1);
+        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        // Collapse leading dots so the result can't become ".." or be hidden.
+        base = base.replaceAll("^\\.+", "");
+        return base.isBlank() ? "file" : base;
     }
 
     private static void scanForMaliciousContent(MultipartFile file) {

@@ -278,9 +278,13 @@ public class SupplierApplicationService {
         app.setWebsiteOrSocialLink(websiteOrSocialLink);
 
         if (tradeLicense != null && !tradeLicense.isEmpty()) {
+            // Validate type/size/content and sanitize the filename before it becomes part
+            // of the storage key (this endpoint is public — never trust the upload).
+            com.buyology.ecommerce.common.utils.FileValidationUtils.validateDocument(tradeLicense);
             try {
-                String key = "suppliers/" + applicationId + "/trade-license-"
-                        + tradeLicense.getOriginalFilename();
+                String safeName = com.buyology.ecommerce.common.utils.FileValidationUtils
+                        .sanitizeFilename(tradeLicense.getOriginalFilename());
+                String key = "suppliers/" + applicationId + "/trade-license-" + safeName;
                 String uploadedKey = contaboObjectService.uploadFile(key, tradeLicense);
                 app.setTradeLicenseKey(uploadedKey);
             } catch (Exception e) {

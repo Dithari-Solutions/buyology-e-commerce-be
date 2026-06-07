@@ -135,7 +135,7 @@ public class QuestionAdminService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Answer not found for this question");
         }
 
-        answer.setBody(request.getBody());
+        answer.setBody(com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         answerRepository.save(answer);
 
         ProductQuestion question = questionRepository.findByIdAndDeletedAtIsNull(questionId).orElseThrow();

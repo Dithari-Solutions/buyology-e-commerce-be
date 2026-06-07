@@ -48,6 +48,7 @@ import com.buyology.ecommerce.product.repository.ProductSpecGroupTranslationRepo
 import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
+import com.buyology.ecommerce.common.utils.HtmlSanitizer;
 import com.buyology.ecommerce.product.repository.ProductVariantOptionRepository;
 import com.buyology.ecommerce.product.repository.ProductVariantRepository;
 import com.buyology.ecommerce.store.domain.Country;
@@ -511,11 +512,11 @@ public class ProductService {
                     translationRepository.flush();
                     t.setSlug(newSlug);
                 }
-                t.setTitle(newTitle);
+                t.setTitle(HtmlSanitizer.stripHtml(newTitle));
             }
             // A non-null description (including empty string) overwrites; null = unchanged
             if (newDescription != null) {
-                t.setDescription(newDescription);
+                t.setDescription(HtmlSanitizer.stripHtml(newDescription));
             }
         }
         translationRepository.saveAll(translations);
@@ -960,10 +961,14 @@ public class ProductService {
         freeDeletedSlug("AR", slugAr);
         translationRepository.flush();
 
+        // Strip HTML from supplier/admin-supplied product copy (stored-XSS defense).
         List<ProductTranslation> translations = new ArrayList<>();
-        translations.add(new ProductTranslation(product, "AZ", tr.getTitleAz(), tr.getDescriptionAz(), slugAz));
-        translations.add(new ProductTranslation(product, "EN", tr.getTitleEn(), tr.getDescriptionEn(), slugEn));
-        translations.add(new ProductTranslation(product, "AR", tr.getTitleAr(), tr.getDescriptionAr(), slugAr));
+        translations.add(new ProductTranslation(product, "AZ",
+                HtmlSanitizer.stripHtml(tr.getTitleAz()), HtmlSanitizer.stripHtml(tr.getDescriptionAz()), slugAz));
+        translations.add(new ProductTranslation(product, "EN",
+                HtmlSanitizer.stripHtml(tr.getTitleEn()), HtmlSanitizer.stripHtml(tr.getDescriptionEn()), slugEn));
+        translations.add(new ProductTranslation(product, "AR",
+                HtmlSanitizer.stripHtml(tr.getTitleAr()), HtmlSanitizer.stripHtml(tr.getDescriptionAr()), slugAr));
         return translationRepository.saveAll(translations);
     }
 

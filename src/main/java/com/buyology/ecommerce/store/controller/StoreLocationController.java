@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -57,6 +58,7 @@ public class StoreLocationController {
 
     @Operation(summary = "Add a location (branch) to a store",
             description = "When isPrimary=true the existing primary branch is automatically demoted.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PostMapping("/{storeId}/locations")
     public ResponseEntity<ApiResponse<StoreLocationResponse>> createLocation(
             @PathVariable UUID storeId,
@@ -79,6 +81,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Update a store location")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PatchMapping("/locations/{locationId}")
     public ResponseEntity<ApiResponse<StoreLocationResponse>> updateLocation(
             @PathVariable UUID locationId,
@@ -87,6 +90,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Deactivate a store location")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @DeleteMapping("/locations/{locationId}")
     public ResponseEntity<ApiResponse<Void>> deleteLocation(@PathVariable UUID locationId) {
         return locationService.deleteLocation(locationId);
@@ -95,6 +99,7 @@ public class StoreLocationController {
     // ── Operating hours sub-resource ─────────────────────────────────────────
 
     @Operation(summary = "Set operating hours for a day at a location")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PostMapping("/locations/{locationId}/hours")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> createHours(
             @PathVariable UUID locationId,
@@ -117,6 +122,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Update an operating hours entry")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @PatchMapping("/hours/{hoursId}")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> updateHours(
             @PathVariable UUID hoursId,
@@ -125,6 +131,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Delete an operating hours entry")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
     @DeleteMapping("/hours/{hoursId}")
     public ResponseEntity<ApiResponse<Void>> deleteHours(@PathVariable UUID hoursId) {
         return hoursService.deleteHours(hoursId);

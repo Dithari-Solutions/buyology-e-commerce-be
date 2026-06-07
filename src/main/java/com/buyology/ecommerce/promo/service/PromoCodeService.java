@@ -182,18 +182,6 @@ public class PromoCodeService {
         PromoCode pc = promoCodeRepo.findById(promoCodeId)
                 .orElseThrow(() -> new NoSuchElementException("Promo code not found: " + promoCodeId));
 
-        List<Users> targets;
-        if (req.getTargetUserIds() != null && !req.getTargetUserIds().isEmpty()) {
-            targets = req.getTargetUserIds().stream()
-                    .map(id -> userRepo.findById(id).orElse(null))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-        } else {
-            targets = userRepo.findAll().stream()
-                    .filter(u -> u.getUserType() == Users.UserType.CUSTOMER)
-                    .collect(Collectors.toList());
-        }
-
         String title = "Exclusive offer for you!";
         String body = "Use code " + pc.getCode() + " to get "
                 + (pc.getDiscountType() == DiscountType.PERCENTAGE
@@ -203,25 +191,49 @@ public class PromoCodeService {
 
         Map<String, String> data = Map.of("promoCode", pc.getCode(), "type", "PROMO");
 
-        for (Users user : targets) {
-            try {
-                if (req.isSendPush()) {
-                    pushService.sendToUser(user.getId(), title, body, data);
-                }
-                if (req.isSendEmail()) {
-                    String email = authCredentialRepo.findByUserId(user.getId()).stream()
-                            .map(c -> c.getEmail())
-                            .filter(e -> e != null && !e.isBlank())
-                            .findFirst().orElse(null);
-                    if (email != null) {
-                        emailService.sendPromoCodeEmail(email, pc.getCode(), body);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("Failed to send promo to user {}: {}", user.getId(), e.getMessage());
+        int sent = 0;
+        if (req.getTargetUserIds() != null && !req.getTargetUserIds().isEmpty()) {
+            // Batch fetch instead of N findById calls.
+            List<Users> targets = userRepo.findAllById(req.getTargetUserIds());
+            for (Users user : targets) {
+                sendPromoToUser(user, pc, title, body, data, req);
             }
+            sent = targets.size();
+        } else {
+            // Broadcast to all customers, paged so we never load the whole table at once.
+            int pageNum = 0;
+            org.springframework.data.domain.Page<Users> page;
+            do {
+                page = userRepo.findByUserType(Users.UserType.CUSTOMER,
+                        org.springframework.data.domain.PageRequest.of(pageNum, 500));
+                for (Users user : page.getContent()) {
+                    sendPromoToUser(user, pc, title, body, data, req);
+                }
+                sent += page.getNumberOfElements();
+                pageNum++;
+            } while (page.hasNext());
         }
-        log.info("Promo '{}' sent to {} users", pc.getCode(), targets.size());
+        log.info("Promo '{}' sent to {} users", pc.getCode(), sent);
+    }
+
+    private void sendPromoToUser(Users user, PromoCode pc, String title, String body,
+                                 Map<String, String> data, SendPromoRequest req) {
+        try {
+            if (req.isSendPush()) {
+                pushService.sendToUser(user.getId(), title, body, data);
+            }
+            if (req.isSendEmail()) {
+                String email = authCredentialRepo.findByUserId(user.getId()).stream()
+                        .map(c -> c.getEmail())
+                        .filter(e -> e != null && !e.isBlank())
+                        .findFirst().orElse(null);
+                if (email != null) {
+                    emailService.sendPromoCodeEmail(email, pc.getCode(), body);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send promo to user {}: {}", user.getId(), e.getMessage());
+        }
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

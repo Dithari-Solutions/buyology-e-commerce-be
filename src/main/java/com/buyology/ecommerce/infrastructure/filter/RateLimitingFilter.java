@@ -193,9 +193,19 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private RateLimitTier determineTier(String path) {
+        // Credential / OTP / password endpoints — strongest throttle (brute force,
+        // credential stuffing, OTP guessing, token-setup abuse). Per-account limits are
+        // additionally enforced in the service layer (LoginAttemptService / OTP attempts).
         if (path.equals("/auth/signup")
                 || path.equals("/auth/signin")
-                || path.equals("/auth/verify-otp")) {
+                || path.equals("/auth/verify-otp")
+                || path.startsWith("/auth/admin/")            // admin signin/signup/verify-otp
+                || path.contains("forgot-password")
+                || path.contains("reset-password")
+                || path.contains("resend-otp")
+                || path.contains("verify-otp")
+                || path.startsWith("/api/supplier/auth/")     // supplier login / password setup
+                || path.startsWith("/api/membership/auth/")) { // B2B token-gated password setup
             return RateLimitTier.AUTH_SENSITIVE;
         }
         if (path.startsWith("/auth/")) {

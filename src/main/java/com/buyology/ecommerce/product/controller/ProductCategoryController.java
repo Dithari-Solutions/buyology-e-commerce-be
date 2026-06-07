@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -49,6 +50,7 @@ public class ProductCategoryController {
                     + "or a subcategory when a valid parentId is supplied. "
                     + "Translations in Azerbaijani, English, and Arabic are all required. "
                     + "Slugs must be globally unique per language.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<CategoryResponse>> createCategory(
             @RequestBody @Valid CreateCategoryRequest request) {
@@ -65,6 +67,7 @@ public class ProductCategoryController {
     @Operation(summary = "Update a category",
             description = "Partially updates a category. All fields are optional — only provided fields are applied. "
                     + "If translations are provided, only the supplied language fields are updated.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(
             @PathVariable UUID id,
@@ -74,6 +77,7 @@ public class ProductCategoryController {
 
     @Operation(summary = "Delete (deactivate) a category",
             description = "Soft-deletes the category by setting its status to INACTIVE.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteCategory(@PathVariable UUID id) {
         return categoryService.deleteCategory(id);

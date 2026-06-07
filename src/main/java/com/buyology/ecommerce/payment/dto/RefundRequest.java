@@ -19,8 +19,8 @@ public class RefundRequest {
 
     private String notes;
 
-    // UUID of the admin initiating the refund; use a system UUID for automated refunds
-    @NotNull
+    // Deprecated/ignored for API callers: the refund is attributed to the authenticated
+    // admin (SecurityContext). Retained only as a fallback for internal/automated refunds.
     private UUID refundedBy;
 
     public UUID getTransactionId() { return transactionId; }

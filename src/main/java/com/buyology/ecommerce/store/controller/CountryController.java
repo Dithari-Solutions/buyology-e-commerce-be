@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -33,6 +34,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Create a country")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<CountryResponse>> createCountry(
             @RequestBody @Valid CreateCountryRequest request) {
@@ -58,6 +60,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Update a country")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<CountryResponse>> updateCountry(
             @PathVariable UUID id,
@@ -66,6 +69,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Deactivate a country")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteCountry(@PathVariable UUID id) {
         return countryService.deleteCountry(id);

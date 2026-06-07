@@ -82,7 +82,7 @@ public class CourierRatingService {
         courierRating.setUserId(userId);
         courierRating.setCourierId(order.getCourierUserId());
         courierRating.setStars(request.getCourierStars());
-        courierRating.setComment(request.getCourierComment());
+        courierRating.setComment(com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getCourierComment()));
         courierRatingRepo.save(courierRating);
 
         log.info("[Rating] Courier rating saved orderId={} courierId={} stars={}",

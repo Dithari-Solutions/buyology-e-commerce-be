@@ -93,6 +93,9 @@ public class ChatServiceImpl implements ChatService {
                     "Call signalling is not supported on web clients. Use messageType=TEXT.");
         }
 
+        // Strip any HTML from the customer-supplied message (stored-XSS defense).
+        String safeContent = com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.content());
+
         // ── Persist ───────────────────────────────────────────────────────────
         ChatMessage msg = new ChatMessage();
         msg.setDeliveryOrderId(deliveryOrderId);
@@ -100,7 +103,7 @@ public class ChatServiceImpl implements ChatService {
         msg.setSenderId(customerId);
         msg.setSenderType(SenderType.CUSTOMER);
         msg.setMessageType(request.messageType());
-        msg.setContent(request.content());
+        msg.setContent(safeContent);
         msg.setSentAt(Instant.now());
         chatMessageRepository.save(msg);
 
@@ -121,7 +124,7 @@ public class ChatServiceImpl implements ChatService {
                     customerId,
                     SenderType.CUSTOMER,
                     request.messageType(),
-                    request.content(),
+                    safeContent,
                     msg.getSentAt()
             );
             rabbitTemplate.convertAndSend(DELIVERY_EXCHANGE, CHAT_FROM_CUSTOMER_KEY, event);

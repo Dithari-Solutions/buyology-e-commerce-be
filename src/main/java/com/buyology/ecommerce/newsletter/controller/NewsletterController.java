@@ -28,11 +28,15 @@ public class NewsletterController {
 
     @PostMapping("/api/newsletter/subscribe")
     public ResponseEntity<ApiResponse<String>> subscribe(@RequestBody Map<String, String> body) {
-        String email = body.get("email");
+        String email = body == null ? null : body.get("email");
         if (email == null || email.isBlank()) {
             return ApiResponse.failure(org.springframework.http.HttpStatus.BAD_REQUEST, "Email is required");
         }
-        return ApiResponse.success(newsletterService.subscribe(email), "OK");
+        if (!com.buyology.ecommerce.common.utils.EmailValidation.isValid(email)
+                || email.length() > 254) {
+            return ApiResponse.failure(org.springframework.http.HttpStatus.BAD_REQUEST, "Email is not valid");
+        }
+        return ApiResponse.success(newsletterService.subscribe(email.trim()), "OK");
     }
 
     @GetMapping("/api/newsletter/unsubscribe")

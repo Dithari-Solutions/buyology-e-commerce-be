@@ -92,7 +92,7 @@ public class WalletService {
 
     @Transactional
     public WalletResponse addCredit(UUID userId, BigDecimal amount, String description, String performedBy) {
-        Wallet wallet = walletRepo.findByUserId(userId)
+        Wallet wallet = walletRepo.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new NoSuchElementException("Wallet not found for user: " + userId));
 
         BigDecimal newBalance = wallet.getBalance().add(amount);
@@ -105,7 +105,7 @@ public class WalletService {
 
     @Transactional
     public WalletResponse deductCredit(UUID userId, BigDecimal amount, String description, String referenceId) {
-        Wallet wallet = walletRepo.findByUserId(userId)
+        Wallet wallet = walletRepo.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new NoSuchElementException("Wallet not found for user: " + userId));
 
         if (wallet.getBalance().compareTo(amount) < 0) {
@@ -122,7 +122,7 @@ public class WalletService {
 
     @Transactional
     public WalletResponse adjustment(UUID userId, BigDecimal amount, String description, String performedBy) {
-        Wallet wallet = walletRepo.findByUserId(userId)
+        Wallet wallet = walletRepo.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new NoSuchElementException("Wallet not found for user: " + userId));
 
         BigDecimal newBalance = wallet.getBalance().add(amount);

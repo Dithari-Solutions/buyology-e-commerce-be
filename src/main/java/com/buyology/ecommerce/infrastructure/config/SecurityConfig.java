@@ -94,9 +94,35 @@ public class SecurityConfig {
                         ).permitAll()
                         // Allow static resources
                         .requestMatchers("/story/**", "/product/**", "/review/**", "/store/**", "/user/**", "/css/**", "/js/**", "/images/**").permitAll()
+                        // Health probes (k8s/load-balancer) + Prometheus scrape — no auth.
+                        // Metrics are low-sensitivity; restrict /actuator/prometheus at the
+                        // network layer in prod.
+                        .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/prometheus").permitAll()
+                        // WebSocket/SockJS handshake — authentication happens at the STOMP
+                        // CONNECT frame (JWT), not at the HTTP handshake.
+                        .requestMatchers("/ws/**", "/ws-native/**").permitAll()
                         .requestMatchers("/api/banner/**").permitAll()
+                        // Public storefront / marketing reads. Write endpoints under these
+                        // paths are individually guarded with method-level @PreAuthorize, which
+                        // is still enforced under permitAll, so only reads are actually open.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/product/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/category/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/brand").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/countries/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/questions/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news").permitAll()
+                        // Stories: reads + view/like (like/unlike self-enforce auth in-controller)
+                        .requestMatchers("/api/story/**").permitAll()
+                        // Newsletter subscribe/unsubscribe (unsubscribe is an emailed GET link)
+                        .requestMatchers("/api/newsletter/**").permitAll()
+                        // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
                         // Payment webhook — must be reachable by Paymob without a JWT
                         .requestMatchers("/api/payments/webhook").permitAll()
+                        // All other payment endpoints require authentication; ownership /
+                        // role checks are enforced at the method/service layer.
+                        .requestMatchers("/api/payments/**").authenticated()
                         // Auth endpoints are public
                         .requestMatchers("/auth/**").permitAll()
                         // Supplier registration and password-setup endpoints are public
@@ -119,8 +145,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/game/**").authenticated()
                         // Review/question reads are public; writes are gated by
                         // method-level @PreAuthorize + ownership checks in the service.
-                        // All other requests must be authenticated by default (deny-by-default).
-                        .anyRequest().permitAll())
+                        // Deny-by-default: every endpoint not explicitly permitted above
+                        // requires authentication. A forgotten matcher fails closed (401),
+                        // not open.
+                        .anyRequest().authenticated())
                 .formLogin(form -> form.disable())
                 .httpBasic(httpBasic -> httpBasic.disable());
 

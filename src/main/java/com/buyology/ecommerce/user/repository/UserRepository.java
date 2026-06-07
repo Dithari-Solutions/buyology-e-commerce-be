@@ -21,4 +21,9 @@ public interface UserRepository extends JpaRepository<Users, UUID> {
            "AND u.userType <> com.buyology.ecommerce.user.domain.Users.UserType.ADMIN " +
            "AND COALESCE(u.lastLoginAt, u.createdAt) < :cutoff")
     List<Users> findInactiveCustomersToBlock(@Param("cutoff") Instant cutoff);
+
+    /** Paged lookup by user type — used to broadcast to customers without loading the
+     *  entire users table into memory at once. */
+    org.springframework.data.domain.Page<Users> findByUserType(
+            Users.UserType userType, org.springframework.data.domain.Pageable pageable);
 }

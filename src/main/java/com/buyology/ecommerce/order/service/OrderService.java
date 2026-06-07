@@ -324,6 +324,13 @@ public class OrderService {
             // Path 1 — order already exists, just transition it to PAID
             orderRepo.findById(tx.getAppOrderId()).ifPresent(order -> {
                 if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
+                    if (!isPaidAmountSufficient(order, tx)) {
+                        log.error("[ORDER] Underpayment detected for order {} (tx {}): paid {} {} < order total {} {}. "
+                                        + "Leaving order in PENDING_PAYMENT for manual review.",
+                                order.getId(), tx.getId(), tx.getAmount(), tx.getCurrency(),
+                                order.getTotalAmount(), order.getCurrency());
+                        return;
+                    }
                     order.setStatus(OrderStatus.PAID);
                     order.setPaymentTransactionId(event.getTransactionId());
                     order.setPaidAt(Instant.now());
@@ -424,15 +431,23 @@ public class OrderService {
 
             OrderResponse orderResponse = createOrder(userId, authCredentialId, req);
 
-            // Transition immediately to PAID
+            // Transition immediately to PAID — unless the amount actually paid does not
+            // cover the order total computed server-side from the cart (amount tampering).
             Order order = orderRepo.findById(orderResponse.getId()).orElse(null);
             if (order != null) {
-                order.setStatus(OrderStatus.PAID);
-                order.setPaymentTransactionId(event.getTransactionId());
-                order.setPaidAt(Instant.now());
-                appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
-                        null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
-                orderRepo.save(order);
+                if (!isPaidAmountSufficient(order, tx)) {
+                    log.error("[ORDER] Underpayment detected for cart-first order {} (tx {}): paid {} {} < order total {} {}. "
+                                    + "Leaving order in PENDING_PAYMENT for manual review.",
+                            order.getId(), tx.getId(), tx.getAmount(), tx.getCurrency(),
+                            order.getTotalAmount(), order.getCurrency());
+                } else {
+                    order.setStatus(OrderStatus.PAID);
+                    order.setPaymentTransactionId(event.getTransactionId());
+                    order.setPaidAt(Instant.now());
+                    appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
+                            null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                    orderRepo.save(order);
+                }
             }
 
             // Back-fill the transaction so future queries can find the order
@@ -447,6 +462,37 @@ public class OrderService {
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
             clearCartItemsSafely(cart.getId());
+        }
+    }
+
+    /**
+     * Defense-in-depth amount reconciliation: confirm the amount actually paid (the
+     * HMAC-verified transaction) covers the order's authoritative server-side total,
+     * net of any B2B credit already applied. Compares in the transaction's currency
+     * with a 1% tolerance for rounding / FX drift. Fails OPEN on a computation error
+     * (logged) so a transient FX glitch never strands a legitimate payment.
+     */
+    private boolean isPaidAmountSufficient(Order order, PaymentTransaction tx) {
+        try {
+            BigDecimal due = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
+            if (order.getCreditApplied() != null && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal creditInOrderCcy = order.getCreditCurrency() != null
+                        && order.getCreditCurrency().equalsIgnoreCase(order.getCurrency())
+                        ? order.getCreditApplied()
+                        : currencyExchangeService.convert(order.getCreditApplied(),
+                                order.getCreditCurrency(), order.getCurrency());
+                due = due.subtract(creditInOrderCcy).max(BigDecimal.ZERO);
+            }
+            BigDecimal dueInTxCcy = order.getCurrency() != null
+                    && order.getCurrency().equalsIgnoreCase(tx.getCurrency())
+                    ? due
+                    : currencyExchangeService.convert(due, order.getCurrency(), tx.getCurrency());
+            BigDecimal paid = tx.getAmount() == null ? BigDecimal.ZERO : tx.getAmount();
+            return paid.compareTo(dueInTxCcy.multiply(new BigDecimal("0.99"))) >= 0;
+        } catch (Exception e) {
+            log.error("[ORDER] Amount reconciliation failed for order {} / tx {}: {} — allowing payment.",
+                    order.getId(), tx.getId(), e.getMessage());
+            return true;
         }
     }
 
@@ -951,6 +997,16 @@ public class OrderService {
                     || order.getStatus() == OrderStatus.CANCELLED
                     || order.getStatus() == OrderStatus.FAILED) return;
 
+            // Forward-only guard: courier events must not move the order backwards
+            // (e.g. an out-of-order ON_THE_WAY arriving before PICKED_UP). FAILED /
+            // CANCELLED are always accepted as terminal courier outcomes.
+            boolean terminalOutcome = target == OrderStatus.FAILED || target == OrderStatus.CANCELLED;
+            if (!terminalOutcome && courierStatusRank(target) <= courierStatusRank(order.getStatus())) {
+                log.warn("[ORDER] Ignoring out-of-order courier status for orderId={}: {} -> {}",
+                        ecommerceOrderId, order.getStatus(), target);
+                return;
+            }
+
             applyMilestoneTimestamp(order, target);
             order.setStatus(target);
             appendTrackingEvent(order, target, "Synced from courier backend",
@@ -987,44 +1043,68 @@ public class OrderService {
     }
 
     /**
-     * Periodically checks for EXPRESS orders stuck in PAID status that haven't been
-     * pushed to the courier backend (no pending or published outbox event found).
-     * Runs every 5 minutes.
+     * Safety net for dropped/lost payment webhooks. An order can be left in
+     * PENDING_PAYMENT if the success path never ran (e.g. the app crashed between the
+     * payment transaction committing as SUCCESS and the order transition, or the
+     * AFTER_COMMIT event was lost). This job finds such orders whose transaction is
+     * actually SUCCESS and completes them. It is PROMOTE-ONLY — it never cancels or
+     * fails an order — so it can never void or mis-handle a real payment. Runs every 5 min.
      */
-    // Courier-backend integration disabled — reconciliation no longer needed.
-    // @Scheduled(fixedDelayString = "${order.reconciliation-interval-ms:300000}")
-    // @Transactional
-    // public void reconcilePaidOrders() {
-    //     log.info("[RECONCILE] Checking for stuck PAID EXPRESS orders...");
-    //
-    //     List<Order> stuckOrders = orderRepo.findAllByStatusAndDeliveryMethod(
-    //             OrderStatus.PAID, DeliveryMethod.EXPRESS, PageRequest.of(0, 50)).getContent();
-    //
-    //     if (stuckOrders.isEmpty()) return;
-    //
-    //     Instant cutoff = Instant.now().minus(Duration.ofMinutes(15));
-    //
-    //     for (Order order : stuckOrders) {
-    //         if (order.getPaidAt() != null && order.getPaidAt().isAfter(cutoff)) {
-    //             continue;
-    //         }
-    //         if (order.getDeliveryOrderId() != null) {
-    //             continue;
-    //         }
-    //         boolean pendingExists = outboxEventRepository.existsByPayloadContainingAndStatusIn(
-    //                 order.getId().toString(),
-    //                 List.of(OutboxStatus.PENDING)
-    //         );
-    //         if (!pendingExists) {
-    //             log.warn("[RECONCILE] Found stuck order {}", order.getId());
-    //             pushToCourier(order);
-    //         }
-    //     }
-    // }
+    @org.springframework.scheduling.annotation.Scheduled(
+            fixedDelayString = "${order.reconciliation-interval-ms:300000}")
+    @Transactional
+    public void reconcileStuckPayments() {
+        List<Order> stuck = orderRepo.findAllByStatus(
+                OrderStatus.PENDING_PAYMENT, PageRequest.of(0, 50)).getContent();
+        if (stuck.isEmpty()) return;
+
+        Instant cutoff = Instant.now().minus(java.time.Duration.ofMinutes(15));
+        int promoted = 0;
+        for (Order order : stuck) {
+            // Only act on orders that have had time to receive their webhook.
+            if (order.getCreatedAt() != null && order.getCreatedAt().isAfter(cutoff)) continue;
+
+            PaymentTransaction tx = paymentTransactionRepo
+                    .findFirstByAppOrderIdAndStatusIn(order.getId(),
+                            List.of(com.buyology.ecommerce.payment.enums.PaymentStatus.SUCCESS))
+                    .orElse(null);
+            if (tx == null) continue;                       // no successful payment — leave as-is
+            if (!isPaidAmountSufficient(order, tx)) continue; // underpaid — leave for manual review
+
+            order.setStatus(OrderStatus.PAID);
+            order.setPaymentTransactionId(tx.getId());
+            order.setPaidAt(Instant.now());
+            appendTrackingEvent(order, OrderStatus.PAID, "Payment reconciled (webhook recovery)",
+                    null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+            orderRepo.save(order);
+            if (order.getCartId() != null) clearCartItemsSafely(order.getCartId());
+            promoted++;
+        }
+        if (promoted > 0) {
+            log.warn("[RECONCILE] Promoted {} stuck PENDING_PAYMENT order(s) to PAID via webhook recovery", promoted);
+        }
+    }
 
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /**
+     * Monotonic rank of the delivery-progress statuses a courier backend can report,
+     * used to reject backward / out-of-order courier syncs. Statuses outside the
+     * courier progression rank -1 so any real courier milestone moves forward from them.
+     */
+    @SuppressWarnings("deprecation") // legacy courier statuses kept for historical orders
+    private static int courierStatusRank(OrderStatus s) {
+        return switch (s) {
+            case PAID                          -> 0;
+            case COURIER_ASSIGNED              -> 1;
+            case PICKED_UP, IN_COURIER         -> 2;
+            case IN_TRANSIT                    -> 3;
+            case DELIVERED                     -> 4;
+            default                            -> -1;
+        };
+    }
 
     /**
      * Validates that the requested status transition is allowed.

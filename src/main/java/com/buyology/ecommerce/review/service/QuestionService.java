@@ -94,7 +94,8 @@ public class QuestionService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
         }
 
-        ProductQuestion question = new ProductQuestion(product, user, request.getBody());
+        ProductQuestion question = new ProductQuestion(product, user,
+                com.buyology.ecommerce.common.utils.HtmlSanitizer.stripHtml(request.getBody()));
         ProductQuestion saved = questionRepository.save(question);
         return ApiResponse.created(toResponse(saved, false), "Question submitted successfully and is pending moderation");
     }

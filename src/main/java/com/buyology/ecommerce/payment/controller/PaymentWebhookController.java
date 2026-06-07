@@ -23,6 +23,9 @@ import java.nio.charset.StandardCharsets;
 @RequestMapping("/api/payments")
 public class PaymentWebhookController {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(PaymentWebhookController.class);
+
     private final PaymentService paymentService;
 
     public PaymentWebhookController(PaymentService paymentService) {
@@ -46,7 +49,11 @@ public class PaymentWebhookController {
                 if (root.has("hmac") && !root.get("hmac").isNull()) {
                     hmac = root.get("hmac").asText();
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                // Malformed JSON body — log so a genuine-but-broken event leaves a trail
+                // instead of being silently dropped. handleWebhook will reject on null HMAC.
+                log.warn("[WEBHOOK] Failed to parse webhook body for HMAC extraction: {}", e.getMessage());
+            }
         }
 
         paymentService.handleWebhook(rawPayload, hmac);

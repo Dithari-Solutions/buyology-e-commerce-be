@@ -9,6 +9,7 @@ import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.repository.*;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.service.UserProfileService;
@@ -90,6 +91,10 @@ public class PaymentService {
 
     @Transactional
     public PaymentInitiatedResponse initiatePayment(InitiatePaymentRequest req) {
+        // Bind the payer to the authenticated principal — never trust customerId from the
+        // request body (prevents initiating payments on behalf of another user).
+        UUID currentUserId = SecurityUtils.currentUserId();
+        req.setCustomerId(currentUserId);
         userProfileService.checkPaymentReadiness(req.getCustomerId());
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
@@ -106,6 +111,25 @@ public class PaymentService {
         BigDecimal effectiveAmount = req.getAmount();
         if (req.getAppOrderId() != null) {
             var order = orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null);
+            // Server-side ownership + amount reconciliation: the client cannot pay for
+            // someone else's order, nor pay less than the order's authoritative total.
+            if (order != null) {
+                if (order.getUserId() != null && !order.getUserId().equals(currentUserId)
+                        && !SecurityUtils.isAdmin()) {
+                    throw new org.springframework.security.access.AccessDeniedException(
+                            "You are not allowed to pay for this order");
+                }
+                BigDecimal orderTotal = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
+                BigDecimal totalInReqCcy = order.getCurrency() != null
+                        && order.getCurrency().equalsIgnoreCase(req.getCurrency())
+                        ? orderTotal
+                        : currencyExchangeService.convert(orderTotal, order.getCurrency(), req.getCurrency());
+                // Allow a 1% tolerance for rounding / FX drift; reject gross underpayment.
+                if (req.getAmount().compareTo(totalInReqCcy.multiply(new BigDecimal("0.99"))) < 0) {
+                    throw new IllegalArgumentException(
+                            "Payment amount does not match the order total");
+                }
+            }
             if (order != null && order.getCreditApplied() != null
                     && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal creditInRequestCcy = order.getCreditCurrency() != null
@@ -464,7 +488,10 @@ public class PaymentService {
         refund.setReason(req.getReason());
         refund.setStatus(RefundStatus.SUCCESS);
         refund.setProviderRefundId(providerRefundId);
-        refund.setRefundedBy(req.getRefundedBy());
+        // Attribute the refund to the authenticated admin, not a client-supplied id.
+        refund.setRefundedBy(SecurityUtils.currentUserIdOrNull() != null
+                ? SecurityUtils.currentUserIdOrNull()
+                : req.getRefundedBy());
         refund = refundRepo.save(refund);
 
         BigDecimal totalRefunded = alreadyRefunded.add(req.getAmount());
@@ -480,11 +507,15 @@ public class PaymentService {
 
     public TransactionResponse getTransaction(UUID transactionId) {
         PaymentTransaction tx = transactionRepo.findById(transactionId).orElseThrow();
+        SecurityUtils.requireSelfOrAdmin(tx.getCustomerId());
         return toTransactionResponse(tx);
     }
 
     public List<TransactionResponse> getTransactionsByOrder(UUID appOrderId) {
-        return transactionRepo.findAllByAppOrderId(appOrderId).stream().map(this::toTransactionResponse).toList();
+        List<PaymentTransaction> txs = transactionRepo.findAllByAppOrderId(appOrderId);
+        // Enforce ownership: a customer may only read their own order's transactions.
+        txs.forEach(tx -> SecurityUtils.requireSelfOrAdmin(tx.getCustomerId()));
+        return txs.stream().map(this::toTransactionResponse).toList();
     }
 
     private String buildOrderMetadata(InitiatePaymentRequest req) {

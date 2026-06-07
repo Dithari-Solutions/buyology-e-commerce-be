@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,8 +31,11 @@ public class AdminAuthController {
 
     @Operation(
         summary = "Initiate admin registration",
-        description = "Validates credentials and sends an OTP to the admin's email."
+        description = "Validates credentials and sends an OTP to the admin's email. "
+                + "Only an existing ADMIN/SUPERADMIN may create new admin accounts. "
+                + "The very first admin is provisioned via the BOOTSTRAP_ADMIN_* env vars (see AdminBootstrapInitializer)."
     )
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<String>> adminSignup(@RequestBody AdminSignUpRequest request) {
         return authService.adminSignup(request);
@@ -45,6 +49,7 @@ public class AdminAuthController {
                 "(Path=/auth/refresh, MaxAge=7d). " +
                 "NOTE: Swagger UI cannot display HttpOnly cookies — use curl or Postman to inspect."
     )
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PostMapping("/verify-otp")
     public ResponseEntity<ApiResponse<SignInResponse>> adminVerifyOtp(
             @RequestBody OtpVerifyRequest request,

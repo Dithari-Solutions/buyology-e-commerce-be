@@ -5,6 +5,7 @@ import com.buyology.ecommerce.payment.dto.*;
 import com.buyology.ecommerce.payment.service.PaymentService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,6 +25,7 @@ public class PaymentController {
      * Initiate a new payment attempt. Runs the full 3-step Paymob flow and
      * returns the payment key token (card) or redirect URL (Tabby/Tamara).
      */
+    @PreAuthorize("isAuthenticated()")
     @PostMapping("/initiate")
     public ResponseEntity<ApiResponse<PaymentInitiatedResponse>> initiatePayment(
             @Valid @RequestBody InitiatePaymentRequest request) {
@@ -33,6 +35,7 @@ public class PaymentController {
     /**
      * Get a single transaction by its ID.
      */
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/transactions/{transactionId}")
     public ResponseEntity<ApiResponse<TransactionResponse>> getTransaction(
             @PathVariable UUID transactionId) {
@@ -42,6 +45,7 @@ public class PaymentController {
     /**
      * Get all payment attempts for a given app order ID.
      */
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/orders/{appOrderId}/transactions")
     public ResponseEntity<ApiResponse<List<TransactionResponse>>> getTransactionsByOrder(
             @PathVariable UUID appOrderId) {
@@ -52,6 +56,7 @@ public class PaymentController {
      * Initiate a refund (full or partial) for a successful transaction.
      * Enforces the partial refund guard before calling Paymob.
      */
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
     @PostMapping("/refunds")
     public ResponseEntity<ApiResponse<RefundResponse>> initiateRefund(
             @Valid @RequestBody RefundRequest request) {
