@@ -4,6 +4,7 @@ import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
 import com.buyology.ecommerce.admin.service.AdminInactivityService;
 import com.buyology.ecommerce.admin.service.AdminUserService;
+import com.buyology.ecommerce.auth.service.MfaService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,11 +22,14 @@ public class AdminUserController {
 
     private final AdminUserService adminUserService;
     private final AdminInactivityService adminInactivityService;
+    private final MfaService mfaService;
 
     public AdminUserController(AdminUserService adminUserService,
-                               AdminInactivityService adminInactivityService) {
+                               AdminInactivityService adminInactivityService,
+                               MfaService mfaService) {
         this.adminUserService = adminUserService;
         this.adminInactivityService = adminInactivityService;
+        this.mfaService = mfaService;
     }
 
     @Operation(summary = "List all users (paginated)")
@@ -63,5 +67,14 @@ public class AdminUserController {
     @PostMapping("/block-inactive")
     public ResponseEntity<ApiResponse<String>> blockInactiveUsers() {
         return adminInactivityService.triggerInactivityBlock();
+    }
+
+    @Operation(summary = "Reset a user's two-factor authentication (SUPERADMIN only)",
+               description = "Wipes the user's Google Authenticator enrollment and recovery codes. "
+                       + "The user is forced to re-enroll on their next sign-in. Use for lost-device recovery.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PostMapping("/{userId}/mfa/reset")
+    public ResponseEntity<ApiResponse<String>> resetUserMfa(@PathVariable UUID userId) {
+        return mfaService.resetForUser(userId);
     }
 }

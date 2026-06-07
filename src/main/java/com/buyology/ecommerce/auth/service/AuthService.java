@@ -55,6 +55,7 @@ public class AuthService {
     private final UserRoleRepository userRoleRepository;
     private final LoginAttemptService loginAttemptService;
     private final com.buyology.ecommerce.common.audit.AuditService auditService;
+    private final MfaService mfaService;
 
     public AuthService(
             TokenService tokenService,
@@ -66,7 +67,8 @@ public class AuthService {
             OtpProperties otpProperties,
             UserRoleRepository userRoleRepository,
             LoginAttemptService loginAttemptService,
-            com.buyology.ecommerce.common.audit.AuditService auditService) {
+            com.buyology.ecommerce.common.audit.AuditService auditService,
+            MfaService mfaService) {
         this.tokenService = tokenService;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -77,6 +79,7 @@ public class AuthService {
         this.userRoleRepository = userRoleRepository;
         this.loginAttemptService = loginAttemptService;
         this.auditService = auditService;
+        this.mfaService = mfaService;
     }
 
     // ── Step 1: Initiate signup ───────────────────────────────────────────────
@@ -669,6 +672,20 @@ public class AuthService {
 
     public ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
             AuthCredentials credentials, HttpServletRequest httpRequest) {
+        return buildSigninResponse(credentials, httpRequest, false);
+    }
+
+    /**
+     * Issues the access token + refresh cookie for a successful authentication.
+     *
+     * Privileged accounts (admins, suppliers) are gated by two-factor auth: unless
+     * {@code mfaSatisfied} is true (i.e. the caller has just verified a TOTP code),
+     * this returns an MFA challenge instead of tokens — either "setup required"
+     * (mandatory, not yet enrolled) or "verification required" (already enrolled).
+     * Non-privileged (customer) accounts are never gated.
+     */
+    public ResponseEntity<ApiResponse<SignInResponse>> buildSigninResponse(
+            AuthCredentials credentials, HttpServletRequest httpRequest, boolean mfaSatisfied) {
 
         String audience = extractAudience(httpRequest);
 
@@ -683,9 +700,20 @@ public class AuthService {
                         || "ADMIN".equalsIgnoreCase(r)
                         || "SUPERADMIN".equalsIgnoreCase(r)
                         || "CUSTOMER_SUPPORT".equalsIgnoreCase(r));
-        if ((isAdminUserType || isPrivilegedRole) && !"dashboard".equals(audience)) {
+        boolean privileged = isAdminUserType || isPrivilegedRole;
+        if (privileged && !"dashboard".equals(audience)) {
             return ApiResponse.failure(HttpStatus.FORBIDDEN,
                     "This account may only sign in from the admin dashboard");
+        }
+
+        // Mandatory 2FA for privileged accounts. Until the second factor is verified
+        // we hand back a short-lived challenge ticket instead of a session.
+        if (privileged && !mfaSatisfied) {
+            SignInResponse challenge = mfaService.buildChallenge(credentials);
+            String message = Boolean.TRUE.equals(challenge.getMfaSetupRequired())
+                    ? "Two-factor authentication setup required"
+                    : "Two-factor authentication code required";
+            return ResponseEntity.ok(new ApiResponse<>(200, message, challenge));
         }
 
         userRepository.findById(credentials.getUserId()).ifPresent(user -> {
