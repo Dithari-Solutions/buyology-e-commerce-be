@@ -24,7 +24,7 @@ import org.springframework.stereotype.Service;
  * Stamps the Buyology logo onto uploaded catalog/marketing images so the assets
  * are visibly ours.
  *
- * The logo is drawn semi-transparently in the bottom-right corner, scaled
+ * The logo is drawn semi-transparently in the center, scaled
  * relative to the image width. Output keeps the source format for JPEG/PNG; WebP
  * (which ImageIO cannot write) is re-encoded to PNG. Anything we can't decode
  * (animated GIF, unknown formats, or a WebP plugin that failed to load) is left
@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
 public class WatermarkService {
 
     private static final Logger log = LoggerFactory.getLogger(WatermarkService.class);
-    private static final String LOGO_RESOURCE = "report/logo.png";
+    private static final String LOGO_RESOURCE = "report/watermark-logo.png";
 
     private final boolean enabled;
     private final float opacity;   // 0..1
@@ -124,9 +124,9 @@ public class WatermarkService {
         int targetH = (int) Math.round((double) l.getHeight() / l.getWidth() * targetW);
         if (targetH < 1 || targetH > imgH) return;
 
-        int m = (int) Math.round(imgW * margin);
-        int x = imgW - targetW - m;
-        int y = imgH - targetH - m;
+        // Center the logo on the image.
+        int x = (imgW - targetW) / 2;
+        int y = (imgH - targetH) / 2;
         if (x < 0) x = 0;
         if (y < 0) y = 0;
 
