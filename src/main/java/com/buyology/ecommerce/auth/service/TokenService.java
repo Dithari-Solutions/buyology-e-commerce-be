@@ -223,7 +223,13 @@ public class TokenService {
         return ResponseCookie.from(REFRESH_TOKEN_COOKIE, tokenValue)
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .sameSite("Strict")
+                // Frontends live on different subdomains (buyology.online / admin. /
+                // supplier.) than the API (api.buyology.online), so the refresh cookie
+                // must cross origins on a credentialed XHR. SameSite=None (Secure)
+                // allows that in prod; Strict/Lax silently drop it for some browsers
+                // (notably Safari) and after OAuth redirects. Dev is insecure, where
+                // None is rejected, so fall back to Lax there.
+                .sameSite(cookieSecure ? "None" : "Lax")
                 .path("/auth/refresh")
                 .maxAge(Duration.ofDays(refreshTokenValidityDays))
                 .build()
@@ -238,7 +244,13 @@ public class TokenService {
         return ResponseCookie.from(REFRESH_TOKEN_COOKIE, "")
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .sameSite("Strict")
+                // Frontends live on different subdomains (buyology.online / admin. /
+                // supplier.) than the API (api.buyology.online), so the refresh cookie
+                // must cross origins on a credentialed XHR. SameSite=None (Secure)
+                // allows that in prod; Strict/Lax silently drop it for some browsers
+                // (notably Safari) and after OAuth redirects. Dev is insecure, where
+                // None is rejected, so fall back to Lax there.
+                .sameSite(cookieSecure ? "None" : "Lax")
                 .path("/auth/refresh")
                 .maxAge(0)
                 .build()
