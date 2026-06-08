@@ -25,6 +25,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +43,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     // Defaults to false so a direct client cannot spoof its IP to mint fresh buckets.
     private final boolean trustForwardedHeaders;
 
+    // Shared secret that lets trusted server-to-server clients (e.g. the n8n
+    // product-integration workflow) bypass throttling. Blank = bypass disabled.
+    private final String rateLimitBypassKey;
+
     // Lazily initialized; retries every 30 s if Redis is unavailable
     private volatile LettuceBasedProxyManager<String> proxyManager;
     private volatile long lastAttemptMs = 0;
@@ -53,10 +59,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     public RateLimitingFilter(LettuceConnectionFactory connectionFactory,
                               ObjectMapper objectMapper,
-                              @Value("${app.trust-forwarded-headers:false}") boolean trustForwardedHeaders) {
+                              @Value("${app.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
+                              @Value("${app.rate-limit.bypass-key:}") String rateLimitBypassKey) {
         this.connectionFactory = connectionFactory;
         this.objectMapper = objectMapper;
         this.trustForwardedHeaders = trustForwardedHeaders;
+        this.rateLimitBypassKey = rateLimitBypassKey;
     }
 
     @Override
@@ -64,7 +72,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String path = request.getRequestURI();
 
-        if (isExcluded(path)) {
+        if (isExcluded(path) || isTrustedService(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -167,6 +175,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
         return proxyManager;
+    }
+
+    /**
+     * Trusted server-to-server clients (e.g. the n8n product-integration workflow)
+     * bypass throttling by presenting the shared service key in the X-Service-Key
+     * header. Compared in constant time; a blank/unset key disables the bypass.
+     * NOTE: this only skips THROTTLING — the endpoint's JWT auth still applies, so
+     * the caller must still be an authenticated admin/supplier.
+     */
+    private boolean isTrustedService(HttpServletRequest request) {
+        if (rateLimitBypassKey == null || rateLimitBypassKey.isBlank()) return false;
+        String provided = request.getHeader("X-Service-Key");
+        if (provided == null) return false;
+        return MessageDigest.isEqual(
+                provided.getBytes(StandardCharsets.UTF_8),
+                rateLimitBypassKey.getBytes(StandardCharsets.UTF_8));
     }
 
     private boolean isExcluded(String path) {
