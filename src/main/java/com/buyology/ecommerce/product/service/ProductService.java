@@ -298,7 +298,9 @@ public class ProductService {
     /** Server-side paginated + searchable admin product list (SKU / any-language title). */
     public ResponseEntity<ApiResponse<com.buyology.ecommerce.common.response.PageResponse<ProductResponse>>> getAllProductsAdminPaged(
             String lang, String search, String status, int page, int size) {
-        String q = (search == null || search.isBlank()) ? null : search.trim();
+        // Empty string (not null) so Postgres can type the LIKE/CONCAT param — a null
+        // bind in '%'||?||'%' is inferred as bytea and blows up lower(bytea).
+        String q = (search == null) ? "" : search.trim();
         String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) ? null : status.toUpperCase();
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(
                 Math.max(0, page), Math.min(Math.max(1, size), 100),

@@ -22,7 +22,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
             LEFT JOIN ProductTranslation t ON t.product = p
             WHERE p.status <> 'DELETED'
               AND (:status IS NULL OR p.status = :status)
-              AND (:q IS NULL
+              AND (:q = ''
                    OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :q, '%'))
                    OR LOWER(t.title) LIKE LOWER(CONCAT('%', :q, '%')))
             """,
@@ -31,7 +31,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
             LEFT JOIN ProductTranslation t ON t.product = p
             WHERE p.status <> 'DELETED'
               AND (:status IS NULL OR p.status = :status)
-              AND (:q IS NULL
+              AND (:q = ''
                    OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :q, '%'))
                    OR LOWER(t.title) LIKE LOWER(CONCAT('%', :q, '%')))
             """)
