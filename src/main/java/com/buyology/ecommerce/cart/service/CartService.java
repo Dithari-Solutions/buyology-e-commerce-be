@@ -360,6 +360,12 @@ public class CartService {
 
         Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
         if (cart == null) {
+            // No ACTIVE cart — a previous attempt may have left it CHECKED_OUT without a
+            // completed payment (a SUCCESS would have marked it ABANDONED). Re-use that
+            // cart so the user can retry instead of getting a dead-end 404.
+            cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT).orElse(null);
+        }
+        if (cart == null) {
             log.warn("checkout rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
