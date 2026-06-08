@@ -289,9 +289,9 @@ public class ProductService {
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsAdmin(String lang) {
-        List<ProductResponse> responses = productRepository.findByStatusNot("DELETED").stream()
-                .map(p -> toResponse(p, lang, true))
-                .toList();
+        // Admin lists all products (for client-side search/filters), so no paging —
+        // but batch-load to avoid the per-product N+1 that made 252 products time out.
+        List<ProductResponse> responses = toResponseBatch(productRepository.findByStatusNot("DELETED"), lang, true);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
@@ -299,9 +299,8 @@ public class ProductService {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));
 
-        List<ProductResponse> responses = productRepository.findByStatusNotAndCategoryId("DELETED", categoryId).stream()
-                .map(p -> toResponse(p, lang, true))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(
+                productRepository.findByStatusNotAndCategoryId("DELETED", categoryId), lang, true);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
@@ -631,9 +630,7 @@ public class ProductService {
                 .limit(4)
                 .toList();
 
-        List<ProductResponse> responses = related.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(related, lang, false);
         
         applyBatchCountryPricing(responses, related, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Related products fetched successfully");
@@ -672,9 +669,7 @@ public class ProductService {
         }
 
         List<Product> popular = new java.util.ArrayList<>(aggregated.values());
-        List<ProductResponse> responses = popular.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(popular, lang, false);
         applyBatchCountryPricing(responses, popular, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Popular for you fetched successfully");
     }
@@ -712,9 +707,7 @@ public class ProductService {
                     .toList();
         }
 
-        List<ProductResponse> responses = products.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
@@ -742,9 +735,7 @@ public class ProductService {
                 .filter(java.util.Objects::nonNull)
                 .toList();
 
-        List<ProductResponse> responses = orderedProducts.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(orderedProducts, lang, false);
         
         applyBatchCountryPricing(responses, orderedProducts, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Search results fetched successfully");
@@ -782,9 +773,7 @@ public class ProductService {
             products = productRepository.findByStatusAndCategoryId("ACTIVE", categoryId);
         }
 
-        List<ProductResponse> responses = products.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
