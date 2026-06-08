@@ -680,10 +680,16 @@ public class ProductService {
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
-            String lang, String countryCode, String currency, Double lat, Double lng) {
-        List<Product> products = (countryCode != null && !countryCode.isBlank())
+            String lang, String countryCode, String currency, Double lat, Double lng, int page, int size) {
+        List<Product> all = (countryCode != null && !countryCode.isBlank())
                 ? storeProductRepository.findActiveProductsByCountryCode(countryCode.toUpperCase())
                 : productRepository.findByStatus("ACTIVE");
+
+        // toResponse() is expensive PER product (per-product association queries), so
+        // only map the requested page — never the whole catalog in one response.
+        int pageSize = Math.max(1, size);
+        long skip = (long) Math.max(0, page) * pageSize;
+        List<Product> products = all.stream().skip(skip).limit(pageSize).toList();
 
         List<ProductResponse> responses = products.stream()
                 .map(p -> toResponse(p, lang, false))

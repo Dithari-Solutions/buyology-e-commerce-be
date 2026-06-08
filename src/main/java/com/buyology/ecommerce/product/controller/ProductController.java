@@ -59,8 +59,12 @@ public class ProductController {
             @Parameter(description = "Customer latitude for express delivery badge")
             @RequestParam(required = false) Double lat,
             @Parameter(description = "Customer longitude for express delivery badge")
-            @RequestParam(required = false) Double lng) {
-        return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng);
+            @RequestParam(required = false) Double lng,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max products per response)")
+            @RequestParam(defaultValue = "60") int size) {
+        return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng, page, size);
     }
 
     @Operation(summary = "Get active product by ID with all related details")
