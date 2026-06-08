@@ -204,7 +204,9 @@ jobs:
             sleep 40
             echo "Waiting for app readiness on ${{ matrix.name }}..."
             for i in $(seq 1 30); do
-              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || echo "000")
+              # The app publishes 8080 on its WireGuard IP only (not localhost),
+              # so probe that address — same endpoint HAProxy will health-check.
+              HTTP=$(curl -s -o /dev/null -w "%{http_code}" "http://${WG_BIND_IP}:8080/actuator/health" || echo "000")
               if [ "$HTTP" = "200" ]; then
                 echo "  ${{ matrix.name }} healthy (HTTP 200)."
                 break
