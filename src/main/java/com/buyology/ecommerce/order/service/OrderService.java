@@ -175,13 +175,21 @@ public class OrderService {
             throw new IllegalArgumentException("Address does not belong to the authenticated user");
         }
 
-        // Validate customer country
+        // Validate customer country. The order is constrained to the user's market:
+        // their explicitly selected country, or (if unset) the country the cart was
+        // browsed/priced in. If neither is set there is no market constraint, so we
+        // accept delivery to the address's own country instead of failing with "(null)".
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
-        
-        if (!isSameCountry(address.getCountry(), profile.getSelectedCountryCode())) {
-            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country (" + 
-                    profile.getSelectedCountryCode() + ").");
+
+        String marketCountry = profile.getSelectedCountryCode();
+        if (marketCountry == null || marketCountry.isBlank()) {
+            marketCountry = cart.getCountryCode();
+        }
+        if (marketCountry != null && !marketCountry.isBlank()
+                && !isSameCountry(address.getCountry(), marketCountry)) {
+            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
+                    + marketCountry + ").");
         }
 
         // Build order
@@ -256,7 +264,7 @@ public class OrderService {
         }
         order.setCurrency(currency);
         
-        order.setCountryCode(cart.getCountryCode() != null ? cart.getCountryCode() : profile.getSelectedCountryCode());
+        order.setCountryCode(marketCountry != null && !marketCountry.isBlank() ? marketCountry : address.getCountry());
         order.setCouponCode(req.getCouponCode());
 
         order = orderRepo.save(order);
