@@ -20,16 +20,13 @@ import com.buyology.ecommerce.store.repository.StoreOperatingHoursRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import com.buyology.ecommerce.store.repository.StoreTranslationRepository;
 import com.buyology.ecommerce.common.utils.FileValidationUtils;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -42,17 +39,20 @@ public class StoreService {
     private final StoreTranslationRepository translationRepository;
     private final StoreLocationRepository locationRepository;
     private final StoreOperatingHoursRepository hoursRepository;
+    private final ContaboObjectService contaboObjectService;
 
     public StoreService(StoreRepository storeRepository,
                         CountryRepository countryRepository,
                         StoreTranslationRepository translationRepository,
                         StoreLocationRepository locationRepository,
-                        StoreOperatingHoursRepository hoursRepository) {
+                        StoreOperatingHoursRepository hoursRepository,
+                        ContaboObjectService contaboObjectService) {
         this.storeRepository = storeRepository;
         this.countryRepository = countryRepository;
         this.translationRepository = translationRepository;
         this.locationRepository = locationRepository;
         this.hoursRepository = hoursRepository;
+        this.contaboObjectService = contaboObjectService;
     }
 
     @Transactional
@@ -220,23 +220,16 @@ public class StoreService {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private static final String STORE_UPLOAD_PATH = "/opt/uploads/store";
-
     private String saveBannerFile(UUID storeId, MultipartFile file) {
         FileValidationUtils.validateImage(file);
-        Path dir = Paths.get(STORE_UPLOAD_PATH, storeId.toString());
-        try {
-            Files.createDirectories(dir);
-            String original = file.getOriginalFilename();
-            String ext = (original != null && original.contains("."))
-                    ? original.substring(original.lastIndexOf("."))
-                    : "";
-            Path dest = dir.resolve("banner" + ext);
-            Files.write(dest, file.getBytes());
-            return "/store/" + storeId + "/banner" + ext;
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to save banner file", e);
-        }
+        String original = file.getOriginalFilename();
+        String ext = (original != null && original.contains("."))
+                ? original.substring(original.lastIndexOf("."))
+                : "";
+        // Store under the watermarked "banners/" prefix and persist the returned S3
+        // key (which may have an updated extension if the image was re-encoded).
+        String key = "banners/" + storeId + "/banner" + ext;
+        return contaboObjectService.uploadFile(key, file);
     }
 
     private StoreLocation createLocationWithHours(Store store, CreateStoreLocationRequest req) {
@@ -281,7 +274,7 @@ public class StoreService {
         response.setName(store.getName());
         response.setSlug(store.getSlug());
         response.setStatus(store.getStatus());
-        response.setBannerUrl(store.getBannerUrl());
+        response.setBannerUrl(contaboObjectService.getPresignedUrl(store.getBannerUrl()));
         response.setContactEmail(store.getContactEmail());
         response.setContactPhone(store.getContactPhone());
         response.setCreatedAt(store.getCreatedAt());
