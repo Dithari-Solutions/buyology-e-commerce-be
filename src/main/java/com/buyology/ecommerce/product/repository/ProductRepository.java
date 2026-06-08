@@ -9,10 +9,37 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.buyology.ecommerce.product.domain.Product;
 
 public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpecificationExecutor<Product> {
+
+    // Admin listing: paginated, optional status filter + free-text search over SKU
+    // and any translation title. DISTINCT because the title join multiplies rows.
+    @Query(value = """
+            SELECT DISTINCT p FROM Product p
+            LEFT JOIN ProductTranslation t ON t.product = p
+            WHERE p.status <> 'DELETED'
+              AND (:status IS NULL OR p.status = :status)
+              AND (:q IS NULL
+                   OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(t.title) LIKE LOWER(CONCAT('%', :q, '%')))
+            """,
+            countQuery = """
+            SELECT COUNT(DISTINCT p) FROM Product p
+            LEFT JOIN ProductTranslation t ON t.product = p
+            WHERE p.status <> 'DELETED'
+              AND (:status IS NULL OR p.status = :status)
+              AND (:q IS NULL
+                   OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(t.title) LIKE LOWER(CONCAT('%', :q, '%')))
+            """)
+    Page<Product> searchAdmin(@Param("q") String q, @Param("status") String status, Pageable pageable);
+
+    long countByStatusNot(String status);
+
+    long countByStatus(String status);
 
     List<Product> findByCategoryId(UUID categoryId);
 

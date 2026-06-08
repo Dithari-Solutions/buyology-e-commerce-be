@@ -295,6 +295,30 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    /** Server-side paginated + searchable admin product list (SKU / any-language title). */
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.common.response.PageResponse<ProductResponse>>> getAllProductsAdminPaged(
+            String lang, String search, String status, int page, int size) {
+        String q = (search == null || search.isBlank()) ? null : search.trim();
+        String st = (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) ? null : status.toUpperCase();
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(
+                Math.max(0, page), Math.min(Math.max(1, size), 100),
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+        org.springframework.data.domain.Page<Product> pg = productRepository.searchAdmin(q, st, pageable);
+        List<ProductResponse> content = toResponseBatch(pg.getContent(), lang, true);
+        return ApiResponse.success(
+                com.buyology.ecommerce.common.response.PageResponse.of(pg, content),
+                "Products fetched successfully");
+    }
+
+    /** Cheap status counts for the admin product dashboard cards. */
+    public ResponseEntity<ApiResponse<Map<String, Long>>> getAdminProductStats() {
+        return ApiResponse.success(Map.of(
+                "total", productRepository.countByStatusNot("DELETED"),
+                "active", productRepository.countByStatus("ACTIVE"),
+                "inactive", productRepository.countByStatus("INACTIVE")),
+                "Product stats");
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategoryAdmin(UUID categoryId, String lang) {
         categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Category not found with id: " + categoryId));

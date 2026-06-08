@@ -84,11 +84,28 @@ public class AdminProductController {
         return productService.updateProduct(productId, request, newFiles);
     }
 
-    @Operation(summary = "Get all products (all statuses)")
+    @Operation(summary = "Get all products (all statuses) — unpaged")
     @GetMapping
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts(
             @RequestParam String lang) {
         return productService.getAllProductsAdmin(lang);
+    }
+
+    @Operation(summary = "Paginated + searchable product list (all statuses)")
+    @GetMapping("/page")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.common.response.PageResponse<ProductResponse>>> getAllProductsPaged(
+            @RequestParam String lang,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return productService.getAllProductsAdminPaged(lang, search, status, page, size);
+    }
+
+    @Operation(summary = "Product status counts for the admin dashboard")
+    @GetMapping("/stats")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Long>>> getProductStats() {
+        return productService.getAdminProductStats();
     }
 
     @Operation(summary = "Get product by ID with all details including media (all statuses)")
