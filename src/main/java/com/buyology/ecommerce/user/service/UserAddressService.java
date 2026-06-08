@@ -169,16 +169,14 @@ public class UserAddressService {
     // =========================================================================
 
     /**
-     * Resolves a Users record from the auth_credentials.id that the JWT puts in the {userId} path variable.
-     * The JWT sub claim is auth_credentials.id, not users.id.
+     * Resolves the Users record for the {userId} path variable. The frontend sends
+     * users.id — which is also the JWT principal (JwtAuthenticationFilter sets the
+     * principal to credentials.getUserId()) — so we look it up directly and assert
+     * the caller owns it (admins bypass).
      */
-    private Users resolveUser(UUID authCredId) {
-        AuthCredentials creds = authCredentialRepo.findById(authCredId)
-                .orElseThrow(() -> new NoSuchElementException("Auth credentials not found: " + authCredId));
-        Users user = userRepo.findById(creds.getUserId())
-                .orElseThrow(() -> new NoSuchElementException("User not found for credentials: " + authCredId));
-        // IDOR guard: the JWT principal is users.id; the {userId} path var is auth_credentials.id.
-        // Ensure the resolved user is the authenticated caller (admins bypass).
+    private Users resolveUser(UUID userId) {
+        Users user = userRepo.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
         SecurityUtils.requireSelfOrAdmin(user.getId());
         return user;
     }
