@@ -86,6 +86,13 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      # 2FA TOTP-secret encryption key. Empty -> app falls back to JWT_SECRET in prod.
+      MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY:-}
+      # First-admin bootstrap (first empty-DB boot only; blank afterwards = no-op).
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Schema mode: `update` for first boot vs empty DB, else `validate` (Flyway owns schema).
+      HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-validate}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       WEB_BASE_URL: ${WEB_BASE_URL}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}

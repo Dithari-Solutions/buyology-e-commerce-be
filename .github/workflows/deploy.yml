@@ -12,13 +12,8 @@ env:
 jobs:
 
   # ── Job 0: Run unit + Testcontainers integration tests ─────────────────────
-  # ubuntu-latest ships a running Docker daemon, so Testcontainers (real Postgres)
-  # works out of the box. We run all *Test (unit) and *IT (integration) classes
-  # but NOT EcommerceBackendApplicationTests, whose @SpringBootTest needs the full
-  # stack (Redis/RabbitMQ/Elasticsearch) that isn't provisioned in this job.
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,21 +26,15 @@ jobs:
           cache: maven
 
       - name: Run unit + integration tests
-        # Ryuk (the Testcontainers reaper) is unnecessary on an ephemeral CI runner
-        # and its lingering connection thread is what delays JVM shutdown after the
-        # tests finish (the "Surefire is going to kill self fork JVM" warning).
-        # The runner is torn down after the job, so containers are cleaned up anyway.
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
         run: ./mvnw -B test -Dtest='*Test,*IT' -DfailIfNoTests=false
 
-  # ── Job 1: Build JAR, build & push Docker image ────────────────────────────
-  # Only on push to main — PRs run the test job only (no build/deploy).
+  # ── Job 1: Build JAR, build & push Docker image (once) ─────────────────────
   build-and-push:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -80,39 +69,67 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Job 2: Deploy to VPS via Docker Compose ────────────────────────────────
+  # ── Job 2: Rolling deploy to BOTH app servers over WireGuard ───────────────
+  # max-parallel: 1 → deploy one replica at a time. While one is restarting,
+  # HAProxy keeps serving from the other → zero downtime. It also prevents both
+  # nodes racing on Hibernate ddl-auto during a first-time empty-DB boot.
   deploy:
     needs: build-and-push
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - name: web-app-1
+            host_secret: VPS_HOST_1
+            wg_bind: "10.10.0.2"
+          - name: web-app-2
+            host_secret: VPS_HOST_2
+            wg_bind: "10.10.0.3"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Copy docker-compose.yml to server
+      - name: Copy app compose to ${{ matrix.name }}
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets[matrix.host_secret] }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: docker-compose.yml
+          source: docker-compose.app.yml
           target: ${{ env.DEPLOY_PATH }}
 
-      - name: Deploy via SSH
+      - name: Deploy via SSH to ${{ matrix.name }}
         uses: appleboy/ssh-action@v1.0.3
         env:
           IMAGE_TAG: sha-${{ github.sha }}
+          WG_BIND_IP: ${{ matrix.wg_bind }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-          DB_URL: ${{ secrets.DB_URL }}
+          # ── Datastores (credentials only — hosts/db-name are baked into the compose) ──
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+          # ── Schema / first-boot (repo VARIABLES, flip for empty-DB bootstrap) ──
+          HIBERNATE_DDL_AUTO: ${{ vars.HIBERNATE_DDL_AUTO || 'validate' }}
+          MFA_ENABLED: ${{ vars.MFA_ENABLED || 'false' }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+          # ── Security ──
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MFA_SECRET_ENCRYPTION_KEY: ${{ secrets.MFA_SECRET_ENCRYPTION_KEY }}
+          # ── App config ──
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
           WEB_BASE_URL: ${{ secrets.WEB_BASE_URL }}
+          # ── Email ──
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+          # ── OAuth ──
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
@@ -121,6 +138,7 @@ jobs:
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
           APPLE_REDIRECT_URI: ${{ secrets.APPLE_REDIRECT_URI }}
+          # ── Paymob ──
           PAYMOB_API_KEY: ${{ secrets.PAYMOB_API_KEY }}
           PAYMOB_SECRET_KEY: ${{ secrets.PAYMOB_SECRET_KEY }}
           PAYMOB_PUBLIC_KEY: ${{ secrets.PAYMOB_PUBLIC_KEY }}
@@ -131,10 +149,12 @@ jobs:
           PAYMOB_CARD_IFRAME_ID: ${{ secrets.PAYMOB_CARD_IFRAME_ID }}
           PAYMOB_TABBY_INTEGRATION_ID: ${{ secrets.PAYMOB_TABBY_INTEGRATION_ID }}
           PAYMOB_TAMARA_INTEGRATION_ID: ${{ secrets.PAYMOB_TAMARA_INTEGRATION_ID }}
+          # ── Twilio ──
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
           TWILIO_VERIFY_SERVICE_SID: ${{ secrets.TWILIO_VERIFY_SERVICE_SID }}
+          # ── Storage / push ──
           FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
           COURIER_SERVICE_PRIVATE_KEY: ${{ secrets.COURIER_SERVICE_PRIVATE_KEY }}
           CONTABO_S3_ENDPOINT: ${{ secrets.CONTABO_S3_ENDPOINT }}
@@ -142,38 +162,26 @@ jobs:
           CONTABO_S3_SECRET_KEY: ${{ secrets.CONTABO_S3_SECRET_KEY }}
           CONTABO_S3_BUCKET_NAME: ${{ secrets.CONTABO_S3_BUCKET_NAME }}
           CONTABO_S3_PUBLIC_URL: ${{ secrets.CONTABO_S3_PUBLIC_URL }}
-          RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
-          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
         with:
-          host: ${{ secrets.VPS_HOST }}
+          host: ${{ secrets[matrix.host_secret] }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 10m
-          envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD,DB_URL,DB_USERNAME,DB_PASSWORD,JWT_SECRET,CORS_ALLOWED_ORIGINS,WEB_BASE_URL,SENDGRID_API_KEY,SENDGRID_FROM_EMAIL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,APPLE_TEAM_ID,APPLE_CLIENT_ID,APPLE_KEY_ID,APPLE_PRIVATE_KEY,APPLE_REDIRECT_URI,PAYMOB_API_KEY,PAYMOB_SECRET_KEY,PAYMOB_PUBLIC_KEY,PAYMOB_HMAC_SECRET,PAYMOB_NOTIFICATION_URL,PAYMOB_REDIRECTION_URL,PAYMOB_CARD_INTEGRATION_ID,PAYMOB_CARD_IFRAME_ID,PAYMOB_TABBY_INTEGRATION_ID,PAYMOB_TAMARA_INTEGRATION_ID,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,TWILIO_VERIFY_SERVICE_SID,FIREBASE_SERVICE_ACCOUNT_KEY,COURIER_SERVICE_PRIVATE_KEY,CONTABO_S3_ENDPOINT,CONTABO_S3_ACCESS_KEY,CONTABO_S3_SECRET_KEY,CONTABO_S3_BUCKET_NAME,CONTABO_S3_PUBLIC_URL,RABBITMQ_USERNAME,RABBITMQ_PASSWORD
+          envs: IMAGE_TAG,WG_BIND_IP,DOCKER_USERNAME,DOCKER_PASSWORD,DB_USERNAME,DB_PASSWORD,REDIS_PASSWORD,RABBITMQ_USERNAME,RABBITMQ_PASSWORD,HIBERNATE_DDL_AUTO,MFA_ENABLED,BOOTSTRAP_ADMIN_EMAIL,BOOTSTRAP_ADMIN_PASSWORD,JWT_SECRET,MFA_SECRET_ENCRYPTION_KEY,CORS_ALLOWED_ORIGINS,WEB_BASE_URL,SENDGRID_API_KEY,SENDGRID_FROM_EMAIL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_REDIRECT_URI,APPLE_TEAM_ID,APPLE_CLIENT_ID,APPLE_KEY_ID,APPLE_PRIVATE_KEY,APPLE_REDIRECT_URI,PAYMOB_API_KEY,PAYMOB_SECRET_KEY,PAYMOB_PUBLIC_KEY,PAYMOB_HMAC_SECRET,PAYMOB_NOTIFICATION_URL,PAYMOB_REDIRECTION_URL,PAYMOB_CARD_INTEGRATION_ID,PAYMOB_CARD_IFRAME_ID,PAYMOB_TABBY_INTEGRATION_ID,PAYMOB_TAMARA_INTEGRATION_ID,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,TWILIO_VERIFY_SERVICE_SID,FIREBASE_SERVICE_ACCOUNT_KEY,COURIER_SERVICE_PRIVATE_KEY,CONTABO_S3_ENDPOINT,CONTABO_S3_ACCESS_KEY,CONTABO_S3_SECRET_KEY,CONTABO_S3_BUCKET_NAME,CONTABO_S3_PUBLIC_URL
           script: |
             set -euo pipefail
-            mkdir -p ${{ env.DEPLOY_PATH }}
             cd ${{ env.DEPLOY_PATH }}
 
-            # ── Docker daemon log rotation (idempotent) ────────────────────────
-            if [ ! -f /etc/docker/daemon.json ] || ! grep -q '"max-size"' /etc/docker/daemon.json 2>/dev/null; then
-              mkdir -p /etc/docker
-              printf '{\n  "log-driver": "json-file",\n  "log-opts": { "max-size": "50m", "max-file": "3" }\n}\n' > /etc/docker/daemon.json
-              systemctl reload docker || true
-            fi
-
             # ── Firebase service-account JSON (base64-encoded secret) ──────────
-            mkdir -p /opt/buyology/firebase
+            # Dir is pre-created and owned by the deploy user during host setup.
             printf '%s' "${FIREBASE_SERVICE_ACCOUNT_KEY}" | base64 -d > /opt/buyology/firebase/service-account.json
 
-            # ── Pass GitHub Secrets straight through to Docker Compose ─────────
-            # Secrets arrive in the SSH session via the ssh-action `envs:` directive
-            # above. We `export` them so Docker Compose's variable substitution
-            # (${VAR} in docker-compose.yml) picks them up from the parent shell.
-            # No .env file is written — secrets never touch the disk on the VPS.
-            # Statics that aren't secrets are set inline below.
-            export DOCKER_USERNAME IMAGE_TAG DB_URL DB_USERNAME DB_PASSWORD \
-                   JWT_SECRET CORS_ALLOWED_ORIGINS WEB_BASE_URL SENDGRID_API_KEY SENDGRID_FROM_EMAIL \
+            # ── Export secrets so compose ${VAR} substitution picks them up ────
+            export DOCKER_USERNAME IMAGE_TAG WG_BIND_IP DB_USERNAME DB_PASSWORD \
+                   REDIS_PASSWORD RABBITMQ_USERNAME RABBITMQ_PASSWORD \
+                   HIBERNATE_DDL_AUTO MFA_ENABLED BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD \
+                   JWT_SECRET MFA_SECRET_ENCRYPTION_KEY CORS_ALLOWED_ORIGINS WEB_BASE_URL \
+                   SENDGRID_API_KEY SENDGRID_FROM_EMAIL \
                    GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI \
                    APPLE_TEAM_ID APPLE_CLIENT_ID APPLE_KEY_ID APPLE_PRIVATE_KEY APPLE_REDIRECT_URI \
                    PAYMOB_API_KEY PAYMOB_SECRET_KEY PAYMOB_PUBLIC_KEY PAYMOB_HMAC_SECRET \
@@ -183,57 +191,33 @@ jobs:
                    TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_PHONE_NUMBER TWILIO_VERIFY_SERVICE_SID \
                    COURIER_SERVICE_PRIVATE_KEY \
                    CONTABO_S3_ENDPOINT CONTABO_S3_ACCESS_KEY CONTABO_S3_SECRET_KEY \
-                   CONTABO_S3_BUCKET_NAME CONTABO_S3_PUBLIC_URL \
-                   RABBITMQ_USERNAME RABBITMQ_PASSWORD
-            export REDIS_HOST=redis
-            export REDIS_PORT=6379
+                   CONTABO_S3_BUCKET_NAME CONTABO_S3_PUBLIC_URL
             export PAYMOB_BASE_URL=https://uae.paymob.com
-
-            # Wipe any old .env left from previous deploys so docker compose
-            # cannot accidentally read stale values.
             rm -f .env
 
-            # ── Login and pull new image ───────────────────────────────────────
+            # ── Login, pull, roll this replica ─────────────────────────────────
             printf '%s' "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
-            docker compose pull app
+            docker compose -f docker-compose.app.yml pull app
+            docker compose -f docker-compose.app.yml up -d
 
-            # ── Tear down and bring up fresh ──────────────────────────────────
-            docker compose down --remove-orphans || true
-            docker compose up -d
-
-            # Give Spring Boot time to start before probing (avoids burning
-            # probe attempts during the 30s JVM startup window)
+            # ── Readiness probe (max 150s) ─────────────────────────────────────
             sleep 40
-
-            # ── Readiness probe (max 120s) ─────────────────────────────────────
-            # Accepts any HTTP response as "up" — a non-empty code means Tomcat
-            # is listening. 000 means the app is not yet accepting connections.
-            echo "Waiting for app readiness..."
+            echo "Waiting for app readiness on ${{ matrix.name }}..."
             for i in $(seq 1 30); do
-              # We use '|| echo "000"' to prevent 'set -e' from killing the script 
-              # if curl fails (e.g. exit code 7 or 56) while the app is still starting.
-              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
-              
-              if [ "$HTTP" != "000" ]; then
-                echo "  Deploy successful — app is responding (HTTP $HTTP)."
+              HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || echo "000")
+              if [ "$HTTP" = "200" ]; then
+                echo "  ${{ matrix.name }} healthy (HTTP 200)."
                 break
               fi
-              
               if [ "$i" = "30" ]; then
-                echo "ERROR: App did not become ready in 150s (last HTTP: $HTTP)."
-                echo "=== Docker Compose Status ==="
-                docker compose ps
-                echo "=== Application Logs (last 100 lines) ==="
-                docker compose logs --tail=100 app
+                echo "ERROR: ${{ matrix.name }} not ready in 150s (last HTTP: $HTTP)."
+                docker compose -f docker-compose.app.yml ps
+                docker compose -f docker-compose.app.yml logs --tail=100 app
                 exit 1
               fi
-              
               echo "  attempt $i/30: HTTP $HTTP"
               sleep 5
             done
 
-            # ── Clean up dangling images ───────────────────────────────────────
             docker image prune -f --filter "until=24h" || true
-
-            echo "=== Running containers ==="
-            docker compose ps
+            docker compose -f docker-compose.app.yml ps

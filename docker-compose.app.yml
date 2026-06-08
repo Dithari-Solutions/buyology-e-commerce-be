@@ -1,0 +1,118 @@
+# ─── App-tier compose (Web-app-1 / Web-app-2) ─────────────────────────────────
+# Runs ONLY the Spring Boot app. All stateful services are external, shared, and
+# reached over WireGuard:
+#   Postgres + Elasticsearch  -> db-server     10.10.0.4
+#   Redis + RabbitMQ          -> redis-server  10.10.0.5
+# Each replica binds 8080 to its OWN WireGuard IP (WG_BIND_IP) so the port is
+# never public; HAProxy on the Conf server load-balances across both over WG.
+name: buyology-ecommerce-be
+
+services:
+  app:
+    image: ${DOCKER_USERNAME}/ecommerce-app:${IMAGE_TAG:-latest}
+    container_name: ecommerce-app
+    restart: always
+    dns: ["8.8.8.8", "1.1.1.1"]
+    ports:
+      - "${WG_BIND_IP}:8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
+
+      # ── Postgres (db-server over WG) ──
+      SPRING_DATASOURCE_URL: jdbc:postgresql://10.10.0.4:5432/buyology_production
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      # First empty-DB boot only: set to `update` (one node), then back to `validate`.
+      HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-validate}
+
+      # ── Redis (redis-server over WG, AUTH required) ──
+      REDIS_HOST: "10.10.0.5"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+      # ── Elasticsearch (db-server over WG) ──
+      SPRING_ELASTICSEARCH_URIS: "http://10.10.0.4:9200"
+
+      # ── RabbitMQ (redis-server over WG) ──
+      RABBITMQ_HOST: "10.10.0.5"
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: "/"
+      SPRING_RABBITMQ_HOST: "10.10.0.5"
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_RABBITMQ_VIRTUAL_HOST: "/"
+
+      # ── Auth / security ──
+      JWT_SECRET: ${JWT_SECRET}
+      MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY}
+      MFA_ENABLED: ${MFA_ENABLED:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      COOKIE_SECURE: "true"
+
+      # ── App config ──
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      WEB_BASE_URL: ${WEB_BASE_URL}
+
+      # ── Email / OTP (SendGrid) ──
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@buyology.online}
+
+      # ── OAuth ──
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID}
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID}
+      APPLE_KEY_ID: ${APPLE_KEY_ID}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY}
+      APPLE_REDIRECT_URI: ${APPLE_REDIRECT_URI}
+
+      # ── Paymob ──
+      PAYMOB_BASE_URL: ${PAYMOB_BASE_URL:-https://uae.paymob.com}
+      PAYMOB_API_KEY: ${PAYMOB_API_KEY}
+      PAYMOB_SECRET_KEY: ${PAYMOB_SECRET_KEY}
+      PAYMOB_PUBLIC_KEY: ${PAYMOB_PUBLIC_KEY}
+      PAYMOB_HMAC_SECRET: ${PAYMOB_HMAC_SECRET}
+      PAYMOB_NOTIFICATION_URL: ${PAYMOB_NOTIFICATION_URL}
+      PAYMOB_REDIRECTION_URL: ${PAYMOB_REDIRECTION_URL}
+      PAYMOB_CARD_INTEGRATION_ID: ${PAYMOB_CARD_INTEGRATION_ID}
+      PAYMOB_CARD_IFRAME_ID: ${PAYMOB_CARD_IFRAME_ID}
+      PAYMOB_TABBY_INTEGRATION_ID: ${PAYMOB_TABBY_INTEGRATION_ID}
+      PAYMOB_TAMARA_INTEGRATION_ID: ${PAYMOB_TAMARA_INTEGRATION_ID}
+
+      # ── Twilio (phone OTP) ──
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID}
+
+      # ── Contabo S3 ──
+      CONTABO_S3_ENDPOINT: ${CONTABO_S3_ENDPOINT}
+      CONTABO_S3_ACCESS_KEY: ${CONTABO_S3_ACCESS_KEY}
+      CONTABO_S3_SECRET_KEY: ${CONTABO_S3_SECRET_KEY}
+      CONTABO_S3_BUCKET_NAME: ${CONTABO_S3_BUCKET_NAME}
+      CONTABO_S3_PUBLIC_URL: ${CONTABO_S3_PUBLIC_URL}
+
+      # ── Courier service integration ──
+      COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY}
+
+      # ── Firebase / FCM ──
+      FIREBASE_ENABLED: ${FIREBASE_ENABLED:-true}
+    volumes:
+      - /opt/buyology/firebase/service-account.json:/firebase/service-account.json:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
