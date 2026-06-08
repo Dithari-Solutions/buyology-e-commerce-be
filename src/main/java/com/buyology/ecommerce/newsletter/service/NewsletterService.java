@@ -108,8 +108,9 @@ public class NewsletterService {
         if (image != null && !image.isEmpty()) {
             FileValidationUtils.validateImage(image);
             String key = "news/" + UUID.randomUUID() + "/" + image.getOriginalFilename();
-            contaboObjectService.uploadFile(key, image);
-            article.setImageKey(key);
+            // Capture the returned key — watermarking may change the extension (e.g. WebP→PNG).
+            String storedKey = contaboObjectService.uploadFile(key, image);
+            article.setImageKey(storedKey);
         }
 
         return toResponse(articleRepo.save(article));

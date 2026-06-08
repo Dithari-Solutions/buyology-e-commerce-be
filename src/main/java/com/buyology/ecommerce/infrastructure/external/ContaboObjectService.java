@@ -19,22 +19,52 @@ import java.util.stream.Collectors;
 @Service
 public class ContaboObjectService {
 
+    // Object-key prefixes whose images we brand with the Buyology watermark.
+    // Deliberately excludes users/ (avatars), refunds/ (customer evidence) and
+    // documents (trade licenses) — those must not be altered.
+    private static final List<String> WATERMARK_PREFIXES = List.of(
+            "products/", "banners/", "stories/", "news/");
+
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final ContaboProperties properties;
+    private final WatermarkService watermarkService;
 
-    public ContaboObjectService(S3Client s3Client, S3Presigner s3Presigner, ContaboProperties properties) {
+    public ContaboObjectService(S3Client s3Client, S3Presigner s3Presigner,
+                                ContaboProperties properties, WatermarkService watermarkService) {
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.properties = properties;
+        this.watermarkService = watermarkService;
     }
 
     /**
      * Uploads a file to Contabo S3 and returns the S3 key.
      * Path format: products/{uuid}/{filename}
+     *
+     * Catalog/marketing images (see {@link #WATERMARK_PREFIXES}) are stamped with
+     * the Buyology logo before upload. If watermarking changes the format (e.g.
+     * WebP→PNG) the returned key's extension is updated to match, so callers that
+     * persist the returned key stay consistent. Watermarking fails open: any issue
+     * uploads the original bytes unchanged.
      */
     public String uploadFile(String key, MultipartFile file) {
         try {
+            if (shouldWatermark(key, file.getContentType())) {
+                byte[] original = file.getBytes();
+                var watermarked = watermarkService.apply(original, file.getContentType());
+                if (watermarked.isPresent()) {
+                    String finalKey = withExtension(key, watermarked.get().extension());
+                    putBytes(finalKey, watermarked.get().bytes(), watermarked.get().contentType());
+                    return finalKey;
+                }
+                // Not processed (unsupported format / decode failure) — upload as-is.
+                putBytes(key, original, file.getContentType());
+                return key;
+            }
+
+            // Non-watermarked path (videos, avatars, documents, …): stream directly
+            // so large files aren't buffered into memory.
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(properties.getBucketName())
                     .key(key)
@@ -47,6 +77,39 @@ public class ContaboObjectService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to upload file to Contabo S3: " + key, e);
         }
+    }
+
+    private boolean shouldWatermark(String key, String contentType) {
+        if (!watermarkService.isEnabled() || key == null || contentType == null) {
+            return false;
+        }
+        if (!contentType.toLowerCase().startsWith("image/")) {
+            return false; // never touch videos or documents
+        }
+        return WATERMARK_PREFIXES.stream().anyMatch(key::startsWith);
+    }
+
+    /** Replaces the key's file extension (e.g. on WebP→PNG re-encode). Keeps it if unchanged. */
+    private static String withExtension(String key, String newExt) {
+        int slash = key.lastIndexOf('/');
+        int dot = key.lastIndexOf('.');
+        if (dot <= slash) {
+            return key + "." + newExt; // no existing extension
+        }
+        String current = key.substring(dot + 1).toLowerCase();
+        if (current.equals(newExt.toLowerCase())) {
+            return key;
+        }
+        return key.substring(0, dot + 1) + newExt;
+    }
+
+    private void putBytes(String key, byte[] data, String contentType) {
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(key)
+                .contentType(contentType)
+                .build();
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
     }
 
     /**
