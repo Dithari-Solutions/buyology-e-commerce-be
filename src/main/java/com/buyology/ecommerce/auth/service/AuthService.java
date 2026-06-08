@@ -57,6 +57,11 @@ public class AuthService {
     private final com.buyology.ecommerce.common.audit.AuditService auditService;
     private final MfaService mfaService;
 
+    // Master switch for mandatory 2FA on privileged logins. Temporarily disabled
+    // (mfa.enabled=false) so API clients like n8n can obtain a token without an
+    // interactive TOTP step. Flip back to true to re-enable.
+    private final boolean mfaEnabled;
+
     public AuthService(
             TokenService tokenService,
             UserRepository userRepository,
@@ -68,7 +73,8 @@ public class AuthService {
             UserRoleRepository userRoleRepository,
             LoginAttemptService loginAttemptService,
             com.buyology.ecommerce.common.audit.AuditService auditService,
-            MfaService mfaService) {
+            MfaService mfaService,
+            @org.springframework.beans.factory.annotation.Value("${mfa.enabled:true}") boolean mfaEnabled) {
         this.tokenService = tokenService;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -80,6 +86,7 @@ public class AuthService {
         this.loginAttemptService = loginAttemptService;
         this.auditService = auditService;
         this.mfaService = mfaService;
+        this.mfaEnabled = mfaEnabled;
     }
 
     // ── Step 1: Initiate signup ───────────────────────────────────────────────
@@ -708,7 +715,8 @@ public class AuthService {
 
         // Mandatory 2FA for privileged accounts. Until the second factor is verified
         // we hand back a short-lived challenge ticket instead of a session.
-        if (privileged && !mfaSatisfied) {
+        // Skipped entirely when mfa.enabled=false (temporary, for n8n API access).
+        if (mfaEnabled && privileged && !mfaSatisfied) {
             SignInResponse challenge = mfaService.buildChallenge(credentials);
             String message = Boolean.TRUE.equals(challenge.getMfaSetupRequired())
                     ? "Two-factor authentication setup required"
