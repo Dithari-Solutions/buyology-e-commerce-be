@@ -12,6 +12,8 @@ public interface ProductSpecOptionRepository extends JpaRepository<ProductSpecOp
 
     List<ProductSpecOption> findByGroup_Id(UUID groupId);
 
+    List<ProductSpecOption> findByGroup_IdIn(List<UUID> groupIds);
+
     /**
      * Returns distinct non-blank values for a spec group code across all active products.
      * Used to populate dynamic filter options on the catalog filter panel.

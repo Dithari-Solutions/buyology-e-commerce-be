@@ -10,5 +10,7 @@ public interface ProductAccessoryRepository extends JpaRepository<ProductAccesso
 
     List<ProductAccessory> findByProductId(UUID productId);
 
+    List<ProductAccessory> findByProductIdIn(List<UUID> productIds);
+
     List<ProductAccessory> findByAccessoryId(UUID accessoryId);
 }

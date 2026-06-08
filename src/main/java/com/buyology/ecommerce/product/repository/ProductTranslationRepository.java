@@ -13,6 +13,8 @@ public interface ProductTranslationRepository extends JpaRepository<ProductTrans
 
     List<ProductTranslation> findByProductId(UUID productId);
 
+    List<ProductTranslation> findByProductIdIn(List<UUID> productIds);
+
     Optional<ProductTranslation> findByLanguageAndSlug(String language, String slug);
 
     @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END " +

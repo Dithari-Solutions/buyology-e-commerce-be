@@ -13,4 +13,6 @@ public interface GlobalSpecOptionTranslationRepository extends JpaRepository<Glo
     List<GlobalSpecOptionTranslation> findAllByOption_Id(UUID optionId);
 
     Optional<GlobalSpecOptionTranslation> findByOption_IdAndLanguage(UUID optionId, Language language);
+
+    java.util.List<GlobalSpecOptionTranslation> findByOption_IdInAndLanguage(java.util.List<UUID> optionIds, Language language);
 }

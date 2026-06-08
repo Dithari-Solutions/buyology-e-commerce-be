@@ -691,9 +691,7 @@ public class ProductService {
         long skip = (long) Math.max(0, page) * pageSize;
         List<Product> products = all.stream().skip(skip).limit(pageSize).toList();
 
-        List<ProductResponse> responses = products.stream()
-                .map(p -> toResponse(p, lang, false))
-                .toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
@@ -800,7 +798,7 @@ public class ProductService {
                     .stream().map(Product::getId).toList();
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
         }
-        List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Super deal products fetched successfully");
     }
@@ -814,7 +812,7 @@ public class ProductService {
                     .stream().map(Product::getId).toList();
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
         }
-        List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Limited stock products fetched successfully");
     }
@@ -831,7 +829,7 @@ public class ProductService {
         List<Product> products = productRepository.findAllById(productIds).stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
                 .toList();
-        List<ProductResponse> responses = products.stream().map(p -> toResponse(p, lang, false)).toList();
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Quick delivery products fetched successfully");
     }
@@ -896,6 +894,130 @@ public class ProductService {
         ProductTranslation translation = translations.get(0);
         return buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(),
                 mediaDtos, specGroupDtos, colorDtos, variantDtos, accessoryIds, includeStatus, lang);
+    }
+
+    /**
+     * Batch equivalent of {@link #toResponse} for LISTS. Loads every association in a
+     * handful of bulk queries (findByProductIdIn / findByGroup_IdIn …) instead of the
+     * ~6+ per-product queries toResponse() does — turning an O(products) query
+     * explosion into a constant ~9 queries. Products with no translation for the
+     * requested language are skipped (a single bad product can't fail the whole list).
+     */
+    private List<ProductResponse> toResponseBatch(List<Product> products, String lang, boolean includeStatus) {
+        if (products.isEmpty()) return List.of();
+        List<UUID> productIds = products.stream().map(Product::getId).toList();
+        Language language;
+        try { language = Language.valueOf(lang.toUpperCase()); }
+        catch (IllegalArgumentException e) { language = Language.EN; }
+
+        // 1. Translations for the requested language → first per product
+        Map<UUID, ProductTranslation> translationByProduct = new HashMap<>();
+        for (ProductTranslation t : translationRepository.findByProductIdIn(productIds)) {
+            if (t.getLanguage().equalsIgnoreCase(lang)) {
+                translationByProduct.putIfAbsent(t.getProduct().getId(), t);
+            }
+        }
+
+        // 2. Media (all) grouped by product
+        Map<UUID, List<ProductMedia>> mediaByProduct = mediaRepository.findByProductIdIn(productIds).stream()
+                .collect(Collectors.groupingBy(m -> m.getProduct().getId()));
+
+        // 3. Variants + their option ids
+        List<ProductVariant> allVariants = variantRepository.findByProductIdIn(productIds);
+        Map<UUID, List<UUID>> optionIdsByVariant = new HashMap<>();
+        List<UUID> variantIds = allVariants.stream().map(ProductVariant::getId).toList();
+        if (!variantIds.isEmpty()) {
+            for (ProductVariantOption vo : variantOptionRepository.findByVariantIdIn(variantIds)) {
+                optionIdsByVariant.computeIfAbsent(vo.getVariant().getId(), k -> new ArrayList<>())
+                        .add(vo.getOption().getId());
+            }
+        }
+        Map<UUID, List<ProductVariant>> variantsByProduct = allVariants.stream()
+                .collect(Collectors.groupingBy(v -> v.getProduct().getId()));
+
+        // 4. Accessories
+        Map<UUID, List<UUID>> accessoryIdsByProduct = new HashMap<>();
+        for (ProductAccessory a : accessoryRepository.findByProductIdIn(productIds)) {
+            accessoryIdsByProduct.computeIfAbsent(a.getProduct().getId(), k -> new ArrayList<>())
+                    .add(a.getAccessory().getId());
+        }
+
+        // 5. Spec groups (non-color, with a global ref) + their localized names
+        List<ProductSpecGroup> allGroups = specGroupRepository.findByProduct_IdIn(productIds).stream()
+                .filter(g -> !g.getCode().startsWith("color_") && g.getGlobalSpecGroup() != null)
+                .toList();
+        List<UUID> groupIds = allGroups.stream().map(ProductSpecGroup::getId).toList();
+        List<UUID> globalGroupIds = allGroups.stream().map(g -> g.getGlobalSpecGroup().getId()).distinct().toList();
+        Map<UUID, String> groupNameByGlobalId = new HashMap<>();
+        if (!globalGroupIds.isEmpty()) {
+            for (var gt : globalSpecGroupTranslationRepository.findByGroup_IdInAndLanguageIgnoreCase(globalGroupIds, lang)) {
+                groupNameByGlobalId.putIfAbsent(gt.getGroup().getId(), gt.getName());
+            }
+        }
+
+        // 6. Spec options (with a global ref) grouped by group + their localized values
+        List<ProductSpecOption> allOptions = groupIds.isEmpty() ? List.of()
+                : specOptionRepository.findByGroup_IdIn(groupIds).stream()
+                        .filter(o -> o.getGlobalSpecOption() != null)
+                        .toList();
+        List<UUID> globalOptionIds = allOptions.stream().map(o -> o.getGlobalSpecOption().getId()).distinct().toList();
+        Map<UUID, String> optionValueByGlobalId = new HashMap<>();
+        if (!globalOptionIds.isEmpty()) {
+            for (var ot : globalSpecOptionTranslationRepository.findByOption_IdInAndLanguage(globalOptionIds, language)) {
+                optionValueByGlobalId.putIfAbsent(ot.getOption().getId(), ot.getValue());
+            }
+        }
+        Map<UUID, List<ProductSpecOption>> optionsByGroup = allOptions.stream()
+                .collect(Collectors.groupingBy(o -> o.getGroup().getId()));
+        Map<UUID, List<ProductSpecGroup>> groupsByProduct = allGroups.stream()
+                .collect(Collectors.groupingBy(g -> g.getProduct().getId()));
+
+        // Assemble each product from the preloaded maps (no further queries)
+        List<ProductResponse> result = new ArrayList<>(products.size());
+        for (Product product : products) {
+            UUID pid = product.getId();
+            ProductTranslation translation = translationByProduct.get(pid);
+            if (translation == null) continue;
+
+            List<ProductMedia> media = mediaByProduct.getOrDefault(pid, List.of());
+            List<ProductResponse.MediaDto> mediaDtos = media.stream()
+                    .filter(m -> m.getColorOption() == null).map(this::toMediaDto).toList();
+
+            Map<UUID, List<ProductResponse.MediaDto>> colorMediaMap = new HashMap<>();
+            for (ProductMedia m : media) {
+                if (m.getColorOption() != null) {
+                    colorMediaMap.computeIfAbsent(m.getColorOption().getId(), k -> new ArrayList<>()).add(toMediaDto(m));
+                }
+            }
+            List<ProductResponse.ColorOptionDto> colorDtos = media.stream()
+                    .filter(m -> m.getColorOption() != null).map(ProductMedia::getColorOption).distinct()
+                    .map(opt -> new ProductResponse.ColorOptionDto(opt.getId(), opt.getValue(), opt.getColorCode(),
+                            colorMediaMap.getOrDefault(opt.getId(), List.of())))
+                    .toList();
+
+            List<ProductResponse.VariantDto> variantDtos = variantsByProduct.getOrDefault(pid, List.of()).stream()
+                    .map(v -> new ProductResponse.VariantDto(v.getId(), v.getSku(),
+                            optionIdsByVariant.getOrDefault(v.getId(), List.of())))
+                    .toList();
+
+            List<UUID> accessoryIds = accessoryIdsByProduct.getOrDefault(pid, List.of());
+
+            List<ProductResponse.SpecGroupDto> specGroupDtos = groupsByProduct.getOrDefault(pid, List.of()).stream()
+                    .map(group -> {
+                        String groupName = groupNameByGlobalId.getOrDefault(group.getGlobalSpecGroup().getId(), group.getCode());
+                        List<ProductResponse.SpecOptionDto> optionDtos = optionsByGroup.getOrDefault(group.getId(), List.of()).stream()
+                                .map(opt -> new ProductResponse.SpecOptionDto(opt.getId(),
+                                        optionValueByGlobalId.getOrDefault(opt.getGlobalSpecOption().getId(), opt.getValue()),
+                                        opt.getGlobalSpecOption().getUnit()))
+                                .toList();
+                        return new ProductResponse.SpecGroupDto(group.getId(), group.getCode(), groupName, optionDtos);
+                    })
+                    .toList();
+
+            result.add(buildResponse(product, translation.getTitle(), translation.getDescription(), translation.getSlug(),
+                    mediaDtos, specGroupDtos, colorDtos, variantDtos, accessoryIds, includeStatus, lang));
+        }
+        return result;
     }
 
     private List<ProductResponse.SpecGroupDto> buildSpecGroupDtos(UUID productId, String lang) {

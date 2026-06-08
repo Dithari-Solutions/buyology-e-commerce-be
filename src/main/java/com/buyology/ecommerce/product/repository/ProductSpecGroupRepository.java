@@ -9,4 +9,6 @@ import java.util.UUID;
 public interface ProductSpecGroupRepository extends JpaRepository<ProductSpecGroup, UUID> {
 
     List<ProductSpecGroup> findByProduct_Id(UUID productId);
+
+    List<ProductSpecGroup> findByProduct_IdIn(List<UUID> productIds);
 }

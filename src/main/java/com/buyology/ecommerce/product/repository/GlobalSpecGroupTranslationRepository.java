@@ -12,4 +12,6 @@ public interface GlobalSpecGroupTranslationRepository extends JpaRepository<Glob
     List<GlobalSpecGroupTranslation> findAllByGroup_Id(UUID groupId);
 
     Optional<GlobalSpecGroupTranslation> findByGroup_IdAndLanguageIgnoreCase(UUID groupId, String language);
+
+    java.util.List<GlobalSpecGroupTranslation> findByGroup_IdInAndLanguageIgnoreCase(java.util.List<UUID> groupIds, String language);
 }
