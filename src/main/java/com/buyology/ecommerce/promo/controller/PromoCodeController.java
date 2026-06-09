@@ -48,6 +48,12 @@ public class PromoCodeController {
         return ApiResponse.success(promoCodeService.listAll(), "Promo codes fetched");
     }
 
+    @GetMapping("/api/admin/promo/{id}/usages")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<PromoUsageResponse>>> usages(@PathVariable UUID id) {
+        return ApiResponse.success(promoCodeService.listUsages(id), "Promo usage fetched");
+    }
+
     @PutMapping("/api/admin/promo/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<PromoCodeResponse>> update(

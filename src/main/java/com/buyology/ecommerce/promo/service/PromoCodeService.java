@@ -154,6 +154,25 @@ public class PromoCodeService {
                 .collect(Collectors.toList());
     }
 
+    /** Admin: who redeemed this promo, on which order, for how much (newest first). */
+    public List<PromoUsageResponse> listUsages(UUID promoCodeId) {
+        return usageRepo.findByPromoCode_IdOrderByUsedAtDesc(promoCodeId).stream()
+                .map(u -> {
+                    String name = userRepo.findById(u.getUserId())
+                            .map(usr -> ((usr.getFirstName() == null ? "" : usr.getFirstName()) + " "
+                                    + (usr.getLastName() == null ? "" : usr.getLastName())).trim())
+                            .filter(s -> !s.isBlank())
+                            .orElse(null);
+                    String email = authCredentialRepo.findByUserId(u.getUserId()).stream()
+                            .findFirst()
+                            .map(c -> c.getEmail())
+                            .orElse(null);
+                    return new PromoUsageResponse(u.getUserId(), name, email,
+                            u.getOrderId(), u.getDiscountApplied(), u.getUsedAt());
+                })
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public PromoCodeResponse updatePromoCode(UUID id, CreatePromoCodeRequest req) {
         validateDiscount(req.getDiscountType(), req.getDiscountValue());
