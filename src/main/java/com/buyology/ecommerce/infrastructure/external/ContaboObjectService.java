@@ -20,10 +20,10 @@ import java.util.stream.Collectors;
 public class ContaboObjectService {
 
     // Object-key prefixes whose images we brand with the Buyology watermark.
-    // Deliberately excludes users/ (avatars), refunds/ (customer evidence) and
-    // documents (trade licenses) — those must not be altered.
-    private static final List<String> WATERMARK_PREFIXES = List.of(
-            "products/", "banners/", "stories/", "news/");
+    // ONLY product catalog images are watermarked. Story, banner, news (marketing/
+    // editorial) and users/ (avatars), refunds/ (evidence), documents (licenses)
+    // must NOT be altered.
+    private static final List<String> WATERMARK_PREFIXES = List.of("products/");
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
