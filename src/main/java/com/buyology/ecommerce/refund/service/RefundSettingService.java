@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.refund.service;
 
 import com.buyology.ecommerce.refund.domain.RefundSetting;
+import com.buyology.ecommerce.refund.dto.PublicRefundSettingResponse;
 import com.buyology.ecommerce.refund.dto.RefundSettingResponse;
 import com.buyology.ecommerce.refund.dto.UpdateRefundSettingRequest;
 import com.buyology.ecommerce.refund.repository.RefundSettingRepository;
@@ -58,6 +59,16 @@ public class RefundSettingService {
     @Transactional(readOnly = true)
     public RefundSettingResponse getResponse() {
         return toResponse(getOrCreate());
+    }
+
+    /**
+     * Storefront-facing settings: the return/refund window in days and whether returns
+     * are enabled. Same window value the admin configures, with admin-only fields stripped.
+     */
+    @Transactional(readOnly = true)
+    public PublicRefundSettingResponse getPublicResponse() {
+        RefundSetting s = getOrCreate();
+        return new PublicRefundSettingResponse(s.getRefundWindowDays(), s.isEnabled());
     }
 
     public RefundSettingResponse toResponse(RefundSetting s) {

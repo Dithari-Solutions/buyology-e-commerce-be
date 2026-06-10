@@ -110,6 +110,9 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/brand").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/countries/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/**").permitAll()
+                        // Public return/refund policy (window days) for the storefront. The
+                        // admin read/write lives under /api/admin/refund-settings (authenticated).
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/refund-settings").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/questions/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news").permitAll()
                         // Stories: reads + view/like (like/unlike self-enforce auth in-controller)
