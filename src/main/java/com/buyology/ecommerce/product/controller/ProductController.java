@@ -63,8 +63,10 @@ public class ProductController {
             @Parameter(description = "Page index (0-based)")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Page size (max products per response)")
-            @RequestParam(defaultValue = "60") int size) {
-        return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng, page, size);
+            @RequestParam(defaultValue = "60") int size,
+            @Parameter(description = "Sort: POPULAR | NEWEST | PRICE_ASC | PRICE_DESC")
+            @RequestParam(required = false) String sort) {
+        return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng, page, size, sort);
     }
 
     @Operation(summary = "Get active product by ID with all related details")

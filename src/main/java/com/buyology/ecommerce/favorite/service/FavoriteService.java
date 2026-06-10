@@ -73,6 +73,13 @@ public class FavoriteService {
         return ApiResponse.success(null, "Product removed from favorites");
     }
 
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> clearFavorites(UUID authCredentialId) {
+        requireOwnedCredential(authCredentialId);
+        favoriteRepository.deleteByAuthCredential_Id(authCredentialId);
+        return ApiResponse.success(null, "All favorites cleared");
+    }
+
     // ─── Get my favorites ─────────────────────────────────────────────────────
 
     public ResponseEntity<ApiResponse<FavoriteListResponse>> getFavorites(UUID authCredentialId) {

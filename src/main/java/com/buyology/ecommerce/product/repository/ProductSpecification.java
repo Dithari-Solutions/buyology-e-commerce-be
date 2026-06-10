@@ -126,10 +126,16 @@ public class ProductSpecification {
             CriteriaBuilder cb,
             List<Predicate> predicates,
             String groupCode,
-            String optionValue) {
+            List<String> optionValues) {
 
-        if (optionValue == null || optionValue.isBlank()) return;
+        if (optionValues == null) return;
+        List<String> values = optionValues.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .toList();
+        if (values.isEmpty()) return;
 
+        // OR within a spec code: the product matches if it has an option for this group
+        // whose value is ANY of the supplied values.
         Subquery<Integer> sub = query.subquery(Integer.class);
         Root<ProductSpecOption> optRoot = sub.from(ProductSpecOption.class);
         Join<ProductSpecOption, ProductSpecGroup> groupJoin = optRoot.join("group");
@@ -138,7 +144,7 @@ public class ProductSpecification {
                 .where(
                         cb.equal(groupJoin.get("product"), root),
                         cb.equal(groupJoin.get("code"), groupCode),
-                        cb.equal(optRoot.get("value"), optionValue));
+                        optRoot.get("value").in(values));
 
         predicates.add(cb.exists(sub));
     }

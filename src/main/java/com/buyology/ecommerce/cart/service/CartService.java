@@ -529,7 +529,9 @@ public class CartService {
         for (CartItemSpecSelection sel : selections) {
             CartItemSpecSelectionResponse specResp = new CartItemSpecSelectionResponse();
             specResp.setSpecOptionId(sel.getSpecOption().getId());
-            specResp.setGroupCode(sel.getSpecOption().getGroup().getCode());
+            String groupCode = sel.getSpecOption().getGroup().getCode();
+            specResp.setGroupCode(groupCode);
+            specResp.setGroupName(humanizeSpecCode(groupCode));
             specResp.setValue(sel.getSpecOption().getValue());
             if (sel.getSpecOption().getUnit() != null) {
                 specResp.setUnit(sel.getSpecOption().getUnit().name());
@@ -539,5 +541,18 @@ public class CartService {
         }
         response.setSelectedSpecs(specResponses);
         return response;
+    }
+
+    /** "operating_system" → "Operating System", "ram" → "RAM" (short tokens upper-cased). */
+    private static String humanizeSpecCode(String code) {
+        if (code == null || code.isBlank()) return code;
+        StringBuilder sb = new StringBuilder();
+        for (String part : code.split("_")) {
+            if (part.isBlank()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            if (part.length() <= 3) sb.append(part.toUpperCase());
+            else sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1).toLowerCase());
+        }
+        return sb.toString();
     }
 }

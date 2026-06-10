@@ -46,6 +46,13 @@ public class FavoriteController {
         return favoriteService.removeFavorite(authCredentialId, productId);
     }
 
+    @Operation(summary = "Remove ALL products from a user's favorites")
+    @DeleteMapping("/{authCredentialId}/all")
+    public ResponseEntity<ApiResponse<Void>> clearFavorites(
+            @PathVariable UUID authCredentialId) {
+        return favoriteService.clearFavorites(authCredentialId);
+    }
+
     @Operation(summary = "Check if a product is in the user's favorites")
     @GetMapping("/{authCredentialId}/products/{productId}/check")
     public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkFavorite(

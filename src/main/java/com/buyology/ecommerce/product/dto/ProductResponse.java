@@ -80,6 +80,20 @@ public class ProductResponse {
     private Boolean expressDelivery;
 
     /**
+     * True when this product qualifies for free delivery (display price ≥ the 100-AED-equiv
+     * threshold). False otherwise. Null when no price could be resolved.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean freeDelivery;
+
+    /**
+     * Delivery fee in the same currency as storePrice. Zero when freeDelivery is true.
+     * Null when no price could be resolved.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal deliveryFee;
+
+    /**
      * All stores carrying this product in the requested country, each with their own price
      * and delivery badge. Null when no countryCode was supplied.
      */
@@ -323,6 +337,10 @@ public class ProductResponse {
     public void setAvailableInSelectedCountry(Boolean availableInSelectedCountry) { this.availableInSelectedCountry = availableInSelectedCountry; }
     public Boolean getExpressDelivery() { return expressDelivery; }
     public void setExpressDelivery(Boolean expressDelivery) { this.expressDelivery = expressDelivery; }
+    public Boolean getFreeDelivery() { return freeDelivery; }
+    public void setFreeDelivery(Boolean freeDelivery) { this.freeDelivery = freeDelivery; }
+    public BigDecimal getDeliveryFee() { return deliveryFee; }
+    public void setDeliveryFee(BigDecimal deliveryFee) { this.deliveryFee = deliveryFee; }
     public List<StoreOptionDto> getStoreOptions() { return storeOptions; }
     public void setStoreOptions(List<StoreOptionDto> storeOptions) { this.storeOptions = storeOptions; }
     public List<MediaDto> getMedia() { return media; }

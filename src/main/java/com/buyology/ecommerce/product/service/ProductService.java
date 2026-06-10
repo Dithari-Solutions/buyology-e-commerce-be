@@ -641,6 +641,7 @@ public class ProductService {
         }
         ProductResponse response = toResponse(product, lang, false);
         applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
+        applyDeliveryInfo(response);
         return ApiResponse.success(response, "Product fetched successfully");
     }
 
@@ -649,12 +650,15 @@ public class ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductNotFoundException(productId));
 
-        // Get products from same category, exclude current product, limit to 4
-        List<Product> related = productRepository.findByStatusAndCategoryId("ACTIVE", product.getCategory().getId())
-                .stream()
-                .filter(p -> !p.getId().equals(productId))
-                .limit(4)
-                .toList();
+        // Get products from same category, exclude current product, keep only those
+        // available in the selected country, then limit to 4.
+        List<Product> related = filterToCountry(
+                productRepository.findByStatusAndCategoryId("ACTIVE", product.getCategory().getId())
+                        .stream()
+                        .filter(p -> !p.getId().equals(productId))
+                        .toList(),
+                countryCode)
+                .stream().limit(4).toList();
 
         List<ProductResponse> responses = toResponseBatch(related, lang, false);
         
@@ -694,17 +698,26 @@ public class ProductService {
             if (aggregated.size() >= 8) break;
         }
 
-        List<Product> popular = new java.util.ArrayList<>(aggregated.values());
+        List<Product> popular = filterToCountry(new java.util.ArrayList<>(aggregated.values()), countryCode);
         List<ProductResponse> responses = toResponseBatch(popular, lang, false);
         applyBatchCountryPricing(responses, popular, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Popular for you fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
-            String lang, String countryCode, String currency, Double lat, Double lng, int page, int size) {
+            String lang, String countryCode, String currency, Double lat, Double lng, int page, int size, String sort) {
         List<Product> all = (countryCode != null && !countryCode.isBlank())
                 ? storeProductRepository.findActiveProductsByCountryCode(countryCode.toUpperCase())
                 : productRepository.findByStatus("ACTIVE");
+
+        // NEWEST can be ordered on the entity before paging (createdAt lives on Product);
+        // price sorts need the resolved display price, so they're applied to the page below.
+        if (sort != null && "NEWEST".equalsIgnoreCase(sort)) {
+            all = all.stream()
+                    .sorted(java.util.Comparator.comparing(Product::getCreatedAt,
+                            java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+                    .toList();
+        }
 
         // toResponse() is expensive PER product (per-product association queries), so
         // only map the requested page — never the whole catalog in one response.
@@ -714,6 +727,7 @@ public class ProductService {
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
+        responses = applySort(responses, sort);
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
@@ -735,6 +749,7 @@ public class ProductService {
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
+        responses = applySort(responses, filter.getSort());
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
@@ -756,10 +771,10 @@ public class ProductService {
 
         // Maintain order from search results
         Map<UUID, Product> productMap = products.stream().collect(Collectors.toMap(Product::getId, p -> p));
-        List<Product> orderedProducts = productIds.stream()
+        List<Product> orderedProducts = filterToCountry(productIds.stream()
                 .map(productMap::get)
                 .filter(java.util.Objects::nonNull)
-                .toList();
+                .toList(), countryCode);
 
         List<ProductResponse> responses = toResponseBatch(orderedProducts, lang, false);
         
@@ -1450,6 +1465,65 @@ public class ProductService {
      */
     private static final double EXPRESS_RADIUS_KM = 12.5;
 
+    // Delivery display rule (mirrors OrderService): free once the price reaches the
+    // 100-AED-equivalent threshold, otherwise a 15-AED standard fee converted to the
+    // product's display currency.
+    private static final BigDecimal FREE_DELIVERY_THRESHOLD_AED = new BigDecimal("100.00");
+    private static final BigDecimal STANDARD_DELIVERY_FEE_AED = new BigDecimal("15.00");
+
+    /**
+     * Populates freeDelivery + deliveryFee on a priced response. Call after storePrice +
+     * currency are set (works for both the single and batch pricing paths).
+     */
+    private void applyDeliveryInfo(ProductResponse resp) {
+        BigDecimal price = resp.getStorePrice();
+        String ccy = resp.getCurrency();
+        if (price == null || ccy == null) return;
+        BigDecimal priceAed = "AED".equalsIgnoreCase(ccy)
+                ? price
+                : currencyExchangeService.convert(price, ccy, "AED");
+        if (priceAed.compareTo(FREE_DELIVERY_THRESHOLD_AED) >= 0) {
+            resp.setFreeDelivery(true);
+            resp.setDeliveryFee(BigDecimal.ZERO);
+        } else {
+            resp.setFreeDelivery(false);
+            resp.setDeliveryFee("AED".equalsIgnoreCase(ccy)
+                    ? STANDARD_DELIVERY_FEE_AED
+                    : currencyExchangeService.convert(STANDARD_DELIVERY_FEE_AED, "AED", ccy));
+        }
+    }
+
+    /**
+     * Drops products not stocked by any store in {@code countryCode}. No-op when no
+     * country is supplied. Used so country-scoped lists never surface "browse only" items.
+     */
+    private List<Product> filterToCountry(List<Product> products, String countryCode) {
+        if (countryCode == null || countryCode.isBlank() || products.isEmpty()) return products;
+        Set<UUID> countryIds = storeProductRepository
+                .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                .stream().map(Product::getId).collect(Collectors.toSet());
+        return products.stream().filter(p -> countryIds.contains(p.getId())).toList();
+    }
+
+    /**
+     * Sorts mapped+priced responses. POPULAR / unknown / null keep the source order.
+     * Price sorts use the already-resolved display price, so call AFTER pricing.
+     */
+    private List<ProductResponse> applySort(List<ProductResponse> responses, String sort) {
+        if (sort == null || sort.isBlank()) return responses;
+        java.util.Comparator<ProductResponse> cmp = switch (sort.toUpperCase()) {
+            case "NEWEST" -> java.util.Comparator.comparing(ProductResponse::getCreatedAt,
+                    java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()));
+            case "PRICE_ASC" -> java.util.Comparator.comparing(ProductResponse::getStorePrice,
+                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+            case "PRICE_DESC" -> java.util.Comparator.comparing(ProductResponse::getStorePrice,
+                    java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder()));
+            default -> null;
+        };
+        if (cmp == null) return responses;
+        return responses.stream().sorted(cmp).toList();
+    }
+
     private void applyCountryPricing(ProductResponse response, UUID productId,
                                      String countryCode, String displayCurrency,
                                      Double lat, Double lng) {
@@ -1631,6 +1705,7 @@ public class ProductService {
                     resp.setCurrency(finalTarget);
                 }
             }
+            applyDeliveryInfo(resp);
         }
     }
 

@@ -80,15 +80,15 @@ public class ProductFiltersResponse {
         public void setName(String name) { this.name = name; }
     }
 
-    @Schema(description = "A dynamic spec filter group with its distinct values from the catalog")
+    @Schema(description = "A dynamic spec filter group with its distinct value+unit options from the catalog")
     public static class SpecFilterDto {
         private String code;
         private String label;
-        private List<String> values;
+        private List<SpecFilterValueDto> values;
 
         public SpecFilterDto() {}
 
-        public SpecFilterDto(String code, String label, List<String> values) {
+        public SpecFilterDto(String code, String label, List<SpecFilterValueDto> values) {
             this.code = code;
             this.label = label;
             this.values = values;
@@ -98,8 +98,27 @@ public class ProductFiltersResponse {
         public void setCode(String code) { this.code = code; }
         public String getLabel() { return label; }
         public void setLabel(String label) { this.label = label; }
-        public List<String> getValues() { return values; }
-        public void setValues(List<String> values) { this.values = values; }
+        public List<SpecFilterValueDto> getValues() { return values; }
+        public void setValues(List<SpecFilterValueDto> values) { this.values = values; }
+    }
+
+    @Schema(description = "A single spec filter option: the raw value to filter by plus its display unit")
+    public static class SpecFilterValueDto {
+        private String value;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String unit;
+
+        public SpecFilterValueDto() {}
+
+        public SpecFilterValueDto(String value, String unit) {
+            this.value = value;
+            this.unit = unit;
+        }
+
+        public String getValue() { return value; }
+        public void setValue(String value) { this.value = value; }
+        public String getUnit() { return unit; }
+        public void setUnit(String unit) { this.unit = unit; }
     }
 
     // ── Getters & Setters ────────────────────────────────────────────────────

@@ -29,4 +29,22 @@ public interface ProductSpecOptionRepository extends JpaRepository<ProductSpecOp
             ORDER BY o.value
             """)
     List<String> findDistinctValuesBySpecGroupCode(@Param("code") String code);
+
+    /**
+     * Like {@link #findDistinctValuesBySpecGroupCode} but also returns each value's unit
+     * (from the linked GlobalSpecOption) so filters can show "8 GB" rather than "8".
+     * Each row is [String value, SpecUnit unit] (unit may be null).
+     */
+    @Query("""
+            SELECT DISTINCT o.value, gso.unit FROM ProductSpecOption o
+            JOIN o.group g
+            JOIN g.product p
+            LEFT JOIN o.globalSpecOption gso
+            WHERE g.code = :code
+              AND p.status = 'ACTIVE'
+              AND o.value IS NOT NULL
+              AND o.value <> ''
+            ORDER BY o.value
+            """)
+    List<Object[]> findDistinctValueUnitsBySpecGroupCode(@Param("code") String code);
 }

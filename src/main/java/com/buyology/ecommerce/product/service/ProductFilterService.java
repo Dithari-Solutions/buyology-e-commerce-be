@@ -140,8 +140,14 @@ public class ProductFilterService {
         List<GlobalSpecGroup> allGroups = globalSpecGroupRepository.findAll();
         List<SpecFilterDto> specDtos = new ArrayList<>();
         for (GlobalSpecGroup group : allGroups) {
-            List<String> values = specOptionRepository.findDistinctValuesBySpecGroupCode(group.getCode());
-            if (values.isEmpty()) continue;
+            List<Object[]> valueRows = specOptionRepository.findDistinctValueUnitsBySpecGroupCode(group.getCode());
+            if (valueRows.isEmpty()) continue;
+
+            List<ProductFiltersResponse.SpecFilterValueDto> values = valueRows.stream()
+                    .map(r -> new ProductFiltersResponse.SpecFilterValueDto(
+                            (String) r[0],
+                            r[1] != null ? ((com.buyology.ecommerce.common.enums.SpecUnit) r[1]).name() : null))
+                    .toList();
 
             String label = globalSpecGroupTranslationRepository
                     .findByGroup_IdAndLanguageIgnoreCase(group.getId(), langUpper)
