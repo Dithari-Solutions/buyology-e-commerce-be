@@ -26,4 +26,8 @@ public interface UserRepository extends JpaRepository<Users, UUID> {
      *  entire users table into memory at once. */
     org.springframework.data.domain.Page<Users> findByUserType(
             Users.UserType userType, org.springframework.data.domain.Pageable pageable);
+
+    /** Accounts in the given status whose soft-delete timestamp is past {@code cutoff}.
+     *  Used by the account-deletion purge job to finalize deletions after the grace window. */
+    List<Users> findByStatusAndDeletedAtBefore(String status, Instant cutoff);
 }

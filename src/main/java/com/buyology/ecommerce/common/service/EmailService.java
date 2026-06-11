@@ -454,6 +454,70 @@ public class EmailService {
                 .replace("{{EXPIRY_MINUTES}}", String.valueOf(otpProps.getExpiryMinutes()));
     }
 
+    // ── Account deletion lifecycle ─────────────────────────────────────────────
+
+    @Async
+    public void sendAccountDeletionRequestedEmail(String toEmail, String name) {
+        try {
+            String body = "<p>Hi " + safeName(name) + ",</p>"
+                    + "<p>We've received your request to delete your Buyology account. Your account is now "
+                    + "scheduled for permanent deletion in <strong>30 days</strong>.</p>"
+                    + "<p>Changed your mind? You can recover your account any time before then by signing in "
+                    + "and choosing <strong>Recover account</strong> from your profile.</p>"
+                    + "<p>After 30 days your personal data will be permanently removed and this cannot be undone.</p>";
+            send(toEmail, "Your Buyology account deletion request", accountEmailHtml("Account deletion requested", body));
+            log.info("Account deletion requested email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send account-deletion-requested email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendAccountRecoveryEmail(String toEmail, String name) {
+        try {
+            String body = "<p>Hi " + safeName(name) + ",</p>"
+                    + "<p>Good news — your Buyology account has been <strong>recovered</strong> and the scheduled "
+                    + "deletion has been cancelled. Everything is back to normal.</p>"
+                    + "<p>If you didn't do this, please contact support@buyology.com immediately.</p>";
+            send(toEmail, "Your Buyology account has been recovered", accountEmailHtml("Account recovered", body));
+            log.info("Account recovery email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send account-recovery email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendAccountDeletedEmail(String toEmail, String name) {
+        try {
+            String body = "<p>Hi " + safeName(name) + ",</p>"
+                    + "<p>Your Buyology account has been <strong>permanently deleted</strong> and your personal "
+                    + "data removed, as requested. We're sorry to see you go.</p>"
+                    + "<p>You're always welcome back — just create a new account any time.</p>";
+            send(toEmail, "Your Buyology account has been deleted", accountEmailHtml("Account deleted", body));
+            log.info("Account deleted email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send account-deleted email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    private static String safeName(String name) {
+        return (name == null || name.isBlank()) ? "there" : name;
+    }
+
+    /** Minimal branded HTML wrapper for transactional account emails. */
+    private static String accountEmailHtml(String heading, String bodyHtml) {
+        return "<!DOCTYPE html><html><body style=\"margin:0;background:#f5f4fb;font-family:Arial,Helvetica,sans-serif;\">"
+                + "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\" style=\"padding:24px;\">"
+                + "<table width=\"560\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;border-radius:16px;overflow:hidden;\">"
+                + "<tr><td style=\"background:#402F75;padding:24px 32px;\">"
+                + "<span style=\"color:#FBBB14;font-size:22px;font-weight:bold;letter-spacing:1px;\">BUYOLOGY</span></td></tr>"
+                + "<tr><td style=\"padding:28px 32px;color:#2b2b2b;font-size:15px;line-height:1.6;\">"
+                + "<h2 style=\"margin:0 0 12px;color:#402F75;font-size:20px;\">" + heading + "</h2>"
+                + bodyHtml
+                + "<p style=\"margin-top:24px;color:#888;font-size:12px;\">Buyology FZ Trading LLC · United Arab Emirates · support@buyology.com</p>"
+                + "</td></tr></table></td></tr></table></body></html>";
+    }
+
     private String loadTemplate(String classpathPath) throws IOException {
         ClassPathResource resource = new ClassPathResource(classpathPath);
         try (InputStream in = resource.getInputStream()) {

@@ -37,6 +37,8 @@ public class ProductFilterService {
     private final GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository;
     private final ProductSpecOptionRepository specOptionRepository;
     private final StoreProductRepository storeProductRepository;
+    private final com.buyology.ecommerce.store.repository.CountryRepository countryRepository;
+    private final com.buyology.ecommerce.currency.service.CurrencyExchangeService currencyExchangeService;
 
     public ProductFilterService(
             ProductRepository productRepository,
@@ -47,7 +49,9 @@ public class ProductFilterService {
             GlobalSpecGroupRepository globalSpecGroupRepository,
             GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository,
             ProductSpecOptionRepository specOptionRepository,
-            StoreProductRepository storeProductRepository) {
+            StoreProductRepository storeProductRepository,
+            com.buyology.ecommerce.store.repository.CountryRepository countryRepository,
+            com.buyology.ecommerce.currency.service.CurrencyExchangeService currencyExchangeService) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.categoryTranslationRepository = categoryTranslationRepository;
@@ -57,6 +61,8 @@ public class ProductFilterService {
         this.globalSpecGroupTranslationRepository = globalSpecGroupTranslationRepository;
         this.specOptionRepository = specOptionRepository;
         this.storeProductRepository = storeProductRepository;
+        this.countryRepository = countryRepository;
+        this.currencyExchangeService = currencyExchangeService;
     }
 
     /**
@@ -68,18 +74,29 @@ public class ProductFilterService {
      * @param lang        language code (e.g. "EN", "AZ", "AR")
      */
     public ResponseEntity<ApiResponse<ProductFiltersResponse>> getAvailableFilters(
-            String countryCode, String lang) {
+            String countryCode, String lang, String displayCurrency) {
 
         String langUpper = lang != null ? lang.trim().toUpperCase() : "EN";
 
         ProductFiltersResponse response = new ProductFiltersResponse();
 
-        // 1. Price range
+        // 1. Price range — findPriceRange returns the country's store-native currency.
+        // Convert it to the user's display currency so the slider matches the prices
+        // shown on the products (and the search converts the picked range back).
         List<Object[]> priceRows = storeProductRepository.findPriceRange(countryCode);
         if (!priceRows.isEmpty() && priceRows.get(0) != null && priceRows.get(0)[0] != null) {
             Object[] row = priceRows.get(0);
             BigDecimal min = new BigDecimal(row[0].toString());
             BigDecimal max = new BigDecimal(row[1].toString());
+            if (countryCode != null && !countryCode.isBlank()
+                    && displayCurrency != null && !displayCurrency.isBlank()) {
+                var country = countryRepository.findByCode(countryCode.toUpperCase()).orElse(null);
+                if (country != null && country.getCurrency() != null
+                        && !displayCurrency.equalsIgnoreCase(country.getCurrency())) {
+                    min = currencyExchangeService.convert(min, country.getCurrency(), displayCurrency.toUpperCase());
+                    max = currencyExchangeService.convert(max, country.getCurrency(), displayCurrency.toUpperCase());
+                }
+            }
             response.setPriceRange(new PriceRangeDto(min, max));
         } else {
             response.setPriceRange(new PriceRangeDto(BigDecimal.ZERO, BigDecimal.ZERO));

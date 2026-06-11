@@ -93,6 +93,14 @@ public class ProductResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigDecimal deliveryFee;
 
+    /** Average review rating (0–5) computed from approved reviews. 0 when no reviews. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal averageRating;
+
+    /** Number of approved reviews. 0 when none. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer totalReviews;
+
     /**
      * All stores carrying this product in the requested country, each with their own price
      * and delivery badge. Null when no countryCode was supplied.
@@ -341,6 +349,10 @@ public class ProductResponse {
     public void setFreeDelivery(Boolean freeDelivery) { this.freeDelivery = freeDelivery; }
     public BigDecimal getDeliveryFee() { return deliveryFee; }
     public void setDeliveryFee(BigDecimal deliveryFee) { this.deliveryFee = deliveryFee; }
+    public BigDecimal getAverageRating() { return averageRating; }
+    public void setAverageRating(BigDecimal averageRating) { this.averageRating = averageRating; }
+    public Integer getTotalReviews() { return totalReviews; }
+    public void setTotalReviews(Integer totalReviews) { this.totalReviews = totalReviews; }
     public List<StoreOptionDto> getStoreOptions() { return storeOptions; }
     public void setStoreOptions(List<StoreOptionDto> storeOptions) { this.storeOptions = storeOptions; }
     public List<MediaDto> getMedia() { return media; }

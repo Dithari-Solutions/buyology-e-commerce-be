@@ -294,6 +294,10 @@ public class UserProfileService {
         res.setPreferredLanguage(profile.getPreferredLanguage());
         res.setCreatedAt(profile.getCreatedAt());
         res.setUpdatedAt(profile.getUpdatedAt());
+        if ("PENDING_DELETION".equals(user.getStatus()) && user.getDeletedAt() != null) {
+            res.setPendingDeletion(true);
+            res.setDeletionScheduledAt(user.getDeletedAt().plus(30, java.time.temporal.ChronoUnit.DAYS));
+        }
         return res;
     }
 

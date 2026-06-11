@@ -41,6 +41,11 @@ public class ProfileResponse {
     private Instant createdAt;
     private Instant updatedAt;
 
+    /** True when the account is scheduled for deletion (within the 30-day grace window). */
+    private boolean pendingDeletion;
+    /** When the account will be permanently deleted (deletion request + 30 days). Null otherwise. */
+    private Instant deletionScheduledAt;
+
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
 
@@ -85,4 +90,8 @@ public class ProfileResponse {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public boolean isPendingDeletion() { return pendingDeletion; }
+    public void setPendingDeletion(boolean pendingDeletion) { this.pendingDeletion = pendingDeletion; }
+    public Instant getDeletionScheduledAt() { return deletionScheduledAt; }
+    public void setDeletionScheduledAt(Instant deletionScheduledAt) { this.deletionScheduledAt = deletionScheduledAt; }
 }

@@ -108,6 +108,7 @@ public class ProductService {
     private final StoreLocationRepository storeLocationRepository;
     private final ContaboObjectService contaboObjectService;
     private final ProductSearchService productSearchService;
+    private final com.buyology.ecommerce.review.repository.ProductReviewStatsRepository productReviewStatsRepository;
 
     public ProductService(
             ProductRepository productRepository,
@@ -132,7 +133,8 @@ public class ProductService {
             CurrencyExchangeService currencyExchangeService,
             StoreLocationRepository storeLocationRepository,
             ContaboObjectService contaboObjectService,
-            ProductSearchService productSearchService) {
+            ProductSearchService productSearchService,
+            com.buyology.ecommerce.review.repository.ProductReviewStatsRepository productReviewStatsRepository) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
@@ -156,6 +158,7 @@ public class ProductService {
         this.storeLocationRepository = storeLocationRepository;
         this.contaboObjectService = contaboObjectService;
         this.productSearchService = productSearchService;
+        this.productReviewStatsRepository = productReviewStatsRepository;
     }
 
     /**
@@ -642,6 +645,7 @@ public class ProductService {
         ProductResponse response = toResponse(product, lang, false);
         applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
         applyDeliveryInfo(response);
+        applyRatingsSingle(response, product.getId());
         return ApiResponse.success(response, "Product fetched successfully");
     }
 
@@ -733,6 +737,24 @@ public class ProductService {
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
             ProductFilterRequest filter, String lang, String countryCode, String currency, Double lat, Double lng) {
+        // The price bounds arrive in the user's DISPLAY currency (matching the slider, which
+        // the filters endpoint converted). storePrice is stored in the country's native
+        // currency, so convert the bounds back to native before the comparison.
+        if (countryCode != null && !countryCode.isBlank() && currency != null && !currency.isBlank()
+                && (filter.getMinPrice() != null || filter.getMaxPrice() != null)) {
+            Country country = countryRepository.findByCode(countryCode.toUpperCase()).orElse(null);
+            if (country != null && country.getCurrency() != null
+                    && !currency.equalsIgnoreCase(country.getCurrency())) {
+                if (filter.getMinPrice() != null) {
+                    filter.setMinPrice(currencyExchangeService.convert(
+                            filter.getMinPrice(), currency.toUpperCase(), country.getCurrency()));
+                }
+                if (filter.getMaxPrice() != null) {
+                    filter.setMaxPrice(currencyExchangeService.convert(
+                            filter.getMaxPrice(), currency.toUpperCase(), country.getCurrency()));
+                }
+            }
+        }
         List<Product> products = productRepository.findAll(ProductSpecification.from(filter)).stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
                 .toList();
@@ -1524,6 +1546,29 @@ public class ProductService {
         return responses.stream().sorted(cmp).toList();
     }
 
+    /** Populates averageRating + totalReviews for a list, from pre-aggregated review stats. */
+    private void applyRatingsBatch(List<ProductResponse> responses, List<Product> products) {
+        if (products.isEmpty()) return;
+        List<UUID> ids = products.stream().map(Product::getId).toList();
+        Map<UUID, com.buyology.ecommerce.review.domain.ProductReviewStats> byId =
+                productReviewStatsRepository.findByProductIdIn(ids).stream()
+                        .collect(Collectors.toMap(
+                                com.buyology.ecommerce.review.domain.ProductReviewStats::getProductId,
+                                s -> s, (a, b) -> a));
+        for (int i = 0; i < responses.size(); i++) {
+            var stats = byId.get(products.get(i).getId());
+            responses.get(i).setAverageRating(stats != null ? stats.getAverageRating() : BigDecimal.ZERO);
+            responses.get(i).setTotalReviews(stats != null ? stats.getTotalReviews() : 0);
+        }
+    }
+
+    /** Populates averageRating + totalReviews for a single product. */
+    private void applyRatingsSingle(ProductResponse resp, UUID productId) {
+        var stats = productReviewStatsRepository.findByProductId(productId).orElse(null);
+        resp.setAverageRating(stats != null ? stats.getAverageRating() : BigDecimal.ZERO);
+        resp.setTotalReviews(stats != null ? stats.getTotalReviews() : 0);
+    }
+
     private void applyCountryPricing(ProductResponse response, UUID productId,
                                      String countryCode, String displayCurrency,
                                      Double lat, Double lng) {
@@ -1707,6 +1752,7 @@ public class ProductService {
             }
             applyDeliveryInfo(resp);
         }
+        applyRatingsBatch(responses, products);
     }
 
     private ProductResponse buildResponse(

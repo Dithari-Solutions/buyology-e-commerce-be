@@ -41,8 +41,10 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductFiltersResponse>> getFilters(
             @RequestParam String lang,
             @Parameter(description = "ISO 3166-1 alpha-3 country code to scope price range (e.g. UAE, AZE)")
-            @RequestParam(required = false) String countryCode) {
-        return productFilterService.getAvailableFilters(countryCode, lang);
+            @RequestParam(required = false) String countryCode,
+            @Parameter(description = "ISO 4217 display currency to express the price range in")
+            @RequestParam(required = false) String currency) {
+        return productFilterService.getAvailableFilters(countryCode, lang, currency);
     }
 
     @Operation(summary = "Get all active products",
