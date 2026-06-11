@@ -500,6 +500,38 @@ public class EmailService {
         }
     }
 
+    // ── Order cancellation ─────────────────────────────────────────────────────
+
+    @Async
+    public void sendOrderCancelledEmail(String toEmail, String name, String orderNumber, String reason) {
+        try {
+            String body = "<p>Hi " + safeName(name) + ",</p>"
+                    + "<p>Your order <strong>" + nullToEmpty(orderNumber) + "</strong> has been <strong>cancelled</strong>"
+                    + (reason != null && !reason.isBlank() ? " — " + reason : "") + ".</p>"
+                    + "<p>If this order was already paid, a refund has been initiated automatically — you'll receive a "
+                    + "separate email with the details. If you didn't request this, please contact support@buyology.com.</p>";
+            send(toEmail, "Your Buyology order has been cancelled", accountEmailHtml("Order cancelled", body));
+            log.info("Order-cancelled email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send order-cancelled email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendRefundInitiatedOnCancelEmail(String toEmail, String name, String orderNumber, String amount, String currency) {
+        try {
+            String body = "<p>Hi " + safeName(name) + ",</p>"
+                    + "<p>We've initiated a refund of <strong>" + nullToEmpty(currency) + " " + nullToEmpty(amount) + "</strong> "
+                    + "for your cancelled order <strong>" + nullToEmpty(orderNumber) + "</strong>.</p>"
+                    + "<p>The amount goes back to your original payment method. Depending on your bank or provider this "
+                    + "can take a few business days to appear.</p>";
+            send(toEmail, "Your refund has been initiated", accountEmailHtml("Refund initiated", body));
+            log.info("Refund-initiated email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send refund-initiated email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     private static String safeName(String name) {
         return (name == null || name.isBlank()) ? "there" : name;
     }

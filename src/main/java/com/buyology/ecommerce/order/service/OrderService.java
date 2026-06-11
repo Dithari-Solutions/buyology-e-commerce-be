@@ -92,6 +92,10 @@ public class OrderService {
     private final com.buyology.ecommerce.supplier.repository.SupplierRepository supplierRepository;
     private final com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository;
     private final com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository;
+    private final com.buyology.ecommerce.common.service.EmailService emailService;
+    private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository;
+    // Lazy provider avoids a construction-time cycle (PaymentService publishes the events this service listens to).
+    private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -114,7 +118,10 @@ public class OrderService {
                         com.buyology.ecommerce.notification.service.PushNotificationService pushService,
                         com.buyology.ecommerce.supplier.repository.SupplierRepository supplierRepository,
                         com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository,
-                        com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository) {
+                        com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository,
+                        com.buyology.ecommerce.common.service.EmailService emailService,
+                        com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository,
+                        org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -137,6 +144,9 @@ public class OrderService {
         this.supplierRepository = supplierRepository;
         this.userRoleRepository = userRoleRepository;
         this.courierProfileRepository = courierProfileRepository;
+        this.emailService = emailService;
+        this.authCredentialRepository = authCredentialRepository;
+        this.paymentServiceProvider = paymentServiceProvider;
     }
 
     // =========================================================================
@@ -266,6 +276,7 @@ public class OrderService {
         
         order.setCountryCode(marketCountry != null && !marketCountry.isBlank() ? marketCountry : address.getCountry());
         order.setCouponCode(req.getCouponCode());
+        order.setPromoCodeId(appliedPromoId);
 
         order = orderRepo.save(order);
 
@@ -308,9 +319,8 @@ public class OrderService {
 
         order = orderRepo.save(order);
 
-        if (appliedPromoId != null) {
-            promoCodeService.recordUsage(appliedPromoId, order.getId(), userId, discount);
-        }
+        // NOTE: promo usage is now recorded on payment success (recordPromoUsageOnPaid),
+        // not here — so a code only counts as redeemed once the order is actually paid.
 
         return toOrderResponse(order);
     }
@@ -357,6 +367,9 @@ public class OrderService {
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
+
+                    // Record promo redemption now that the order is actually paid.
+                    recordPromoUsageOnPaid(order);
 
                     // Notify suppliers (owning items) + superadmins of the new paid order.
                     notifyNewOrder(order);
@@ -464,6 +477,8 @@ public class OrderService {
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
+                    // Record promo redemption now that the order is actually paid.
+                    recordPromoUsageOnPaid(order);
                     // Notify suppliers + superadmins of the new paid order.
                     notifyNewOrder(order);
                 }
@@ -777,6 +792,11 @@ public class OrderService {
         broadcastStatusUpdate(saved, null);
         notifyCustomerStatus(saved);
 
+        // Admin cancelled → auto-refund + customer emails (same as a customer cancellation).
+        if (saved.getStatus() == OrderStatus.CANCELLED) {
+            handleCancellationSideEffects(saved, req.getCancellationReason());
+        }
+
         return toOrderResponse(saved);
     }
 
@@ -885,6 +905,12 @@ public class OrderService {
         Order order = orderRepo.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
+        // Customers may cancel only up to (and including) IN_COURIER. Once the order is
+        // IN_TRANSIT ("courier on the way to delivery") or later, it can no longer be cancelled.
+        if (!isCustomerCancellable(order.getStatus())) {
+            throw new IllegalStateException(
+                    "This order can no longer be cancelled — it is already on its way to you.");
+        }
         validateTransition(order.getStatus(), OrderStatus.CANCELLED);
 
         order.setCancellationReason(reason);
@@ -896,7 +922,88 @@ public class OrderService {
 
         Order saved = orderRepo.save(order);
         broadcastStatusUpdate(saved, null);
+        handleCancellationSideEffects(saved, reason);
         return toOrderResponse(saved);
+    }
+
+    /** Statuses a customer is still allowed to cancel from (before the order leaves for delivery). */
+    @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
+    private boolean isCustomerCancellable(OrderStatus status) {
+        return switch (status) {
+            case PENDING_PAYMENT, PAID, PACKAGING, IN_COURIER,
+                 PROCESSING, COURIER_ASSIGNED, PICKED_UP -> true;
+            default -> false; // IN_TRANSIT, SHIPPED, DELIVERED, CANCELLED, FAILED
+        };
+    }
+
+    /** Records the order's promo redemption — called once the order becomes PAID. */
+    private void recordPromoUsageOnPaid(Order order) {
+        if (order.getPromoCodeId() == null) return;
+        try {
+            promoCodeService.recordUsage(order.getPromoCodeId(), order.getId(),
+                    order.getUserId(), order.getDiscount());
+        } catch (Exception e) {
+            log.warn("[ORDER] Failed to record promo usage for paid order {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * On cancellation of a paid order: auto-initiate a refund of the charged amount and email
+     * the customer (cancellation + refund). Best-effort — failures are logged, never block the
+     * cancellation. No-op for unpaid (PENDING_PAYMENT) orders.
+     */
+    private void handleCancellationSideEffects(Order order, String reason) {
+        String email = customerEmail(order);
+        String name = customerName(order);
+        String orderNo = order.getId().toString();
+
+        boolean refunded = false;
+        BigDecimal refundAmount = null;
+        String refundCurrency = null;
+
+        if (order.getPaymentTransactionId() != null) {
+            try {
+                PaymentTransaction tx = paymentTransactionRepo.findById(order.getPaymentTransactionId()).orElse(null);
+                if (tx != null && (tx.getStatus() == com.buyology.ecommerce.payment.enums.PaymentStatus.SUCCESS
+                        || tx.getStatus() == com.buyology.ecommerce.payment.enums.PaymentStatus.PARTIALLY_REFUNDED)) {
+                    var req = new com.buyology.ecommerce.payment.dto.RefundRequest();
+                    req.setTransactionId(tx.getId());
+                    req.setAmount(tx.getAmount());
+                    req.setReason("Order " + order.getId() + " cancelled");
+                    paymentServiceProvider.getObject().initiateRefund(req);
+                    refunded = true;
+                    refundAmount = tx.getAmount();
+                    refundCurrency = tx.getCurrency();
+                    log.info("[ORDER] Auto-refund initiated for cancelled order {}", order.getId());
+                }
+            } catch (Exception e) {
+                log.warn("[ORDER] Auto-refund on cancel failed for order {} — needs manual refund: {}",
+                        order.getId(), e.getMessage());
+            }
+        }
+
+        if (email != null) {
+            try { emailService.sendOrderCancelledEmail(email, name, orderNo, reason); }
+            catch (Exception e) { log.warn("[ORDER] order-cancelled email failed for {}: {}", order.getId(), e.getMessage()); }
+            if (refunded && refundAmount != null) {
+                try { emailService.sendRefundInitiatedOnCancelEmail(email, name, orderNo, refundAmount.toPlainString(), refundCurrency); }
+                catch (Exception e) { log.warn("[ORDER] refund-initiated email failed for {}: {}", order.getId(), e.getMessage()); }
+            }
+        }
+    }
+
+    private String customerEmail(Order order) {
+        if (order.getUserId() == null) return null;
+        return authCredentialRepository.findByUserId(order.getUserId()).stream()
+                .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getEmail)
+                .filter(e -> e != null && !e.isBlank())
+                .findFirst().orElse(null);
+    }
+
+    private String customerName(Order order) {
+        // First name lives on the Users entity (not UserProfiles); the email greets generically
+        // when absent, so we keep this dependency-free and return null.
+        return null;
     }
 
     // =========================================================================

@@ -161,6 +161,10 @@ public class Order {
     @Column(name = "coupon_code", length = 50)
     private String couponCode;
 
+    /** Resolved promo code id — usage is recorded against it only once the order is PAID. */
+    @Column(name = "promo_code_id")
+    private UUID promoCodeId;
+
     // ── Carrier info (admin-set on SHIPPED) ──────────────────────────────────
 
     @Column(name = "tracking_code", length = 100)
@@ -338,6 +342,8 @@ public class Order {
 
     public String getCouponCode() { return couponCode; }
     public void setCouponCode(String couponCode) { this.couponCode = couponCode; }
+    public UUID getPromoCodeId() { return promoCodeId; }
+    public void setPromoCodeId(UUID promoCodeId) { this.promoCodeId = promoCodeId; }
 
     public String getTrackingCode() { return trackingCode; }
     public void setTrackingCode(String trackingCode) { this.trackingCode = trackingCode; }
