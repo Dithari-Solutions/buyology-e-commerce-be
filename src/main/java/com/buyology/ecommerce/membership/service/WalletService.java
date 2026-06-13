@@ -30,15 +30,18 @@ public class WalletService {
     private final WalletTransactionRepository txRepo;
     private final CurrencyExchangeService currencyExchangeService;
     private final B2bCountryRepository countryRepo;
+    private final com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepo;
 
     public WalletService(WalletRepository walletRepo,
                          WalletTransactionRepository txRepo,
                          CurrencyExchangeService currencyExchangeService,
-                         B2bCountryRepository countryRepo) {
+                         B2bCountryRepository countryRepo,
+                         com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepo) {
         this.walletRepo = walletRepo;
         this.txRepo = txRepo;
         this.currencyExchangeService = currencyExchangeService;
         this.countryRepo = countryRepo;
+        this.userProfilesRepo = userProfilesRepo;
     }
 
     @Transactional
@@ -153,12 +156,19 @@ public class WalletService {
         Wallet wallet = walletRepo.findByUserId(userId)
                 .orElseThrow(() -> new NoSuchElementException("Wallet not found for user: " + userId));
         WalletResponse r = toResponse(wallet);
-        if (targetCurrency == null || targetCurrency.isBlank()
-                || targetCurrency.equalsIgnoreCase(wallet.getCurrency())) {
+        // Default to the user's preferred (detected-country) currency so the wallet is always
+        // presented in their currency — even when the client doesn't pass one explicitly.
+        String target = (targetCurrency == null || targetCurrency.isBlank())
+                ? userProfilesRepo.findByUserId(userId)
+                    .map(com.buyology.ecommerce.user.domain.UserProfiles::getPreferredCurrency)
+                    .orElse(null)
+                : targetCurrency;
+        if (target == null || target.isBlank()
+                || target.equalsIgnoreCase(wallet.getCurrency())) {
             return r;
         }
         String from = wallet.getCurrency();
-        String to = targetCurrency.toUpperCase();
+        String to = target.toUpperCase();
         r.setBalance(convertScaled(r.getBalance(), from, to));
         if (r.getCreditLimit() != null) r.setCreditLimit(convertScaled(r.getCreditLimit(), from, to));
         if (r.getMinOrderAmount() != null) r.setMinOrderAmount(convertScaled(r.getMinOrderAmount(), from, to));
