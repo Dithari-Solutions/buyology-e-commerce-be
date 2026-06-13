@@ -189,19 +189,18 @@ public class GameService {
                 .collect(Collectors.toMap(QuizQuestion::getId, Function.identity()));
 
         int score = 0;
-        boolean allCorrect = true;
         for (GameSubmissionRequest.QuizAnswer answer : answers) {
             QuizQuestion question = answer.getQuestionId() == null ? null : questions.get(answer.getQuestionId());
             // Unknown/inactive questions can never count as correct.
-            if (question == null || !question.isActive()
-                    || question.getCorrectOptionIndex() != answer.getSelectedOptionIndex()) {
-                allCorrect = false;
-            } else {
+            if (question != null && question.isActive()
+                    && question.getCorrectOptionIndex() == answer.getSelectedOptionIndex()) {
                 score += question.getPoints();
             }
         }
 
-        return new GameOutcome(allCorrect, score);
+        // Reward participation: any correct answer earns the daily tokens (matches the mini-game,
+        // which also treats score > 0 as a win). Avoids the old all-or-nothing 0-token behaviour.
+        return new GameOutcome(score > 0, score);
     }
 
     @Transactional
