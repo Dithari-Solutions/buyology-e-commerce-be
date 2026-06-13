@@ -111,7 +111,9 @@ public class CreditPaybackService {
                 .orElseThrow(() -> new IllegalStateException(
                         "No active CARD config for credit payback"));
 
-        String merchantOrderId = MERCHANT_ID_PREFIX + usage.getId();
+        // Unique per attempt — Paymob rejects a duplicate merchant_order_id, so reusing a fixed
+        // "CRED-<usageId>" across retries 500'd. The usageId stays parseable (leading UUID).
+        String merchantOrderId = MERCHANT_ID_PREFIX + usage.getId() + "-" + System.currentTimeMillis();
 
         ObjectNode billingData = objectMapper.createObjectNode();
         billingData.put("first_name", "B2B");
@@ -133,14 +135,30 @@ public class CreditPaybackService {
         item.put("quantity", 1);
         items.add(item);
 
-        PaymobClient.IntentionResult intention = paymobClient.createIntention(
-                provider.getSecretKey(), provider.getBaseUrl(),
-                amountCents, PAYMOB_CURRENCY,
-                Integer.parseInt(config.getIntegrationId()),
-                merchantOrderId,
-                billingData, customer, items,
-                provider.getNotificationUrl(),
-                paymobProperties.getRedirectionUrl());
+        int integrationId;
+        try {
+            integrationId = Integer.parseInt(config.getIntegrationId());
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Invalid CARD integration id configured for credit payback");
+        }
+
+        PaymobClient.IntentionResult intention;
+        try {
+            intention = paymobClient.createIntention(
+                    provider.getSecretKey(), provider.getBaseUrl(),
+                    amountCents, PAYMOB_CURRENCY,
+                    integrationId,
+                    merchantOrderId,
+                    billingData, customer, items,
+                    provider.getNotificationUrl(),
+                    paymobProperties.getRedirectionUrl());
+        } catch (RuntimeException e) {
+            // Surface as 502 (not a raw 500) so the client gets a clear "gateway" error.
+            log.error("[PAYBACK] Paymob intention failed for usage {}: {}", usage.getId(), e.getMessage());
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_GATEWAY,
+                    "Payment gateway error while initiating payback");
+        }
 
         usage.setPaymobIntentionId(intention.intentionId());
         usageRepository.save(usage);
@@ -169,7 +187,11 @@ public class CreditPaybackService {
         if (merchantOrderId == null || !merchantOrderId.startsWith(MERCHANT_ID_PREFIX)) return;
         UUID usageId;
         try {
-            usageId = UUID.fromString(merchantOrderId.substring(MERCHANT_ID_PREFIX.length()));
+            // Reference is "CRED-<usageId>" optionally followed by "-<uniqueness suffix>";
+            // the usage id is the leading 36-char UUID.
+            String rest = merchantOrderId.substring(MERCHANT_ID_PREFIX.length());
+            if (rest.length() > 36) rest = rest.substring(0, 36);
+            usageId = UUID.fromString(rest);
         } catch (IllegalArgumentException e) {
             log.warn("[PAYBACK] Bad usage id in merchantOrderId {}", merchantOrderId);
             return;
