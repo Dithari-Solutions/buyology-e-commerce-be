@@ -192,6 +192,11 @@ public class OrderService {
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
 
+        // A verified phone number is required to place an order (delivery contact).
+        if (!profile.isPhoneVerified()) {
+            throw new IllegalStateException("Please verify your phone number before placing an order.");
+        }
+
         String marketCountry = profile.getSelectedCountryCode();
         if (marketCountry == null || marketCountry.isBlank()) {
             marketCountry = cart.getCountryCode();
