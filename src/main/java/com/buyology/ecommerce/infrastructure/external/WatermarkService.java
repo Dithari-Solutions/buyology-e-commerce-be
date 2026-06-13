@@ -25,7 +25,9 @@ import org.springframework.stereotype.Service;
  * are visibly ours.
  *
  * The logo is drawn semi-transparently in the center, scaled
- * relative to the image width. Output keeps the source format for JPEG/PNG; WebP
+ * relative to the image width. Transparency is always preserved: any source with an
+ * alpha channel is emitted as PNG, never JPEG (JPEG cannot store alpha — transparent
+ * pixels would flatten to black). Opaque JPEGs stay JPEG; WebP
  * (which ImageIO cannot write) is re-encoded to PNG. Anything we can't decode
  * (animated GIF, unknown formats, or a WebP plugin that failed to load) is left
  * untouched — {@link #apply} returns empty and the caller uploads the original.
@@ -91,7 +93,12 @@ public class WatermarkService {
                 return Optional.empty();
             }
 
-            boolean asJpeg = "jpeg".equals(fmt);
+            // Keep transparency: a source with an alpha channel is rendered onto a
+            // transparent ARGB canvas and emitted as PNG. JPEG cannot store alpha, so
+            // forcing a transparent image through the JPEG path would flatten its
+            // transparent pixels to black — never do that. Only opaque sources stay JPEG.
+            boolean hasAlpha = src.getColorModel().hasAlpha();
+            boolean asJpeg = "jpeg".equals(fmt) && !hasAlpha;
             int type = asJpeg ? BufferedImage.TYPE_INT_RGB : BufferedImage.TYPE_INT_ARGB;
             BufferedImage canvas = new BufferedImage(src.getWidth(), src.getHeight(), type);
 
