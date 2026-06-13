@@ -33,6 +33,22 @@ public class PromoCodeController {
         return ApiResponse.success(result, "Promo code validated");
     }
 
+    /** Current redemption offer (token cost + reward) for rendering the redeem button. */
+    @GetMapping("/api/promo/redeem-info")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<TokenRedemptionInfoResponse>> redeemInfo(
+            @AuthenticationPrincipal UUID userId) {
+        return ApiResponse.success(promoCodeService.getRedemptionInfo(userId), "Redemption info fetched");
+    }
+
+    /** Redeem the configured number of tokens for a personal coupon code. */
+    @PostMapping("/api/promo/redeem")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<RedeemTokensResponse>> redeem(
+            @AuthenticationPrincipal UUID userId) {
+        return ApiResponse.success(promoCodeService.redeemTokens(userId), "Tokens redeemed");
+    }
+
     // ── Admin endpoints ──────────────────────────────────────────────────────
 
     @PostMapping("/api/admin/promo")
@@ -76,5 +92,32 @@ public class PromoCodeController {
             @RequestBody SendPromoRequest req) {
         promoCodeService.sendPromoToCustomers(id, req);
         return ApiResponse.success(null, "Promo code is being sent to customers");
+    }
+
+    /** Mint a coupon bound to ONE user and email/notify only that user. */
+    @PostMapping("/api/admin/promo/issue")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PromoCodeResponse>> issueToUser(
+            @Valid @RequestBody IssuePersonalCodeRequest req) {
+        return ApiResponse.created(promoCodeService.issuePersonalCode(req),
+                "Personal promo code issued");
+    }
+
+    // ── Admin: token-redemption configuration ────────────────────────────────
+
+    @GetMapping("/api/admin/promo/redeem-config")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<TokenRedemptionConfigDto>> getRedeemConfig() {
+        return ApiResponse.success(
+                TokenRedemptionConfigDto.from(promoCodeService.getOrCreateConfig()),
+                "Token redemption config fetched");
+    }
+
+    @PutMapping("/api/admin/promo/redeem-config")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<TokenRedemptionConfigDto>> updateRedeemConfig(
+            @RequestBody TokenRedemptionConfigDto req) {
+        return ApiResponse.success(promoCodeService.updateConfig(req),
+                "Token redemption config updated");
     }
 }

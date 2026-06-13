@@ -49,6 +49,20 @@ public class PromoCode {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
+    /**
+     * When set, this code is PERSONAL: only the user with this id may validate/apply it.
+     * null = public code usable by anyone (the historical behaviour).
+     */
+    @Column(name = "target_user_id")
+    private UUID targetUserId;
+
+    /**
+     * Audit: when this code was minted by a customer redeeming tokens, the number of
+     * tokens spent. null = not a token-redemption code (admin-created / personal-issued).
+     */
+    @Column(name = "redeemed_from_tokens")
+    private Integer redeemedFromTokens;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
 
@@ -92,6 +106,10 @@ public class PromoCode {
     public void setApplicableCategoryIds(String applicableCategoryIds) { this.applicableCategoryIds = applicableCategoryIds; }
     public Instant getExpiresAt() { return expiresAt; }
     public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
+    public UUID getTargetUserId() { return targetUserId; }
+    public void setTargetUserId(UUID targetUserId) { this.targetUserId = targetUserId; }
+    public Integer getRedeemedFromTokens() { return redeemedFromTokens; }
+    public void setRedeemedFromTokens(Integer redeemedFromTokens) { this.redeemedFromTokens = redeemedFromTokens; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
     public String getDescription() { return description; }

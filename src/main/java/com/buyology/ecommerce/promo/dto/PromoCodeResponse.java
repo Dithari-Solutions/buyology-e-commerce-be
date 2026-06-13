@@ -15,6 +15,7 @@ public class PromoCodeResponse {
     private Integer maxUsesPerCustomer;
     private long totalUsed;
     private Instant expiresAt;
+    private UUID targetUserId;
     private boolean isActive;
     private String description;
     private Instant createdAt;
@@ -37,6 +38,8 @@ public class PromoCodeResponse {
     public void setTotalUsed(long totalUsed) { this.totalUsed = totalUsed; }
     public Instant getExpiresAt() { return expiresAt; }
     public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
+    public UUID getTargetUserId() { return targetUserId; }
+    public void setTargetUserId(UUID targetUserId) { this.targetUserId = targetUserId; }
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
     public String getDescription() { return description; }

@@ -6,10 +6,14 @@ import com.buyology.ecommerce.notification.service.PushNotificationService;
 import com.buyology.ecommerce.promo.domain.DiscountType;
 import com.buyology.ecommerce.promo.domain.PromoCode;
 import com.buyology.ecommerce.promo.domain.PromoCodeUsage;
+import com.buyology.ecommerce.promo.domain.TokenRedemptionConfig;
 import com.buyology.ecommerce.promo.dto.*;
 import com.buyology.ecommerce.promo.repository.PromoCodeRepository;
 import com.buyology.ecommerce.promo.repository.PromoCodeUsageRepository;
+import com.buyology.ecommerce.promo.repository.TokenRedemptionConfigRepository;
+import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -31,6 +37,10 @@ public class PromoCodeService {
 
     private static final Logger log = LoggerFactory.getLogger(PromoCodeService.class);
 
+    private static final SecureRandom RNG = new SecureRandom();
+    // Excludes ambiguous characters (0/O, 1/I) so codes are easy to read/type.
+    private static final String CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
     private final PromoCodeRepository promoCodeRepo;
     private final PromoCodeUsageRepository usageRepo;
     private final UserRepository userRepo;
@@ -38,6 +48,8 @@ public class PromoCodeService {
     private final PushNotificationService pushService;
     private final EmailService emailService;
     private final ObjectMapper objectMapper;
+    private final TokenRedemptionConfigRepository tokenConfigRepo;
+    private final UserProfilesRepository userProfilesRepo;
 
     public PromoCodeService(PromoCodeRepository promoCodeRepo,
                             PromoCodeUsageRepository usageRepo,
@@ -45,7 +57,9 @@ public class PromoCodeService {
                             AuthCredentialRepository authCredentialRepo,
                             PushNotificationService pushService,
                             EmailService emailService,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            TokenRedemptionConfigRepository tokenConfigRepo,
+                            UserProfilesRepository userProfilesRepo) {
         this.promoCodeRepo = promoCodeRepo;
         this.usageRepo = usageRepo;
         this.userRepo = userRepo;
@@ -53,6 +67,8 @@ public class PromoCodeService {
         this.pushService = pushService;
         this.emailService = emailService;
         this.objectMapper = objectMapper;
+        this.tokenConfigRepo = tokenConfigRepo;
+        this.userProfilesRepo = userProfilesRepo;
     }
 
     // ── Customer: validate promo code ────────────────────────────────────────
@@ -65,6 +81,11 @@ public class PromoCodeService {
             return ValidatePromoCodeResponse.invalid("Promo code not found or inactive");
         }
         PromoCode pc = opt.get();
+
+        // Personal codes (token-redeemed or admin-issued) belong to one user only.
+        if (pc.getTargetUserId() != null && !pc.getTargetUserId().equals(userId)) {
+            return ValidatePromoCodeResponse.invalid("This promo code is not valid for your account");
+        }
 
         if (pc.getExpiresAt() != null && pc.getExpiresAt().isBefore(Instant.now())) {
             return ValidatePromoCodeResponse.invalid("Promo code has expired");
@@ -255,7 +276,175 @@ public class PromoCodeService {
         }
     }
 
+    // ── Admin: issue a coupon to ONE user + email only them ──────────────────
+
+    @Transactional
+    public PromoCodeResponse issuePersonalCode(IssuePersonalCodeRequest req) {
+        validateDiscount(req.getDiscountType(), req.getDiscountValue());
+        Users user = userRepo.findById(req.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + req.getUserId()));
+
+        int maxUses = (req.getMaxUses() != null && req.getMaxUses() > 0) ? req.getMaxUses() : 1;
+
+        PromoCode pc = new PromoCode();
+        pc.setCode(generateUniqueCode("VIP-"));
+        pc.setDiscountType(req.getDiscountType());
+        pc.setDiscountValue(req.getDiscountValue());
+        pc.setMinimumOrderAmount(req.getMinimumOrderAmount());
+        pc.setMaxUsesTotal(maxUses);
+        pc.setMaxUsesPerCustomer(maxUses);
+        pc.setTargetUserId(user.getId());
+        pc.setExpiresAt(req.getValidityDays() != null && req.getValidityDays() > 0
+                ? Instant.now().plus(req.getValidityDays(), ChronoUnit.DAYS) : null);
+        pc.setDescription(req.getDescription() != null && !req.getDescription().isBlank()
+                ? req.getDescription() : "Personal offer");
+        pc.setActive(true);
+        PromoCode saved = promoCodeRepo.save(pc);
+
+        // Notify only this user.
+        String body = "Use code " + saved.getCode() + " to get " + offerText(saved) + "!";
+        try {
+            String email = authCredentialRepo.findByUserId(user.getId()).stream()
+                    .map(c -> c.getEmail())
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst().orElse(null);
+            if (req.isSendEmail() && email != null) {
+                emailService.sendPromoCodeEmail(email, saved.getCode(), body);
+            }
+            if (req.isSendPush()) {
+                pushService.sendToUser(user.getId(), "A gift for you 🎁", body,
+                        Map.of("promoCode", saved.getCode(), "type", "PROMO"));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to notify user {} of personal code: {}", user.getId(), e.getMessage());
+        }
+        return toResponse(saved);
+    }
+
+    // ── Customer: redeem tokens for a personal coupon ────────────────────────
+
+    public TokenRedemptionInfoResponse getRedemptionInfo(UUID userId) {
+        TokenRedemptionConfig cfg = getOrCreateConfig();
+        Integer remaining = cfg.getMaxRedemptionsPerCustomer() == null ? null
+                : Math.max(0, cfg.getMaxRedemptionsPerCustomer()
+                        - (int) promoCodeRepo.countByTargetUserIdAndRedeemedFromTokensNotNull(userId));
+        return new TokenRedemptionInfoResponse(cfg.isEnabled(), cfg.getTokenCost(),
+                cfg.getDiscountType(), cfg.getDiscountValue(), remaining);
+    }
+
+    @Transactional
+    public RedeemTokensResponse redeemTokens(UUID userId) {
+        TokenRedemptionConfig cfg = getOrCreateConfig();
+        if (!cfg.isEnabled()) {
+            throw new IllegalStateException("Token redemption is currently unavailable");
+        }
+
+        if (cfg.getMaxRedemptionsPerCustomer() != null
+                && promoCodeRepo.countByTargetUserIdAndRedeemedFromTokensNotNull(userId)
+                    >= cfg.getMaxRedemptionsPerCustomer()) {
+            throw new IllegalStateException("You have reached the maximum number of token redemptions");
+        }
+
+        // Atomic conditional debit — guards against concurrent double-spend.
+        int debited = userProfilesRepo.debitTokens(userId, cfg.getTokenCost());
+        if (debited == 0) {
+            throw new IllegalStateException("You don't have enough tokens to redeem");
+        }
+
+        PromoCode pc = new PromoCode();
+        pc.setCode(generateUniqueCode("RWD-"));
+        pc.setDiscountType(cfg.getDiscountType());
+        pc.setDiscountValue(cfg.getDiscountValue());
+        pc.setMinimumOrderAmount(cfg.getMinimumOrderAmount());
+        pc.setMaxUsesTotal(cfg.getMaxUsesPerCoupon());
+        pc.setMaxUsesPerCustomer(cfg.getMaxUsesPerCoupon());
+        pc.setTargetUserId(userId);
+        pc.setRedeemedFromTokens(cfg.getTokenCost());
+        pc.setExpiresAt(cfg.getCouponValidityDays() > 0
+                ? Instant.now().plus(cfg.getCouponValidityDays(), ChronoUnit.DAYS) : null);
+        pc.setDescription("Redeemed for " + cfg.getTokenCost() + " tokens");
+        pc.setActive(true);
+        promoCodeRepo.save(pc);
+
+        int remainingTokens = userProfilesRepo.findByUserId(userId)
+                .map(UserProfiles::getTokens).orElse(0);
+        Integer redemptionsRemaining = cfg.getMaxRedemptionsPerCustomer() == null ? null
+                : Math.max(0, cfg.getMaxRedemptionsPerCustomer()
+                        - (int) promoCodeRepo.countByTargetUserIdAndRedeemedFromTokensNotNull(userId));
+
+        // Best-effort email of the freshly minted code.
+        try {
+            String email = authCredentialRepo.findByUserId(userId).stream()
+                    .map(c -> c.getEmail())
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst().orElse(null);
+            if (email != null) {
+                emailService.sendPromoCodeEmail(email, pc.getCode(), offerText(pc));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to email redeemed code to user {}: {}", userId, e.getMessage());
+        }
+
+        return new RedeemTokensResponse(pc.getCode(), pc.getDiscountType(), pc.getDiscountValue(),
+                pc.getMinimumOrderAmount(), pc.getExpiresAt(), remainingTokens, redemptionsRemaining);
+    }
+
+    // ── Admin: token-redemption configuration ────────────────────────────────
+
+    @Transactional
+    public TokenRedemptionConfig getOrCreateConfig() {
+        return tokenConfigRepo.findTopByOrderByUpdatedAtAsc()
+                .orElseGet(() -> tokenConfigRepo.save(new TokenRedemptionConfig()));
+    }
+
+    @Transactional
+    public TokenRedemptionConfigDto updateConfig(TokenRedemptionConfigDto dto) {
+        validateDiscount(dto.getDiscountType(), dto.getDiscountValue());
+        if (dto.getTokenCost() <= 0) {
+            throw new IllegalArgumentException("Token cost must be greater than 0");
+        }
+        if (dto.getMaxUsesPerCoupon() <= 0) {
+            throw new IllegalArgumentException("Max uses per coupon must be at least 1");
+        }
+        if (dto.getCouponValidityDays() < 0) {
+            throw new IllegalArgumentException("Coupon validity days cannot be negative");
+        }
+        if (dto.getMaxRedemptionsPerCustomer() != null && dto.getMaxRedemptionsPerCustomer() < 0) {
+            throw new IllegalArgumentException("Max redemptions per customer cannot be negative");
+        }
+        TokenRedemptionConfig cfg = getOrCreateConfig();
+        cfg.setEnabled(dto.isEnabled());
+        cfg.setTokenCost(dto.getTokenCost());
+        cfg.setDiscountType(dto.getDiscountType());
+        cfg.setDiscountValue(dto.getDiscountValue());
+        cfg.setMinimumOrderAmount(dto.getMinimumOrderAmount());
+        cfg.setCouponValidityDays(dto.getCouponValidityDays());
+        cfg.setMaxUsesPerCoupon(dto.getMaxUsesPerCoupon());
+        cfg.setMaxRedemptionsPerCustomer(dto.getMaxRedemptionsPerCustomer());
+        return TokenRedemptionConfigDto.from(tokenConfigRepo.save(cfg));
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────────
+
+    private String offerText(PromoCode pc) {
+        return pc.getDiscountType() == DiscountType.PERCENTAGE
+                ? pc.getDiscountValue().stripTrailingZeros().toPlainString() + "% off your next order"
+                : pc.getDiscountValue().stripTrailingZeros().toPlainString() + " off your next order";
+    }
+
+    private String generateUniqueCode(String prefix) {
+        for (int attempt = 0; attempt < 12; attempt++) {
+            StringBuilder sb = new StringBuilder(prefix);
+            for (int i = 0; i < 8; i++) {
+                sb.append(CODE_ALPHABET.charAt(RNG.nextInt(CODE_ALPHABET.length())));
+            }
+            String code = sb.toString();
+            if (!promoCodeRepo.existsByCodeIgnoreCase(code)) {
+                return code;
+            }
+        }
+        throw new IllegalStateException("Could not generate a unique promo code, please retry");
+    }
 
     private void validateDiscount(DiscountType type, BigDecimal value) {
         // Bean Validation already rejects null / <= 0 on the DTO (@NotNull, @DecimalMin("0.01")).
@@ -294,6 +483,7 @@ public class PromoCodeService {
         r.setMaxUsesPerCustomer(pc.getMaxUsesPerCustomer());
         r.setTotalUsed(usageRepo.countByPromoCode(pc));
         r.setExpiresAt(pc.getExpiresAt());
+        r.setTargetUserId(pc.getTargetUserId());
         r.setActive(pc.isActive());
         r.setDescription(pc.getDescription());
         r.setCreatedAt(pc.getCreatedAt());

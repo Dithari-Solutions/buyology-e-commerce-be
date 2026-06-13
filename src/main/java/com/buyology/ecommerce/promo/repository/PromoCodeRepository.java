@@ -8,4 +8,7 @@ import java.util.UUID;
 public interface PromoCodeRepository extends JpaRepository<PromoCode, UUID> {
     Optional<PromoCode> findByCodeIgnoreCaseAndIsActiveTrue(String code);
     boolean existsByCodeIgnoreCase(String code);
+
+    /** How many token-redemption codes this customer has minted (for the per-customer redeem cap). */
+    long countByTargetUserIdAndRedeemedFromTokensNotNull(UUID targetUserId);
 }
