@@ -10,9 +10,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * Partial-update request for a product. Every field is optional — only the
- * fields that are present (non-null) are applied. Variants, specs and colors
- * are out of scope here; media is edited via {@link #removeMediaIds},
+ * fields that are present (non-null) are applied. Variants and colors are out
+ * of scope here; media is edited via {@link #removeMediaIds},
  * {@link #primaryMediaId}, and any uploaded files on the multipart request.
+ * Specs, when present, fully replace the product's existing specifications.
  */
 @Schema(description = "Partial update for a product — only non-null fields are applied")
 public class UpdateProductRequest {
@@ -29,6 +30,11 @@ public class UpdateProductRequest {
 
     @Schema(description = "Partial translations — each language/field is optional")
     private TranslationPatch translations;
+
+    @Schema(description = "Replacement specifications. When present (non-null) the product's existing "
+            + "specs are fully replaced; omit to leave them untouched; an empty list clears all specs. "
+            + "Not allowed while the product has variants.")
+    private List<CreateSpecGroupRequest> specs;
 
     @Schema(description = "IDs of existing media to delete from the product")
     private List<UUID> removeMediaIds;
@@ -116,6 +122,14 @@ public class UpdateProductRequest {
 
     public void setTranslations(TranslationPatch translations) {
         this.translations = translations;
+    }
+
+    public List<CreateSpecGroupRequest> getSpecs() {
+        return specs;
+    }
+
+    public void setSpecs(List<CreateSpecGroupRequest> specs) {
+        this.specs = specs;
     }
 
     public List<UUID> getRemoveMediaIds() {

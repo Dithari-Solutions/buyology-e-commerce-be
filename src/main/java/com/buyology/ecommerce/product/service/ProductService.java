@@ -467,6 +467,18 @@ public class ProductService {
 
         productRepository.save(product);
 
+        // ── Specs: full replacement when provided (null = leave untouched, [] = clear) ──
+        if (request.getSpecs() != null) {
+            // Variants reference spec options by FK; replacing specs would orphan them.
+            if (!variantRepository.findByProductId(id).isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Cannot edit specifications while the product has variants. Remove variants first.");
+            }
+            deleteProductSpecs(id, false); // keep the synthetic color_* group
+            specGroupRepository.flush();
+            saveSpecs(product, request.getSpecs(), new HashMap<>());
+        }
+
         // ── Media: remove ────────────────────────────────────────────────────
         if (request.getRemoveMediaIds() != null) {
             for (UUID mediaId : request.getRemoveMediaIds()) {
@@ -599,18 +611,7 @@ public class ProductService {
         variantRepository.deleteAllInBatch(variants);
 
         // 2. Spec options (with translations) → spec groups (with translations)
-        List<ProductSpecGroup> groups = specGroupRepository.findByProduct_Id(productId);
-        for (ProductSpecGroup group : groups) {
-            List<ProductSpecOption> options = specOptionRepository.findByGroup_Id(group.getId());
-            for (ProductSpecOption option : options) {
-                specOptionTranslationRepository.deleteAllInBatch(
-                        specOptionTranslationRepository.findAllByOption_Id(option.getId()));
-            }
-            specOptionRepository.deleteAllInBatch(options);
-            specGroupTranslationRepository.deleteAllInBatch(
-                    specGroupTranslationRepository.findAllByGroup_Id(group.getId()));
-        }
-        specGroupRepository.deleteAllInBatch(groups);
+        deleteProductSpecs(productId, true);
 
         // 3. Media
         mediaRepository.deleteAllInBatch(mediaRepository.findByProductId(productId));
@@ -627,6 +628,28 @@ public class ProductService {
 
         // 7. Remove media files from Contabo S3
         contaboObjectService.deleteFolder("products/" + productId);
+    }
+
+    /**
+     * Delete a product's per-product spec groups/options (and their translations). Never touches the
+     * shared global spec library. When {@code includeColorGroups} is false the synthetic {@code color_*}
+     * group is preserved (it backs color media/variant options) — used when replacing specs on update.
+     */
+    private void deleteProductSpecs(UUID productId, boolean includeColorGroups) {
+        List<ProductSpecGroup> groups = specGroupRepository.findByProduct_Id(productId).stream()
+                .filter(g -> includeColorGroups || g.getCode() == null || !g.getCode().startsWith("color_"))
+                .toList();
+        for (ProductSpecGroup group : groups) {
+            List<ProductSpecOption> options = specOptionRepository.findByGroup_Id(group.getId());
+            for (ProductSpecOption option : options) {
+                specOptionTranslationRepository.deleteAllInBatch(
+                        specOptionTranslationRepository.findAllByOption_Id(option.getId()));
+            }
+            specOptionRepository.deleteAllInBatch(options);
+            specGroupTranslationRepository.deleteAllInBatch(
+                    specGroupTranslationRepository.findAllByGroup_Id(group.getId()));
+        }
+        specGroupRepository.deleteAllInBatch(groups);
     }
 
     public ResponseEntity<ApiResponse<ProductResponse>> getProductByIdAdmin(UUID id, String lang) {
