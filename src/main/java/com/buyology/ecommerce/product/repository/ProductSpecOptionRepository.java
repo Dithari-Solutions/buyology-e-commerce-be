@@ -2,6 +2,7 @@ package com.buyology.ecommerce.product.repository;
 
 import com.buyology.ecommerce.product.domain.ProductSpecOption;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,6 +14,17 @@ public interface ProductSpecOptionRepository extends JpaRepository<ProductSpecOp
     List<ProductSpecOption> findByGroup_Id(UUID groupId);
 
     List<ProductSpecOption> findByGroup_IdIn(List<UUID> groupIds);
+
+    /** Null product-option links to any global option of the given group, so the group can be deleted. */
+    @Modifying
+    @Query("update ProductSpecOption o set o.globalSpecOption = null "
+            + "where o.globalSpecOption.id in (select opt.id from GlobalSpecOption opt where opt.group.id = :groupId)")
+    void detachByGlobalGroup(@Param("groupId") UUID groupId);
+
+    /** Null product-option links to a single global option, so that option can be deleted. */
+    @Modifying
+    @Query("update ProductSpecOption o set o.globalSpecOption = null where o.globalSpecOption.id = :optionId")
+    void detachByGlobalOption(@Param("optionId") UUID optionId);
 
     /**
      * Returns distinct non-blank values for a spec group code across all active products.

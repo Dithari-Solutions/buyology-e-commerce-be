@@ -8,10 +8,13 @@ import com.buyology.ecommerce.product.domain.GlobalSpecOption;
 import com.buyology.ecommerce.product.domain.GlobalSpecOptionTranslation;
 import com.buyology.ecommerce.product.dto.CreateGlobalSpecGroupRequest;
 import com.buyology.ecommerce.product.dto.GlobalSpecGroupResponse;
+import com.buyology.ecommerce.product.dto.UpdateSpecGroupRequest;
 import com.buyology.ecommerce.product.repository.GlobalSpecGroupRepository;
 import com.buyology.ecommerce.product.repository.GlobalSpecGroupTranslationRepository;
 import com.buyology.ecommerce.product.repository.GlobalSpecOptionRepository;
 import com.buyology.ecommerce.product.repository.GlobalSpecOptionTranslationRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecGroupRepository;
+import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,16 +29,22 @@ public class GlobalSpecService {
     private final GlobalSpecGroupTranslationRepository groupTranslationRepository;
     private final GlobalSpecOptionRepository optionRepository;
     private final GlobalSpecOptionTranslationRepository optionTranslationRepository;
+    private final ProductSpecGroupRepository productSpecGroupRepository;
+    private final ProductSpecOptionRepository productSpecOptionRepository;
 
     public GlobalSpecService(
             GlobalSpecGroupRepository groupRepository,
             GlobalSpecGroupTranslationRepository groupTranslationRepository,
             GlobalSpecOptionRepository optionRepository,
-            GlobalSpecOptionTranslationRepository optionTranslationRepository) {
+            GlobalSpecOptionTranslationRepository optionTranslationRepository,
+            ProductSpecGroupRepository productSpecGroupRepository,
+            ProductSpecOptionRepository productSpecOptionRepository) {
         this.groupRepository = groupRepository;
         this.groupTranslationRepository = groupTranslationRepository;
         this.optionRepository = optionRepository;
         this.optionTranslationRepository = optionTranslationRepository;
+        this.productSpecGroupRepository = productSpecGroupRepository;
+        this.productSpecOptionRepository = productSpecOptionRepository;
     }
 
     @Transactional
@@ -143,13 +152,89 @@ public class GlobalSpecService {
     public ResponseEntity<ApiResponse<Void>> deleteOption(UUID optionId) {
         GlobalSpecOption option = optionRepository.findById(optionId)
                 .orElseThrow(() -> new IllegalArgumentException("Global spec option not found: " + optionId));
+        productSpecOptionRepository.detachByGlobalOption(option.getId());
         optionTranslationRepository.deleteAll(
                 optionTranslationRepository.findAllByOption_Id(option.getId()));
         optionRepository.delete(option);
         return ApiResponse.success(null, "Option deleted successfully");
     }
 
+    /** Edit a group's display names (the code is immutable). */
+    @Transactional
+    public ResponseEntity<ApiResponse<GlobalSpecGroupResponse>> updateGroup(
+            UUID groupId, UpdateSpecGroupRequest request) {
+        GlobalSpecGroup group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new IllegalArgumentException("Global spec group not found: " + groupId));
+        upsertGroupTranslation(group, "AZ", request.getNameAz());
+        upsertGroupTranslation(group, "EN", request.getNameEn());
+        upsertGroupTranslation(group, "AR", request.getNameAr());
+
+        List<GlobalSpecGroupTranslation> groupTr = groupTranslationRepository.findAllByGroup_Id(groupId);
+        List<GlobalSpecGroupResponse.OptionDto> opts = optionRepository
+                .findByGroupIdOrderByDisplayOrderAscCreatedAtAsc(groupId).stream()
+                .map(o -> toOptionDto(o, optionTranslationRepository.findAllByOption_Id(o.getId())))
+                .toList();
+        return ApiResponse.success(toGroupResponse(group, groupTr, opts), "Global spec group updated");
+    }
+
+    /** Delete a whole group (its options + translations). Products keep their copied specs. */
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> deleteGroup(UUID groupId) {
+        GlobalSpecGroup group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new IllegalArgumentException("Global spec group not found: " + groupId));
+
+        // Null product references first so the FK constraints don't block the delete.
+        productSpecOptionRepository.detachByGlobalGroup(groupId);
+        productSpecGroupRepository.detachByGlobalGroup(groupId);
+
+        List<GlobalSpecOption> options = optionRepository
+                .findByGroupIdOrderByDisplayOrderAscCreatedAtAsc(groupId);
+        for (GlobalSpecOption o : options) {
+            optionTranslationRepository.deleteAll(
+                    optionTranslationRepository.findAllByOption_Id(o.getId()));
+        }
+        optionRepository.deleteAll(options);
+        groupTranslationRepository.deleteAll(groupTranslationRepository.findAllByGroup_Id(groupId));
+        groupRepository.delete(group);
+        return ApiResponse.success(null, "Global spec group deleted");
+    }
+
+    /** Edit an existing option's unit + value translations. */
+    @Transactional
+    public ResponseEntity<ApiResponse<GlobalSpecGroupResponse.OptionDto>> updateOption(
+            UUID optionId, CreateGlobalSpecGroupRequest.OptionRequest request) {
+        GlobalSpecOption option = optionRepository.findById(optionId)
+                .orElseThrow(() -> new IllegalArgumentException("Global spec option not found: " + optionId));
+        option.setUnit(request.getUnit());
+        if (request.getDisplayOrder() != null) {
+            option.setDisplayOrder(request.getDisplayOrder());
+        }
+        optionRepository.save(option);
+        upsertOptionTranslation(option, Language.AZ, request.getValueAz());
+        upsertOptionTranslation(option, Language.EN, request.getValueEn());
+        upsertOptionTranslation(option, Language.AR, request.getValueAr());
+
+        List<GlobalSpecOptionTranslation> tr = optionTranslationRepository.findAllByOption_Id(optionId);
+        return ApiResponse.success(toOptionDto(option, tr), "Option updated successfully");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private void upsertGroupTranslation(GlobalSpecGroup group, String language, String name) {
+        GlobalSpecGroupTranslation t = groupTranslationRepository
+                .findByGroup_IdAndLanguageIgnoreCase(group.getId(), language)
+                .orElseGet(() -> new GlobalSpecGroupTranslation(group, language, name));
+        t.setName(name);
+        groupTranslationRepository.save(t);
+    }
+
+    private void upsertOptionTranslation(GlobalSpecOption option, Language language, String value) {
+        GlobalSpecOptionTranslation t = optionTranslationRepository
+                .findByOption_IdAndLanguage(option.getId(), language)
+                .orElseGet(() -> new GlobalSpecOptionTranslation(option, language, value));
+        t.setValue(value);
+        optionTranslationRepository.save(t);
+    }
 
     private GlobalSpecGroupResponse.OptionDto saveOption(
             GlobalSpecGroup group, CreateGlobalSpecGroupRequest.OptionRequest req, int displayOrder) {

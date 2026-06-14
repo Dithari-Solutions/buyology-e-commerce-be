@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.product.dto.CreateGlobalSpecGroupRequest;
 import com.buyology.ecommerce.product.dto.GlobalSpecGroupResponse;
 import com.buyology.ecommerce.product.dto.ReorderSpecOptionsRequest;
+import com.buyology.ecommerce.product.dto.UpdateSpecGroupRequest;
 import com.buyology.ecommerce.product.service.GlobalSpecService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -40,12 +41,34 @@ public class AdminGlobalSpecController {
         return globalSpecService.createGroup(request);
     }
 
+    @Operation(summary = "Edit a global spec group's display names")
+    @PutMapping("/{groupId}")
+    public ResponseEntity<ApiResponse<GlobalSpecGroupResponse>> updateGroup(
+            @PathVariable UUID groupId,
+            @Valid @RequestBody UpdateSpecGroupRequest request) {
+        return globalSpecService.updateGroup(groupId, request);
+    }
+
+    @Operation(summary = "Delete a global spec group (and its options). Products keep their copied specs.")
+    @DeleteMapping("/{groupId}")
+    public ResponseEntity<ApiResponse<Void>> deleteGroup(@PathVariable UUID groupId) {
+        return globalSpecService.deleteGroup(groupId);
+    }
+
     @Operation(summary = "Add an option to an existing global spec group")
     @PostMapping("/{groupId}/options")
     public ResponseEntity<ApiResponse<GlobalSpecGroupResponse.OptionDto>> addOption(
             @PathVariable UUID groupId,
             @Valid @RequestBody CreateGlobalSpecGroupRequest.OptionRequest request) {
         return globalSpecService.addOption(groupId, request);
+    }
+
+    @Operation(summary = "Edit an existing global spec option (value + unit)")
+    @PutMapping("/options/{optionId}")
+    public ResponseEntity<ApiResponse<GlobalSpecGroupResponse.OptionDto>> updateOption(
+            @PathVariable UUID optionId,
+            @Valid @RequestBody CreateGlobalSpecGroupRequest.OptionRequest request) {
+        return globalSpecService.updateOption(optionId, request);
     }
 
     @Operation(summary = "Delete a global spec option")
