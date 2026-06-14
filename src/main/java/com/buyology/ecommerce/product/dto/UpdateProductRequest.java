@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.buyology.ecommerce.product.domain.Product.AvailabilityStatus;
 import com.buyology.ecommerce.product.domain.Product.ProductType;
 import com.buyology.ecommerce.product.domain.Product.RefurbGrade;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
@@ -16,6 +17,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * Specs, when present, fully replace the product's existing specifications.
  */
 @Schema(description = "Partial update for a product — only non-null fields are applied")
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class UpdateProductRequest {
 
     private UUID categoryId;

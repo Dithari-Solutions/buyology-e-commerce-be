@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.dto;
 import com.buyology.ecommerce.product.domain.Product.AvailabilityStatus;
 import com.buyology.ecommerce.product.domain.Product.ProductType;
 import com.buyology.ecommerce.product.domain.Product.RefurbGrade;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Schema(description = "Request body for creating a new product with translations, media, variants, and accessories")
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateProductRequest {
 
     @NotNull(message = "Category ID is required")
