@@ -465,7 +465,23 @@ public class ProductService {
             applyTranslationPatch(product, request.getTranslations());
         }
 
+        // ── SKU (optional; must stay unique) ─────────────────────────────────
+        if (request.getSku() != null && !request.getSku().isBlank()) {
+            String newSku = request.getSku().trim();
+            if (!newSku.equals(product.getSku()) && productRepository.existsBySku(newSku)) {
+                throw new IllegalArgumentException("Product SKU already exists: " + newSku);
+            }
+            product.setSku(newSku);
+        }
+
         productRepository.save(product);
+
+        // ── Accessories: full replacement when provided ──────────────────────
+        if (request.getAccessoryIds() != null) {
+            accessoryRepository.deleteAllInBatch(accessoryRepository.findByProductId(id));
+            accessoryRepository.flush();
+            saveAccessories(product, request.getAccessoryIds());
+        }
 
         // ── Specs: full replacement when provided (null = leave untouched, [] = clear) ──
         if (request.getSpecs() != null) {

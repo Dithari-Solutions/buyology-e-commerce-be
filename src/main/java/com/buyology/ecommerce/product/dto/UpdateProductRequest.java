@@ -30,6 +30,12 @@ public class UpdateProductRequest {
     private Boolean isSuperDeal;
     private Boolean isLimitedStock;
 
+    @Schema(description = "New SKU (optional). Must stay globally unique. Blank/omitted leaves it unchanged.")
+    private String sku;
+
+    @Schema(description = "Replacement accessory product IDs. When present (non-null) the links are fully replaced; omit to leave them untouched.")
+    private List<UUID> accessoryIds;
+
     @Schema(description = "Partial translations — each language/field is optional")
     private TranslationPatch translations;
 
@@ -68,6 +74,22 @@ public class UpdateProductRequest {
 
     public void setProductType(ProductType productType) {
         this.productType = productType;
+    }
+
+    public String getSku() {
+        return sku;
+    }
+
+    public void setSku(String sku) {
+        this.sku = sku;
+    }
+
+    public List<UUID> getAccessoryIds() {
+        return accessoryIds;
+    }
+
+    public void setAccessoryIds(List<UUID> accessoryIds) {
+        this.accessoryIds = accessoryIds;
     }
 
     public String getStatus() {
