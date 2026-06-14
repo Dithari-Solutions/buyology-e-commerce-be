@@ -21,6 +21,10 @@ public class ProductCategory {
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
+    /** Optional icon key (language-agnostic) chosen from the predefined set, shown in the storefront menu. */
+    @Column(name = "icon", length = 50)
+    private String icon;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -78,6 +82,14 @@ public class ProductCategory {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
     }
 
     public Instant getCreatedAt() {

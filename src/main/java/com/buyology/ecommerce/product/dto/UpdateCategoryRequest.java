@@ -15,6 +15,9 @@ public class UpdateCategoryRequest {
     @Schema(description = "Category status", example = "ACTIVE", allowableValues = {"ACTIVE", "INACTIVE"})
     private String status;
 
+    @Schema(description = "Optional icon key from the predefined set. Pass an empty string to clear it.", example = "laptop", nullable = true)
+    private String icon;
+
     @Schema(description = "Updated translations. If provided, all language fields inside must be filled.")
     private Translations translations;
 
@@ -98,6 +101,9 @@ public class UpdateCategoryRequest {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getIcon() { return icon; }
+    public void setIcon(String icon) { this.icon = icon; }
 
     public Translations getTranslations() { return translations; }
     public void setTranslations(Translations translations) { this.translations = translations; }

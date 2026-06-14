@@ -649,6 +649,21 @@ public class ProductService {
         return ApiResponse.success(response, "Product fetched successfully");
     }
 
+    /**
+     * Resolve a product by slug regardless of which language that slug belongs to, then render
+     * it in the requested language. Fixes "not found" when the URL keeps the source-language
+     * slug after a language switch (slugs are per-language).
+     */
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductBySlugPublic(
+            String slug, String lang, String countryCode, String currency, Double lat, Double lng) {
+        UUID productId = translationRepository.findActiveBySlugAnyLang(slug).stream()
+                .findFirst()
+                .map(t -> t.getProduct().getId())
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Product not found for slug: " + slug));
+        return getProductByIdPublic(productId, lang, countryCode, currency, lat, lng);
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getRelatedProducts(
             UUID productId, String lang, String countryCode, String currency, Double lat, Double lng) {
         Product product = productRepository.findById(productId)
@@ -891,12 +906,20 @@ public class ProductService {
     // ========================
 
     private ProductResponse toResponse(Product product, String lang, boolean includeStatus) {
-        List<ProductTranslation> translations = translationRepository.findByProductId(product.getId())
-                .stream()
+        List<ProductTranslation> all = translationRepository.findByProductId(product.getId());
+        List<ProductTranslation> translations = all.stream()
                 .filter(t -> t.getLanguage().equalsIgnoreCase(lang))
                 .toList();
+        // Fall back to EN (then any) so a product missing the requested-language
+        // translation still renders instead of 404-ing the whole detail page.
         if (translations.isEmpty()) {
-            throw new IllegalArgumentException("No translation found for language: " + lang);
+            translations = all.stream().filter(t -> "EN".equalsIgnoreCase(t.getLanguage())).toList();
+        }
+        if (translations.isEmpty()) {
+            translations = all;
+        }
+        if (translations.isEmpty()) {
+            throw new IllegalArgumentException("No translation found for product: " + product.getId());
         }
 
         // Product-level media (not linked to a color)

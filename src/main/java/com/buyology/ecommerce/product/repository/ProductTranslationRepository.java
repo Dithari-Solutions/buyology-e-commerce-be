@@ -17,6 +17,10 @@ public interface ProductTranslationRepository extends JpaRepository<ProductTrans
 
     Optional<ProductTranslation> findByLanguageAndSlug(String language, String slug);
 
+    /** Resolve a product by its slug in ANY language (slugs are per-language), restricted to active products. */
+    @Query("SELECT t FROM ProductTranslation t WHERE t.slug = :slug AND t.product.status = 'ACTIVE' ORDER BY t.language")
+    List<ProductTranslation> findActiveBySlugAnyLang(@Param("slug") String slug);
+
     @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END " +
            "FROM ProductTranslation t " +
            "WHERE t.language = :language AND t.slug = :slug AND t.product.status != 'DELETED'")

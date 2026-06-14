@@ -87,6 +87,18 @@ public class ProductController {
         return productService.getProductByIdPublic(productId, lang, countryCode, currency, lat, lng);
     }
 
+    @Operation(summary = "Get a product by slug (resolved across languages) in the requested language")
+    @GetMapping("/by-slug")
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductBySlug(
+            @RequestParam String slug,
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productService.getProductBySlugPublic(slug, lang, countryCode, currency, lat, lng);
+    }
+
     @Operation(summary = "Get related products (same category, popular)")
     @GetMapping("/{productId}/related")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getRelatedProducts(

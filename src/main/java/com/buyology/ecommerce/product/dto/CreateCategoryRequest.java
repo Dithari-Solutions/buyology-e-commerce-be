@@ -20,6 +20,9 @@ public class CreateCategoryRequest {
     @Schema(description = "Category status", example = "ACTIVE", defaultValue = "ACTIVE")
     private String status = "ACTIVE";
 
+    @Schema(description = "Optional icon key from the predefined set", example = "laptop", nullable = true)
+    private String icon;
+
     @NotNull(message = "Translations are required")
     @Valid
     @Schema(description = "Required translations in Azerbaijani, English, and Arabic")
@@ -43,6 +46,14 @@ public class CreateCategoryRequest {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
     }
 
     public CategoryTranslationRequest getTranslations() {

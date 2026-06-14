@@ -56,6 +56,7 @@ public class ProductCategoryService {
 
         // 3. Persist the category
         ProductCategory category = new ProductCategory(parent, request.getStatus());
+        category.setIcon(request.getIcon());
         ProductCategory savedCategory = categoryRepository.save(category);
 
         // 4. Persist translations for AZ, EN, and AR
@@ -79,20 +80,24 @@ public class ProductCategoryService {
 
         List<CategoryLocalizedResponse> responses = categoryRepository.findAll().stream()
                 .map(category -> {
+                    // Fall back to EN so a category missing the requested-language translation
+                    // (e.g. AR) still appears in the menu instead of failing the whole list.
                     ProductCategoryTranslation tr = translationRepository
                             .findByCategoryIdAndLanguage(category.getId(), lang.name())
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "Missing " + lang + " translation for category: " + category.getId()));
+                            .or(() -> translationRepository.findByCategoryIdAndLanguage(category.getId(), "EN"))
+                            .orElse(null);
 
-                    return new CategoryLocalizedResponse(
+                    CategoryLocalizedResponse resp = new CategoryLocalizedResponse(
                             category.getId(),
                             category.getParent() != null ? category.getParent().getId() : null,
                             category.getStatus(),
-                            tr.getName(),
-                            tr.getDescription(),
-                            tr.getSlug(),
+                            tr != null ? tr.getName() : null,
+                            tr != null ? tr.getDescription() : null,
+                            tr != null ? tr.getSlug() : null,
                             category.getCreatedAt(),
                             category.getUpdatedAt());
+                    resp.setIcon(category.getIcon());
+                    return resp;
                 })
                 .toList();
 
@@ -130,6 +135,11 @@ public class ProductCategoryService {
         // Update status if provided
         if (request.getStatus() != null) {
             category.setStatus(request.getStatus());
+        }
+
+        // Update icon if provided ("" clears it back to none)
+        if (request.getIcon() != null) {
+            category.setIcon(request.getIcon().isBlank() ? null : request.getIcon());
         }
 
         categoryRepository.save(category);
@@ -221,6 +231,7 @@ public class ProductCategoryService {
         response.setId(category.getId());
         response.setParentId(category.getParent() != null ? category.getParent().getId() : null);
         response.setStatus(category.getStatus());
+        response.setIcon(category.getIcon());
         response.setCreatedAt(category.getCreatedAt());
         response.setUpdatedAt(category.getUpdatedAt());
         response.setTranslations(translationDtos);

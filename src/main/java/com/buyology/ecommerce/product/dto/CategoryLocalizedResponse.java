@@ -8,6 +8,7 @@ public class CategoryLocalizedResponse {
     private UUID id;
     private UUID parentId;
     private String status;
+    private String icon;
     private String name;
     private String description;
     private String slug;
@@ -38,6 +39,9 @@ public class CategoryLocalizedResponse {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getIcon() { return icon; }
+    public void setIcon(String icon) { this.icon = icon; }
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }

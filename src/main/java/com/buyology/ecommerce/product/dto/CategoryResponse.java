@@ -15,6 +15,7 @@ public class CategoryResponse {
     private UUID parentId;
 
     private String status;
+    private String icon;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -101,6 +102,14 @@ public class CategoryResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
     }
 
     public Instant getCreatedAt() {
