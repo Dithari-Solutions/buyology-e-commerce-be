@@ -8,7 +8,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
-import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.IOException;
@@ -205,35 +204,54 @@ public class ContaboObjectService {
             cleanKey = cleanKey.substring(0, queryIdx);
         }
 
-        // Reuse a recently-signed URL so the same object yields the same URL
-        // across requests (browser-cacheable). Re-sign only after the cache
-        // window, which is well inside the signature's validity.
-        Instant now = Instant.now();
-        CachedUrl cached = presignedUrlCache.get(cleanKey);
-        if (cached != null && cached.expiresAt().isAfter(now)) {
-            return cached.url();
+        // Only product catalog images get the long-lived, browser-cacheable URL.
+        // Other assets (avatars, refund evidence, stories, banners, documents)
+        // are MUTABLE — a user can replace an avatar at the same key — so they
+        // keep the original fresh-presign-per-call behavior with no long cache.
+        if (!cleanKey.startsWith("products/")) {
+            return presignGet(cleanKey, null, Duration.ofHours(2));
         }
 
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                .bucket(properties.getBucketName())
-                .key(cleanKey)
-                // Make the GET response tell the browser to cache the image bytes.
-                .responseCacheControl(IMAGE_CACHE_CONTROL)
-                .build();
+        final String productKey = cleanKey;
+        final Instant now = Instant.now();
 
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(PRESIGN_SIGNATURE_TTL)
-                .getObjectRequest(getObjectRequest)
-                .build();
-
-        PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
-        String url = presignedRequest.url().toString();
-
+        // Bound memory: sweep expired entries once the cache grows past the cap.
         if (presignedUrlCache.size() > PRESIGN_CACHE_MAX_ENTRIES) {
             presignedUrlCache.values().removeIf(c -> c.expiresAt().isBefore(now));
         }
-        presignedUrlCache.put(cleanKey, new CachedUrl(url, now.plus(PRESIGN_CACHE_TTL)));
-        return url;
+
+        // compute() runs the remap atomically per key, so concurrent misses sign
+        // the URL exactly once (presigning is local/no network) and reuse it
+        // across requests until the cache window lapses — keeping the URL (and
+        // therefore the browser's image cache) byte-identical.
+        CachedUrl entry = presignedUrlCache.compute(productKey, (k, existing) -> {
+            if (existing != null && existing.expiresAt().isAfter(now)) {
+                return existing;
+            }
+            String signed = presignGet(k, IMAGE_CACHE_CONTROL, PRESIGN_SIGNATURE_TTL);
+            return new CachedUrl(signed, now.plus(PRESIGN_CACHE_TTL));
+        });
+        return entry.url();
+    }
+
+    /**
+     * Signs a GET URL for an object key. When {@code cacheControl} is non-null it
+     * is attached as the response's Cache-Control so the browser caches the bytes.
+     */
+    private String presignGet(String cleanKey, String cacheControl, Duration signatureTtl) {
+        GetObjectRequest.Builder getObjectRequest = GetObjectRequest.builder()
+                .bucket(properties.getBucketName())
+                .key(cleanKey);
+        if (cacheControl != null) {
+            getObjectRequest.responseCacheControl(cacheControl);
+        }
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(signatureTtl)
+                .getObjectRequest(getObjectRequest.build())
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
     /**
