@@ -23,6 +23,9 @@ public class ProductResponse {
     private String availabilityStatus;
     private Boolean isSuperDeal;
     private Boolean isLimitedStock;
+    /** Admin-managed stock count; the storefront shows an urgency message when low (< 5). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer stockQuantity;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -310,6 +313,8 @@ public class ProductResponse {
     public void setIsSuperDeal(Boolean isSuperDeal) { this.isSuperDeal = isSuperDeal; }
     public Boolean getIsLimitedStock() { return isLimitedStock; }
     public void setIsLimitedStock(Boolean isLimitedStock) { this.isLimitedStock = isLimitedStock; }
+    public Integer getStockQuantity() { return stockQuantity; }
+    public void setStockQuantity(Integer stockQuantity) { this.stockQuantity = stockQuantity; }
     public String getProductType() { return productType; }
     public void setProductType(String productType) { this.productType = productType; }
     public Boolean getIsRefurbished() { return isRefurbished; }

@@ -308,6 +308,15 @@ public class OrderService {
                 }
             }
 
+            // Soft-decrement the product's admin-managed display stock (drives the
+            // storefront's "almost sold out" urgency). Floored at 0; never blocks the
+            // order. The managed entity flushes on commit.
+            Product orderedProduct = cartItem.getProduct();
+            if (orderedProduct.getStockQuantity() != null) {
+                orderedProduct.setStockQuantity(
+                        Math.max(0, orderedProduct.getStockQuantity() - cartItem.getQuantity()));
+            }
+
             OrderItem item = new OrderItem();
             item.setOrder(order);
             item.setProductId(cartItem.getProduct().getId());

@@ -29,6 +29,7 @@ public class UpdateProductRequest {
     private AvailabilityStatus availabilityStatus;
     private Boolean isSuperDeal;
     private Boolean isLimitedStock;
+    private Integer stockQuantity;
 
     @Schema(description = "New SKU (optional). Must stay globally unique. Blank/omitted leaves it unchanged.")
     private String sku;
@@ -138,6 +139,14 @@ public class UpdateProductRequest {
 
     public void setIsLimitedStock(Boolean isLimitedStock) {
         this.isLimitedStock = isLimitedStock;
+    }
+
+    public Integer getStockQuantity() {
+        return stockQuantity;
+    }
+
+    public void setStockQuantity(Integer stockQuantity) {
+        this.stockQuantity = stockQuantity;
     }
 
     public TranslationPatch getTranslations() {

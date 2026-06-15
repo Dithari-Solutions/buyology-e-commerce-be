@@ -31,6 +31,9 @@ public class CreateProductRequest {
     @Schema(description = "Mark product as limited stock", defaultValue = "false")
     private Boolean isLimitedStock = false;
 
+    @Schema(description = "Available stock count. Null = not tracked; < 5 shows a low-stock urgency message")
+    private Integer stockQuantity;
+
     @NotNull(message = "Product type is required")
     @Schema(description = "Type of the product", allowableValues = {"SIMPLE", "DIY", "ACCESSORY"})
     private ProductType productType;
@@ -190,5 +193,13 @@ public class CreateProductRequest {
 
     public void setIsLimitedStock(Boolean isLimitedStock) {
         this.isLimitedStock = isLimitedStock;
+    }
+
+    public Integer getStockQuantity() {
+        return stockQuantity;
+    }
+
+    public void setStockQuantity(Integer stockQuantity) {
+        this.stockQuantity = stockQuantity;
     }
 }

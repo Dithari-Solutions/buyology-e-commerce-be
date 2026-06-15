@@ -46,6 +46,11 @@ public class Product {
     @Column(name = "is_limited_stock", nullable = false)
     private Boolean isLimitedStock = false;
 
+    // Admin-managed stock count. Null = not tracked. Drives the storefront's
+    // low-stock urgency message (shown when 0 < stockQuantity < 5).
+    @Column(name = "stock_quantity")
+    private Integer stockQuantity;
+
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
@@ -257,6 +262,14 @@ public class Product {
 
     public void setIsLimitedStock(Boolean isLimitedStock) {
         this.isLimitedStock = isLimitedStock;
+    }
+
+    public Integer getStockQuantity() {
+        return stockQuantity;
+    }
+
+    public void setStockQuantity(Integer stockQuantity) {
+        this.stockQuantity = stockQuantity;
     }
 
     public UUID getSupplierId() { return supplierId; }

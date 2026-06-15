@@ -247,6 +247,7 @@ public class ProductService {
                 request.getAvailabilityStatus(),
                 request.getIsSuperDeal(),
                 request.getIsLimitedStock());
+        product.setStockQuantity(request.getStockQuantity());
         Product savedProduct = productRepository.save(product);
 
         // 5. Save translations
@@ -456,6 +457,9 @@ public class ProductService {
         }
         if (request.getIsLimitedStock() != null) {
             product.setIsLimitedStock(request.getIsLimitedStock());
+        }
+        if (request.getStockQuantity() != null) {
+            product.setStockQuantity(request.getStockQuantity());
         }
         if (request.getIsRefurbished() != null) {
             product.setIsRefurbished(request.getIsRefurbished());
@@ -1910,6 +1914,7 @@ public class ProductService {
         response.setRefurbGrade(product.getRefurbGrade() != null ? product.getRefurbGrade().name() : null);
         response.setSku(product.getSku());
         response.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
+        response.setStockQuantity(product.getStockQuantity());
         response.setIsSuperDeal(product.getIsSuperDeal());
         response.setIsLimitedStock(product.getIsLimitedStock());
         if (includeStatus) {
