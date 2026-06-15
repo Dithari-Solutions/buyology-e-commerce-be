@@ -109,6 +109,7 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/category/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/brand").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/countries/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/currency/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/**").permitAll()
                         // Public return/refund policy (window days) for the storefront. The
                         // admin read/write lives under /api/admin/refund-settings (authenticated).
