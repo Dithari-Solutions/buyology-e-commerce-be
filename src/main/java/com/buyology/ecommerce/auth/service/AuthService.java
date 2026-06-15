@@ -383,9 +383,11 @@ public class AuthService {
             Optional<AuthCredentials> existing = authCredentialRepository
                     .findByEmailAndProvider(request.getEmail(), "LOCAL");
             if (existing.isEmpty()) {
+                // Customer sign-in surfaces "no account" so the app can prompt to sign up.
                 loginAttemptService.recordFailure(request.getEmail());
-                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "invalid_credentials");
-                return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+                auditService.logFailure("AUTH_LOGIN", "AuthCredentials", request.getEmail(), "email_not_registered");
+                return ApiResponse.failure(HttpStatus.NOT_FOUND,
+                        "No account found with this email. Please sign up first.");
             }
 
             AuthCredentials authCredentials = existing.get();
