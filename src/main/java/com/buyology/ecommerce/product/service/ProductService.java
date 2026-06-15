@@ -813,24 +813,18 @@ public class ProductService {
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
             ProductFilterRequest filter, String lang, String countryCode, String currency, Double lat, Double lng) {
-        // The price bounds arrive in the user's DISPLAY currency (matching the slider, which
-        // the filters endpoint converted). storePrice is stored in the country's native
-        // currency, so convert the bounds back to native before the comparison.
-        if (countryCode != null && !countryCode.isBlank() && currency != null && !currency.isBlank()
-                && (filter.getMinPrice() != null || filter.getMaxPrice() != null)) {
-            Country country = countryRepository.findByCode(countryCode.toUpperCase()).orElse(null);
-            if (country != null && country.getCurrency() != null
-                    && !currency.equalsIgnoreCase(country.getCurrency())) {
-                if (filter.getMinPrice() != null) {
-                    filter.setMinPrice(currencyExchangeService.convert(
-                            filter.getMinPrice(), currency.toUpperCase(), country.getCurrency()));
-                }
-                if (filter.getMaxPrice() != null) {
-                    filter.setMaxPrice(currencyExchangeService.convert(
-                            filter.getMaxPrice(), currency.toUpperCase(), country.getCurrency()));
-                }
-            }
-        }
+        // The price bounds arrive in the user's DISPLAY currency (matching the slider).
+        // storePrice in store_products is in each store's NATIVE currency, and the same
+        // product can be listed in several stores/countries — so an EXISTS predicate on
+        // native storePrice can match a different store than the one whose converted
+        // price we actually show, leaking out-of-range items. Instead, drop the DB-level
+        // price predicate and filter on the resolved DISPLAY price after country pricing,
+        // so the range matches exactly what the user sees.
+        BigDecimal minPrice = filter.getMinPrice();
+        BigDecimal maxPrice = filter.getMaxPrice();
+        filter.setMinPrice(null);
+        filter.setMaxPrice(null);
+
         List<Product> products = productRepository.findAll(ProductSpecification.from(filter)).stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
                 .toList();
@@ -847,8 +841,38 @@ public class ProductService {
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
+        responses = applyPriceRange(responses, minPrice, maxPrice);
         responses = applySort(responses, filter.getSort());
         return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    /**
+     * Keeps only responses whose resolved DISPLAY price (storePrice, already converted
+     * to the display currency) falls within [min, max]. Bounds are in the display
+     * currency — the same currency the storefront slider uses — so the filter matches
+     * exactly the price shown on each card. Products without a resolvable price are
+     * dropped when a bound is set, since they can't be placed in a price range.
+     */
+    private List<ProductResponse> applyPriceRange(List<ProductResponse> responses,
+            BigDecimal min, BigDecimal max) {
+        if (min == null && max == null) {
+            return responses;
+        }
+        return responses.stream()
+                .filter(r -> {
+                    BigDecimal price = r.getStorePrice();
+                    if (price == null) {
+                        return false;
+                    }
+                    if (min != null && price.compareTo(min) < 0) {
+                        return false;
+                    }
+                    if (max != null && price.compareTo(max) > 0) {
+                        return false;
+                    }
+                    return true;
+                })
+                .toList();
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProductsElastic(
