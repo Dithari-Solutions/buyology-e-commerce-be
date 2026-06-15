@@ -13,7 +13,10 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -24,6 +27,23 @@ public class ContaboObjectService {
     // editorial) and users/ (avatars), refunds/ (evidence), documents (licenses)
     // must NOT be altered.
     private static final List<String> WATERMARK_PREFIXES = List.of("products/");
+
+    // Presigned GET URLs are signed with the current timestamp, so a fresh call
+    // produces a DIFFERENT URL for the same object every time — which busts the
+    // browser's image cache on every page load. We sign once and reuse the same
+    // URL for a window comfortably shorter than the signature validity, so the
+    // URL stays byte-identical across requests and the browser can cache the
+    // image. The signed request also carries Cache-Control so the bytes are
+    // actually cached client-side.
+    private static final Duration PRESIGN_SIGNATURE_TTL = Duration.ofHours(6);
+    private static final Duration PRESIGN_CACHE_TTL = Duration.ofHours(4);
+    private static final String IMAGE_CACHE_CONTROL =
+            "public, max-age=" + Duration.ofHours(6).toSeconds();
+    private static final int PRESIGN_CACHE_MAX_ENTRIES = 20_000;
+
+    private record CachedUrl(String url, Instant expiresAt) {}
+
+    private final Map<String, CachedUrl> presignedUrlCache = new ConcurrentHashMap<>();
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
@@ -185,18 +205,35 @@ public class ContaboObjectService {
             cleanKey = cleanKey.substring(0, queryIdx);
         }
 
+        // Reuse a recently-signed URL so the same object yields the same URL
+        // across requests (browser-cacheable). Re-sign only after the cache
+        // window, which is well inside the signature's validity.
+        Instant now = Instant.now();
+        CachedUrl cached = presignedUrlCache.get(cleanKey);
+        if (cached != null && cached.expiresAt().isAfter(now)) {
+            return cached.url();
+        }
+
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(properties.getBucketName())
                 .key(cleanKey)
+                // Make the GET response tell the browser to cache the image bytes.
+                .responseCacheControl(IMAGE_CACHE_CONTROL)
                 .build();
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofHours(2)) // URL valid for 2 hours
+                .signatureDuration(PRESIGN_SIGNATURE_TTL)
                 .getObjectRequest(getObjectRequest)
                 .build();
 
         PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
-        return presignedRequest.url().toString();
+        String url = presignedRequest.url().toString();
+
+        if (presignedUrlCache.size() > PRESIGN_CACHE_MAX_ENTRIES) {
+            presignedUrlCache.values().removeIf(c -> c.expiresAt().isBefore(now));
+        }
+        presignedUrlCache.put(cleanKey, new CachedUrl(url, now.plus(PRESIGN_CACHE_TTL)));
+        return url;
     }
 
     /**
