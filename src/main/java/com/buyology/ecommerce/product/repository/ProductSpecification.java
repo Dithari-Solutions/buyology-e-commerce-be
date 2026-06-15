@@ -48,8 +48,10 @@ public class ProductSpecification {
                 predicates.add(cb.equal(root.get("isRefurbished"), isRefurbished));
             }
 
-            // Brand
-            if (filter.getBrandId() != null) {
+            // Brand — multi-select (brandIds) preferred; single brandId kept for legacy callers.
+            if (filter.getBrandIds() != null && !filter.getBrandIds().isEmpty()) {
+                predicates.add(root.get("brand").get("id").in(filter.getBrandIds()));
+            } else if (filter.getBrandId() != null) {
                 predicates.add(cb.equal(root.get("brand").get("id"), filter.getBrandId()));
             }
 

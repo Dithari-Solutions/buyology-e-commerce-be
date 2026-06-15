@@ -15,8 +15,11 @@ public class ProductFilterRequest {
     @Schema(description = "Condition: NEW or REFURBISHED", allowableValues = {"NEW", "REFURBISHED"})
     private String condition;
 
-    @Schema(description = "Brand ID to filter by")
+    @Schema(description = "Brand ID to filter by (single — legacy; prefer brandIds)")
     private UUID brandId;
+
+    @Schema(description = "Brand IDs to filter by (multi-select). A product matches if its brand is any of these.")
+    private List<UUID> brandIds;
 
     @Schema(description = "Availability status", allowableValues = {"IN_STOCK", "OUT_OF_STOCK", "PRE_ORDER"})
     private String availabilityStatus;
@@ -72,6 +75,9 @@ public class ProductFilterRequest {
 
     public UUID getBrandId() { return brandId; }
     public void setBrandId(UUID brandId) { this.brandId = brandId; }
+
+    public List<UUID> getBrandIds() { return brandIds; }
+    public void setBrandIds(List<UUID> brandIds) { this.brandIds = brandIds; }
 
     public String getAvailabilityStatus() { return availabilityStatus; }
     public void setAvailabilityStatus(String availabilityStatus) { this.availabilityStatus = availabilityStatus; }
