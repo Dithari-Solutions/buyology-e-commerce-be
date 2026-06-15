@@ -404,7 +404,17 @@ public class OrderService {
         orderReq.setShippingFee(req.getShippingFee());
         orderReq.setCouponCode(req.getCouponCode());
 
-        return createOrder(userId, authCredentialId, orderReq);
+        OrderResponse response = createOrder(userId, authCredentialId, orderReq);
+
+        // The ephemeral cart has served its purpose. Mark it ABANDONED so it is
+        // never resumed as the user's active cart — findOrCreateActiveCart only
+        // resumes CHECKED_OUT carts, never ABANDONED ones — which would otherwise
+        // merge this single-product checkout into their real shopping cart on a
+        // failed/abandoned payment. It's still cleared by cartId on payment success.
+        cart.setStatus(Cart.CartStatus.ABANDONED);
+        cartRepo.save(cart);
+
+        return response;
     }
 
     // =========================================================================
