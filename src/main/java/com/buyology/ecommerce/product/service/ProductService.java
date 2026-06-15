@@ -390,9 +390,29 @@ public class ProductService {
         if (!"DELETED".equals(product.getStatus())) {
             throw new IllegalArgumentException("Product is not in trash");
         }
+
+        // Block restore if another active product has since taken any of this product's names.
+        List<ProductTranslation> translations = translationRepository.findByProductId(id);
+        for (ProductTranslation t : translations) {
+            assertTitleAvailable(t.getLanguage(), t.getTitle(), id);
+        }
+
         product.setStatus("ACTIVE");
         product.setDeletedAt(null);
         productRepository.save(product);
+
+        // Restore the original (un-suffixed) slug when it's free again.
+        String idSuffix = "-" + id.toString().replace("-", "").substring(0, 8);
+        for (ProductTranslation t : translations) {
+            if (t.getSlug() != null && t.getSlug().endsWith(idSuffix)) {
+                String original = t.getSlug().substring(0, t.getSlug().length() - idSuffix.length());
+                if (!translationRepository.existsActiveByLanguageAndSlug(t.getLanguage(), original)) {
+                    t.setSlug(original);
+                }
+            }
+        }
+        translationRepository.saveAll(translations);
+
         return ApiResponse.success(toResponse(product, lang, true), "Product restored successfully");
     }
 
@@ -559,6 +579,8 @@ public class ProductService {
             };
 
             if (newTitle != null && !newTitle.isBlank() && !newTitle.equals(t.getTitle())) {
+                // Reject if another active product already uses this name in this language.
+                assertTitleAvailable(lang, newTitle, product.getId());
                 String newSlug = SlugUtils.toSlug(newTitle);
                 if (!newSlug.equals(t.getSlug())) {
                     if (translationRepository.existsActiveByLanguageAndSlug(lang, newSlug)) {
@@ -1180,10 +1202,25 @@ public class ProductService {
         return groupDtos;
     }
 
+    /** Throw if another non-deleted product already uses this name in this language (case-insensitive). */
+    private void assertTitleAvailable(String language, String title, UUID excludeProductId) {
+        if (title == null || title.isBlank()) {
+            return;
+        }
+        if (translationRepository.existsActiveByLanguageAndTitleIgnoreCase(language, title.trim(), excludeProductId)) {
+            throw new IllegalArgumentException("A product with the name '" + title.trim() + "' already exists");
+        }
+    }
+
     private List<ProductTranslation> saveTranslations(Product product, ProductTranslationRequest tr) {
         String slugAz = SlugUtils.toSlug(tr.getTitleAz());
         String slugEn = SlugUtils.toSlug(tr.getTitleEn());
         String slugAr = SlugUtils.toSlug(tr.getTitleAr());
+
+        // Reject duplicate product names (case-insensitive, per language) up front.
+        assertTitleAvailable("AZ", tr.getTitleAz(), product.getId());
+        assertTitleAvailable("EN", tr.getTitleEn(), product.getId());
+        assertTitleAvailable("AR", tr.getTitleAr(), product.getId());
 
         // Reject if an active product already uses the same name/slug
         if (translationRepository.existsActiveByLanguageAndSlug("AZ", slugAz)) {

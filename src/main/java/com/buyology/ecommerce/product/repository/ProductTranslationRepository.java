@@ -25,4 +25,13 @@ public interface ProductTranslationRepository extends JpaRepository<ProductTrans
            "FROM ProductTranslation t " +
            "WHERE t.language = :language AND t.slug = :slug AND t.product.status != 'DELETED'")
     boolean existsActiveByLanguageAndSlug(@Param("language") String language, @Param("slug") String slug);
+
+    /** True if a non-deleted product (other than excludeProductId, when given) already uses this name in this language. */
+    @Query("SELECT CASE WHEN COUNT(t) > 0 THEN true ELSE false END " +
+           "FROM ProductTranslation t " +
+           "WHERE t.language = :language AND LOWER(t.title) = LOWER(:title) " +
+           "AND t.product.status != 'DELETED' " +
+           "AND (:excludeProductId IS NULL OR t.product.id <> :excludeProductId)")
+    boolean existsActiveByLanguageAndTitleIgnoreCase(@Param("language") String language,
+            @Param("title") String title, @Param("excludeProductId") UUID excludeProductId);
 }
