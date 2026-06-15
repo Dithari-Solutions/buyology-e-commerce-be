@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.order.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.order.dto.BuyNowOrderRequest;
 import com.buyology.ecommerce.order.dto.CreateOrderRequest;
 import com.buyology.ecommerce.order.dto.OrderResponse;
 import com.buyology.ecommerce.order.dto.OrderSummaryResponse;
@@ -57,6 +58,23 @@ public class OrderController {
         requireOwnedCredential(userId, authCredentialId);
         return ApiResponse.created(
                 orderService.createOrder(userId, authCredentialId, request),
+                "Order created successfully");
+    }
+
+    /**
+     * Create a "Buy Now" order for a single product, bypassing the user's cart.
+     * The user's persistent cart is left untouched; an ephemeral one-item cart is
+     * used internally. Starts in PENDING_PAYMENT like any other order.
+     */
+    @PostMapping("/buy-now")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<OrderResponse>> createBuyNowOrder(
+            @AuthenticationPrincipal UUID userId,
+            @RequestHeader("X-Auth-Credential-Id") UUID authCredentialId,
+            @Valid @RequestBody BuyNowOrderRequest request) {
+        requireOwnedCredential(userId, authCredentialId);
+        return ApiResponse.created(
+                orderService.createBuyNowOrder(userId, authCredentialId, request),
                 "Order created successfully");
     }
 

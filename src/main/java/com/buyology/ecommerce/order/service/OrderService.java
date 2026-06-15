@@ -2,6 +2,10 @@ package com.buyology.ecommerce.order.service;
 
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
+import com.buyology.ecommerce.product.domain.Product;
+import com.buyology.ecommerce.store.domain.StoreProduct;
+import com.buyology.ecommerce.auth.domain.AuthCredentials;
+import com.buyology.ecommerce.order.dto.BuyNowOrderRequest;
 import com.buyology.ecommerce.common.outbox.OutboxEvent;
 import com.buyology.ecommerce.common.outbox.OutboxEventRepository;
 import com.buyology.ecommerce.promo.dto.ValidatePromoCodeResponse;
@@ -328,6 +332,79 @@ public class OrderService {
         // not here — so a code only counts as redeemed once the order is actually paid.
 
         return toOrderResponse(order);
+    }
+
+    /**
+     * Creates a "Buy Now" order for a SINGLE product without disturbing the user's
+     * persistent cart. We build a throwaway, single-item cart (separate from the
+     * active cart), mark it CHECKED_OUT, and run it through the exact same {@link
+     * #createOrder} pipeline — so pricing, stock, promo, and payment behave
+     * identically to a normal checkout. The user's real cart is never touched, and
+     * the ephemeral cart is cleared on payment success like any other.
+     */
+    @Transactional
+    public OrderResponse createBuyNowOrder(UUID userId, UUID authCredentialId, BuyNowOrderRequest req) {
+        if (req.getProductId() == null || req.getStoreId() == null) {
+            throw new IllegalArgumentException("productId and storeId are required");
+        }
+        int quantity = (req.getQuantity() != null && req.getQuantity() > 0) ? req.getQuantity() : 1;
+
+        StoreProduct storeProduct = storeProductRepo
+                .findByStore_IdAndProduct_IdAndIsActiveTrue(req.getStoreId(), req.getProductId())
+                .orElseThrow(() -> new IllegalArgumentException("Product is not available in the selected store"));
+
+        Product product = storeProduct.getProduct();
+        if (product == null || "DELETED".equals(product.getStatus())) {
+            throw new IllegalArgumentException("Product not found");
+        }
+
+        String storeCountry = storeProduct.getStore().getCountry().getCode();
+        String storeCurrency = storeProduct.getStore().getCountry().getCurrency();
+
+        UserProfiles profile = userProfileRepo.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+
+        // Same single-country purchase rule as add-to-cart: you can browse other
+        // countries but only buy from stores in your selected country.
+        String userCountry = profile.getSelectedCountryCode();
+        if (userCountry != null && !userCountry.isBlank() && !isSameCountry(storeCountry, userCountry)) {
+            throw new IllegalArgumentException(
+                    "You can only purchase products from stores in your selected country (" + userCountry + ").");
+        }
+
+        // Resolve the discounted store price in the store's native currency (same as
+        // CartService.addItem). No variant: matches the product-detail Buy Now flow,
+        // and createOrder only decrements stock for variant items.
+        BigDecimal unitPrice = storeProduct.effectivePrice();
+        BigDecimal originalUnitPrice = storeProduct.hasDiscount() ? storeProduct.getStorePrice() : null;
+
+        AuthCredentials credential = authCredentialRepository.findById(authCredentialId)
+                .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
+
+        // Ephemeral, single-item cart — NOT the user's active cart.
+        Cart cart = new Cart(credential);
+        cart.setCountryCode(storeCountry);
+        cart.setCurrency(storeCurrency);
+        cart = cartRepo.save(cart);
+
+        CartItem item = new CartItem(cart, product, null, quantity, unitPrice, req.getStoreId());
+        item.setOriginalUnitPrice(originalUnitPrice);
+        cartItemRepo.save(item);
+
+        cart.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)));
+        cart.setStatus(Cart.CartStatus.CHECKED_OUT);
+        cartRepo.save(cart);
+
+        // Reuse the tested order pipeline (address/country checks, pricing, promo,
+        // shipping, stock, payment integration) on the ephemeral cart.
+        CreateOrderRequest orderReq = new CreateOrderRequest();
+        orderReq.setCartId(cart.getId());
+        orderReq.setAddressId(req.getAddressId());
+        orderReq.setDeliveryMethod(req.getDeliveryMethod());
+        orderReq.setShippingFee(req.getShippingFee());
+        orderReq.setCouponCode(req.getCouponCode());
+
+        return createOrder(userId, authCredentialId, orderReq);
     }
 
     // =========================================================================
