@@ -43,8 +43,11 @@ public class ProductController {
             @Parameter(description = "ISO 3166-1 alpha-3 country code to scope price range (e.g. UAE, AZE)")
             @RequestParam(required = false) String countryCode,
             @Parameter(description = "ISO 4217 display currency to express the price range in")
-            @RequestParam(required = false) String currency) {
-        return productFilterService.getAvailableFilters(countryCode, lang, currency);
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "User latitude — resolves express-store pricing so the range matches the cards")
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productFilterService.getAvailableFilters(countryCode, lang, currency, lat, lng);
     }
 
     @Operation(summary = "Get all active products",

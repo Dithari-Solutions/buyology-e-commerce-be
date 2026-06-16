@@ -17,7 +17,6 @@ import com.buyology.ecommerce.product.repository.ProductCategoryRepository;
 import com.buyology.ecommerce.product.repository.ProductCategoryTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.product.repository.ProductSpecOptionRepository;
-import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -36,9 +35,7 @@ public class ProductFilterService {
     private final GlobalSpecGroupRepository globalSpecGroupRepository;
     private final GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository;
     private final ProductSpecOptionRepository specOptionRepository;
-    private final StoreProductRepository storeProductRepository;
-    private final com.buyology.ecommerce.store.repository.CountryRepository countryRepository;
-    private final com.buyology.ecommerce.currency.service.CurrencyExchangeService currencyExchangeService;
+    private final ProductService productService;
 
     public ProductFilterService(
             ProductRepository productRepository,
@@ -49,9 +46,8 @@ public class ProductFilterService {
             GlobalSpecGroupRepository globalSpecGroupRepository,
             GlobalSpecGroupTranslationRepository globalSpecGroupTranslationRepository,
             ProductSpecOptionRepository specOptionRepository,
-            StoreProductRepository storeProductRepository,
-            com.buyology.ecommerce.store.repository.CountryRepository countryRepository,
-            com.buyology.ecommerce.currency.service.CurrencyExchangeService currencyExchangeService) {
+            ProductService productService) {
+        this.productService = productService;
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.categoryTranslationRepository = categoryTranslationRepository;
@@ -60,9 +56,6 @@ public class ProductFilterService {
         this.globalSpecGroupRepository = globalSpecGroupRepository;
         this.globalSpecGroupTranslationRepository = globalSpecGroupTranslationRepository;
         this.specOptionRepository = specOptionRepository;
-        this.storeProductRepository = storeProductRepository;
-        this.countryRepository = countryRepository;
-        this.currencyExchangeService = currencyExchangeService;
     }
 
     /**
@@ -74,30 +67,19 @@ public class ProductFilterService {
      * @param lang        language code (e.g. "EN", "AZ", "AR")
      */
     public ResponseEntity<ApiResponse<ProductFiltersResponse>> getAvailableFilters(
-            String countryCode, String lang, String displayCurrency) {
+            String countryCode, String lang, String displayCurrency, Double lat, Double lng) {
 
         String langUpper = lang != null ? lang.trim().toUpperCase() : "EN";
 
         ProductFiltersResponse response = new ProductFiltersResponse();
 
-        // 1. Price range — findPriceRange returns the country's store-native currency.
-        // Convert it to the user's display currency so the slider matches the prices
-        // shown on the products (and the search converts the picked range back).
-        List<Object[]> priceRows = storeProductRepository.findPriceRange(countryCode);
-        if (!priceRows.isEmpty() && priceRows.get(0) != null && priceRows.get(0)[0] != null) {
-            Object[] row = priceRows.get(0);
-            BigDecimal min = new BigDecimal(row[0].toString());
-            BigDecimal max = new BigDecimal(row[1].toString());
-            if (countryCode != null && !countryCode.isBlank()
-                    && displayCurrency != null && !displayCurrency.isBlank()) {
-                var country = countryRepository.findByCode(countryCode.toUpperCase()).orElse(null);
-                if (country != null && country.getCurrency() != null
-                        && !displayCurrency.equalsIgnoreCase(country.getCurrency())) {
-                    min = currencyExchangeService.convert(min, country.getCurrency(), displayCurrency.toUpperCase());
-                    max = currencyExchangeService.convert(max, country.getCurrency(), displayCurrency.toUpperCase());
-                }
-            }
-            response.setPriceRange(new PriceRangeDto(min, max));
+        // 1. Price range — resolved DISPLAY prices (discounted + currency-converted +
+        // country/global), using the same pricing as the search, so the slider bounds
+        // are in the display currency and match exactly what the cards show and what
+        // the search filters on.
+        BigDecimal[] priceRange = productService.resolveDisplayPriceRange(countryCode, displayCurrency, lat, lng);
+        if (priceRange != null) {
+            response.setPriceRange(new PriceRangeDto(priceRange[0], priceRange[1]));
         } else {
             response.setPriceRange(new PriceRangeDto(BigDecimal.ZERO, BigDecimal.ZERO));
         }

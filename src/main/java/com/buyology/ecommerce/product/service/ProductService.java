@@ -879,6 +879,45 @@ public class ProductService {
                 .toList();
     }
 
+    /**
+     * Resolves the DISPLAY price range — [min, max] of the storePrice the storefront
+     * actually shows — across the active catalog (scoped to a country when given),
+     * using the SAME country/global pricing + discount + currency conversion as the
+     * search. This keeps the filter slider bounds in the display currency and exactly
+     * aligned with what {@link #applyPriceRange} filters on (and what the cards show).
+     * Prices are resolved on lightweight responses (no translations/specs/media).
+     * Returns null when nothing in the catalog is priced.
+     */
+    public BigDecimal[] resolveDisplayPriceRange(String countryCode, String currency, Double lat, Double lng) {
+        List<Product> products = productRepository.findByStatus("ACTIVE");
+
+        if (countryCode != null && !countryCode.isBlank()) {
+            Set<UUID> countryProductIds = new HashSet<>(storeProductRepository
+                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .stream().map(Product::getId).toList());
+            products = products.stream()
+                    .filter(p -> countryProductIds.contains(p.getId()))
+                    .toList();
+        }
+        if (products.isEmpty()) return null;
+
+        // Price-only resolution (no ratings/delivery/DTO build) — same pricing path as the
+        // search, so the bounds match exactly what the cards show and the search filters on.
+        List<ProductResponse> responses = new java.util.ArrayList<>(products.size());
+        for (int i = 0; i < products.size(); i++) responses.add(new ProductResponse());
+        applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng, false);
+
+        BigDecimal min = null;
+        BigDecimal max = null;
+        for (ProductResponse r : responses) {
+            BigDecimal price = r.getStorePrice();
+            if (price == null) continue;
+            if (min == null || price.compareTo(min) < 0) min = price;
+            if (max == null || price.compareTo(max) > 0) max = price;
+        }
+        return min == null ? null : new BigDecimal[]{ min, max };
+    }
+
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProductsElastic(
             String query, String lang, String countryCode, String currency, Double lat, Double lng) {
         List<com.buyology.ecommerce.product.search.domain.ProductDocument> searchResults = productSearchService.search(query);
@@ -1794,6 +1833,17 @@ public class ProductService {
     private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
                                           String countryCode, String displayCurrency,
                                           Double lat, Double lng) {
+        applyBatchCountryPricing(responses, products, countryCode, displayCurrency, lat, lng, true);
+    }
+
+    /**
+     * @param includeExtras when false, only storePrice/currency/storeOptions are resolved —
+     *                      ratings and delivery info are skipped (used by the price-range
+     *                      computation, which reads only storePrice).
+     */
+    private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
+                                          String countryCode, String displayCurrency,
+                                          Double lat, Double lng, boolean includeExtras) {
         if (products.isEmpty()) return;
 
         List<UUID> allProductIds = products.stream().map(Product::getId).toList();
@@ -1831,7 +1881,9 @@ public class ProductService {
         if (!missingPriceIds.isEmpty()) {
             List<Object[]> gRows = storeProductRepository.findCheapestPricesGloballyBatch(missingPriceIds);
             for (Object[] grow : gRows) {
-                globalPrices.put((UUID) grow[0], grow);
+                // Keep the FIRST row per product (query is ORDER BY'd) so price ties across
+                // currencies resolve deterministically — search and the filter range agree.
+                globalPrices.putIfAbsent((UUID) grow[0], grow);
             }
         }
 
@@ -1877,9 +1929,9 @@ public class ProductService {
                     resp.setCurrency(finalTarget);
                 }
             }
-            applyDeliveryInfo(resp);
+            if (includeExtras) applyDeliveryInfo(resp);
         }
-        applyRatingsBatch(responses, products);
+        if (includeExtras) applyRatingsBatch(responses, products);
     }
 
     private ProductResponse buildResponse(
