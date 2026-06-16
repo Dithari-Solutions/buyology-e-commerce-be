@@ -103,16 +103,29 @@ public class StoreService {
      * Public storefront view: ACTIVE stores with their locations AND each location's
      * weekly operating hours nested — for the contact page (no auth required).
      */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<StoreResponse>>> getPublicStores() {
-        List<StoreResponse> stores = storeRepository.findAllByDeletedAtIsNull().stream()
-                .filter(s -> s.getStatus() == com.buyology.ecommerce.store.enums.StoreStatus.ACTIVE)
+        List<StoreResponse> stores = storeRepository
+                .findAllByStatusAndDeletedAtIsNull(com.buyology.ecommerce.store.enums.StoreStatus.ACTIVE)
+                .stream()
                 .map(s -> {
-                    StoreResponse resp = buildResponse(s,
-                            translationRepository.findAllByStoreId(s.getId()),
-                            locationRepository.findAllByStoreId(s.getId()));
-                    resp.getLocations().forEach(loc -> loc.setOperatingHours(
-                            hoursRepository.findAllByLocationId(loc.getId()).stream()
-                                    .map(this::toHoursResponse).toList()));
+                    // Lightweight public payload: only contact-relevant fields (no banner
+                    // presign, no status/timestamps/translations) so this unauthenticated
+                    // endpoint stays cheap and doesn't leak admin/internal fields.
+                    StoreResponse resp = new StoreResponse();
+                    resp.setId(s.getId());
+                    resp.setName(s.getName());
+                    resp.setSlug(s.getSlug());
+                    resp.setCountryName(s.getCountry().getName());
+                    resp.setContactEmail(s.getContactEmail());
+                    resp.setContactPhone(s.getContactPhone());
+                    resp.setLocations(locationRepository.findAllByStoreIdAndIsActive(s.getId(), true).stream()
+                            .map(l -> {
+                                StoreLocationResponse lr = toLocationResponse(l);
+                                lr.setOperatingHours(hoursRepository.findAllByLocationId(l.getId()).stream()
+                                        .map(this::toHoursResponse).toList());
+                                return lr;
+                            }).toList());
                     return resp;
                 })
                 .toList();
