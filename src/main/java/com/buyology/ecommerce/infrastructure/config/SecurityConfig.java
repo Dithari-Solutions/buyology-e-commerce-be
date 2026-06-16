@@ -126,6 +126,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/verify/**").permitAll()
                         // Payment webhook — must be reachable by Paymob without a JWT
                         .requestMatchers("/api/payments/webhook").permitAll()
+                        // Redirect-confirm fallback — HMAC-authenticated, must work even
+                        // after the shopper's JWT expires during the 3-D Secure step
+                        .requestMatchers("/api/payments/confirm-redirect").permitAll()
                         // All other payment endpoints require authentication; ownership /
                         // role checks are enforced at the method/service layer.
                         .requestMatchers("/api/payments/**").authenticated()

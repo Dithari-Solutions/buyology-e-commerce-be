@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -420,6 +421,87 @@ public class PaymentService {
             log.error("[WEBHOOK] Error processing transaction {}", transaction.getId(), e);
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, e.getMessage());
             throw e;
+        }
+    }
+
+    /**
+     * Reconstructs a webhook-shaped Paymob payload from the flat REDIRECT ("transaction
+     * response callback") query parameters, so a browser redirect can be confirmed
+     * through the exact same {@link #handleWebhook} path as the server-to-server
+     * webhook — a resilient fallback for when the webhook is delayed, blocked, or
+     * misconfigured.
+     *
+     * Paymob signs the redirect params with the SAME HMAC scheme as the webhook, over
+     * the same canonical field set, so the reconstructed {@code {"obj": {...}, "type":
+     * "TRANSACTION"}} payload verifies against the redirect's {@code hmac}. handleWebhook
+     * then applies the full tested path: HMAC verification, the INSERT-first idempotency
+     * ledger, transaction resolution, status transition, and the underpayment guard.
+     * Because the idempotency key is the Paymob transaction id — identical to the real
+     * webhook's — this can never double-process: whichever of the redirect or the
+     * webhook arrives first wins and the other is skipped.
+     *
+     * Returns {@code null} when the params are absent or unsigned; the caller must then
+     * not attempt confirmation. This method is intentionally side-effect-free: the caller
+     * invokes the proxied {@link #handleWebhook} with the result so that method's own
+     * {@code @Transactional} boundary and AFTER_COMMIT event apply (calling handleWebhook
+     * from inside this class would self-invoke and bypass the transactional proxy).
+     */
+    public String buildRedirectWebhookPayload(Map<String, String> params) {
+        if (params == null) return null;
+        String hmac = params.get("hmac");
+        if (hmac == null || hmac.isBlank()) {
+            log.warn("[REDIRECT-CONFIRM] Missing hmac in redirect params — ignoring");
+            return null;
+        }
+
+        // Canonical scalar fields, carried flat in the redirect query string. We copy
+        // them as strings; the HMAC validator and status logic both read them via
+        // asText()/asBoolean(), which treat "true"/"false"/numeric strings correctly,
+        // and Paymob signs these same string representations.
+        ObjectNode obj = objectMapper.createObjectNode();
+        String[] flatFields = {
+                "amount_cents", "created_at", "currency", "error_occured",
+                "has_parent_transaction", "id", "integration_id", "is_3d_secure",
+                "is_auth", "is_capture", "is_refunded", "is_standalone_payment",
+                "is_voided", "owner", "pending", "success"
+        };
+        for (String f : flatFields) {
+            String v = params.get(f);
+            if (v != null) obj.put(f, v);
+        }
+
+        // The HMAC concatenation and transaction resolution both read order.id; the
+        // redirect carries it flat as "order".
+        String orderId = params.get("order");
+        if (orderId != null) {
+            ObjectNode order = objectMapper.createObjectNode();
+            order.put("id", orderId);
+            obj.set("order", order);
+        }
+
+        // source_data.{pan,sub_type,type} participate in the HMAC.
+        ObjectNode src = objectMapper.createObjectNode();
+        if (params.get("source_data.pan") != null) src.put("pan", params.get("source_data.pan"));
+        if (params.get("source_data.sub_type") != null) src.put("sub_type", params.get("source_data.sub_type"));
+        if (params.get("source_data.type") != null) src.put("type", params.get("source_data.type"));
+        obj.set("source_data", src);
+
+        // data.message feeds the failure reason on declined transactions (not signed).
+        if (params.get("data.message") != null) {
+            ObjectNode data = objectMapper.createObjectNode();
+            data.put("message", params.get("data.message"));
+            obj.set("data", data);
+        }
+
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("obj", obj);
+        root.put("type", "TRANSACTION");
+
+        try {
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("[REDIRECT-CONFIRM] Failed to build payload from redirect params: {}", e.getMessage());
+            return null;
         }
     }
 

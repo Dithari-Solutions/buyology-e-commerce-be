@@ -61,4 +61,32 @@ public class PaymentWebhookController {
         // Always return 200 so Paymob does not retry — we handle idempotency internally
         return ResponseEntity.ok().build();
     }
+
+    /**
+     * Confirms a payment from the Paymob browser redirect ("transaction response
+     * callback") as a resilient fallback to the server-to-server webhook. The
+     * storefront forwards the redirect query parameters here when the shopper lands
+     * back on the site; the service verifies the HMAC Paymob signed over those
+     * params before mutating anything, then runs the same idempotent path the
+     * webhook uses. Public (HMAC-authenticated) so it works even if the shopper's
+     * session token has expired by the time they return from the 3-D Secure step.
+     */
+    @PostMapping("/confirm-redirect")
+    public ResponseEntity<Void> confirmRedirect(@RequestBody java.util.Map<String, String> params) {
+        try {
+            // Reconstruct the webhook-shaped payload, then run it through the *proxied*
+            // handleWebhook so its own @Transactional boundary (and AFTER_COMMIT
+            // order-paid event) apply — exactly as for a real webhook delivery.
+            String payload = paymentService.buildRedirectWebhookPayload(params);
+            if (payload != null) {
+                paymentService.handleWebhook(payload, params.get("hmac"));
+            }
+        } catch (Exception e) {
+            // Best-effort fallback: a bad HMAC / unknown order must not break the
+            // shopper's return-to-site UX. handleWebhook has already rolled back.
+            log.warn("[REDIRECT-CONFIRM] Confirmation failed: {}", e.getMessage());
+        }
+        // Always 200 so the storefront's return flow proceeds to status polling.
+        return ResponseEntity.ok().build();
+    }
 }
