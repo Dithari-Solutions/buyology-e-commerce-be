@@ -755,6 +755,11 @@ public class OrderService {
     }
 
     private BigDecimal calculateShippingFee(DeliveryMethod method, BigDecimal subtotal, String currency) {
+        // ─── TEMPORARY (TESTING): delivery fee disabled — every order ships free. ───
+        // Restore express-delivery charging by deleting this return and uncommenting
+        // the block below.
+        return BigDecimal.ZERO;
+        /*
         if (method == DeliveryMethod.REGULAR) {
             return BigDecimal.ZERO;
         }
@@ -767,6 +772,7 @@ public class OrderService {
             return BigDecimal.ZERO;
         }
         return currencyExchangeService.convert(EXPRESS_DELIVERY_FEE, BASE_CURRENCY, currency);
+        */
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {
