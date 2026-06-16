@@ -99,6 +99,40 @@ public class StoreService {
         return ApiResponse.success(stores, "Stores fetched successfully");
     }
 
+    /**
+     * Public storefront view: ACTIVE stores with their locations AND each location's
+     * weekly operating hours nested — for the contact page (no auth required).
+     */
+    public ResponseEntity<ApiResponse<List<StoreResponse>>> getPublicStores() {
+        List<StoreResponse> stores = storeRepository.findAllByDeletedAtIsNull().stream()
+                .filter(s -> s.getStatus() == com.buyology.ecommerce.store.enums.StoreStatus.ACTIVE)
+                .map(s -> {
+                    StoreResponse resp = buildResponse(s,
+                            translationRepository.findAllByStoreId(s.getId()),
+                            locationRepository.findAllByStoreId(s.getId()));
+                    resp.getLocations().forEach(loc -> loc.setOperatingHours(
+                            hoursRepository.findAllByLocationId(loc.getId()).stream()
+                                    .map(this::toHoursResponse).toList()));
+                    return resp;
+                })
+                .toList();
+        return ApiResponse.success(stores, "Stores fetched successfully");
+    }
+
+    private com.buyology.ecommerce.store.dto.OperatingHoursResponse toHoursResponse(StoreOperatingHours h) {
+        com.buyology.ecommerce.store.dto.OperatingHoursResponse r =
+                new com.buyology.ecommerce.store.dto.OperatingHoursResponse();
+        r.setId(h.getId());
+        r.setLocationId(h.getLocation().getId());
+        r.setDayOfWeek(h.getDayOfWeek());
+        r.setOpenTime(h.getOpenTime());
+        r.setCloseTime(h.getCloseTime());
+        r.setIsClosed(h.getIsClosed());
+        r.setCreatedAt(h.getCreatedAt());
+        r.setUpdatedAt(h.getUpdatedAt());
+        return r;
+    }
+
     public ResponseEntity<ApiResponse<StoreResponse>> getStoreById(UUID id) {
         Store store = storeRepository.findByIdAndDeletedAtIsNull(id).orElse(null);
         if (store == null) {

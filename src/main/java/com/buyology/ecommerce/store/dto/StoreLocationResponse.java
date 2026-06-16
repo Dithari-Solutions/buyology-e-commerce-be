@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.store.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public class StoreLocationResponse {
@@ -19,6 +20,11 @@ public class StoreLocationResponse {
     private Boolean isActive;
     private Instant createdAt;
     private Instant updatedAt;
+    /** Weekly opening hours — populated only on the public storefront endpoint. */
+    private List<OperatingHoursResponse> operatingHours;
+
+    public List<OperatingHoursResponse> getOperatingHours() { return operatingHours; }
+    public void setOperatingHours(List<OperatingHoursResponse> operatingHours) { this.operatingHours = operatingHours; }
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }

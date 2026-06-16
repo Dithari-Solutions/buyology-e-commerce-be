@@ -138,6 +138,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/membership/auth/**").permitAll()
                         // Admin API requires authentication; method-level @PreAuthorize handles role checks
                         .requestMatchers("/api/admin/**").authenticated()
+                        // Public storefront contact data (active stores + locations + hours)
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/stores/public").permitAll()
                         .requestMatchers("/api/stores/**").authenticated()
                         // Order endpoints require authentication
                         .requestMatchers("/api/orders/**").authenticated()

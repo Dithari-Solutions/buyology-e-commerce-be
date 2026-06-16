@@ -58,6 +58,12 @@ public class StoreController {
         return storeService.getAllStores();
     }
 
+    @Operation(summary = "Public: active stores with locations + weekly operating hours (storefront contact page)")
+    @GetMapping("/public")
+    public ResponseEntity<ApiResponse<List<StoreResponse>>> getPublicStores() {
+        return storeService.getPublicStores();
+    }
+
     @Operation(summary = "Get a store by ID")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<StoreResponse>> getStoreById(@PathVariable UUID id) {
