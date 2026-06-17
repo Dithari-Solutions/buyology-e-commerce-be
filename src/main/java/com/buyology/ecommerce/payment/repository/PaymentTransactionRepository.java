@@ -2,6 +2,7 @@ package com.buyology.ecommerce.payment.repository;
 
 import com.buyology.ecommerce.payment.domain.PaymentProviderOrder;
 import com.buyology.ecommerce.payment.domain.PaymentTransaction;
+import com.buyology.ecommerce.payment.enums.PaymentPurpose;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -43,6 +44,10 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
 
     Optional<PaymentTransaction> findFirstByAppOrderIdAndStatusIn(
             UUID appOrderId, List<PaymentStatus> statuses);
+
+    /** Latest courier-fee charge for a refund in any of the given statuses (for resume/idempotency). */
+    Optional<PaymentTransaction> findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+            UUID refundRequestId, PaymentPurpose purpose, List<PaymentStatus> statuses);
 
     /**
      * Delivery-fee revenue, bucketed by time. Sums successfully-charged courier

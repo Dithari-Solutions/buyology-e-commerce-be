@@ -94,7 +94,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
-        log.warn("Data integrity violation: {}", ex.getMessage());
+        // Log the most-specific cause — it carries the actual constraint name (e.g.
+        // "...violates unique constraint \"payment_transactions_intention_id_key\""),
+        // which the generic top-level message hides. Don't leak it to the client.
+        Throwable root = ex.getMostSpecificCause();
+        log.warn("Data integrity violation: {}", root != null ? root.getMessage() : ex.getMessage());
         return ApiResponse.failure(HttpStatus.CONFLICT, "A record with the same unique value already exists");
     }
 

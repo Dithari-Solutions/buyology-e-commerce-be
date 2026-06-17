@@ -287,6 +287,24 @@ public class PaymentService {
                         "Unknown payer for courier fee: " + req.customerId()));
         userProfileService.checkPaymentReadiness(ownerUserId);
 
+        // Idempotency: re-selecting courier pickup must RESUME the existing pending charge,
+        // not create a second one. Creating another intention for the same refund collides
+        // on a unique payment_transactions column → 409. Reuse the live pending charge.
+        if (req.refundRequestId() != null) {
+            var existing = transactionRepo
+                    .findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                            req.refundRequestId(), PaymentPurpose.COURIER_RETURN_FEE,
+                            List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
+                    .orElse(null);
+            if (existing != null && existing.getPaymentKeyToken() != null && existing.getMethodConfig() != null) {
+                String resumeUrl = existing.getMethodConfig().getProvider().getBaseUrl()
+                        + "/unifiedcheckout/?publicKey=" + existing.getMethodConfig().getProvider().getPublicKey()
+                        + "&clientSecret=" + existing.getPaymentKeyToken();
+                log.info("[COURIER-FEE] Resuming pending charge {} for refund {}", existing.getId(), req.refundRequestId());
+                return buildInitiatedResponse(existing, existing.getPaymentKeyToken(), resumeUrl);
+            }
+        }
+
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
         PaymentMethodConfig config = methodConfigRepo
