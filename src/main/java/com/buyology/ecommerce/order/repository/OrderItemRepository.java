@@ -117,19 +117,21 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             @Param("to") Instant to);
 
     // ── Refunds netted against revenue ───────────────────────────────────────
-    // Refunds are per-order (RefundRequest.refundAmount is the whole-order total)
-    // and only count once money is actually returned (status = 'PAID'). A scope's
-    // (platform or one supplier) share of a refund is allocated proportionally to
-    // its items' value: refund_amount * scope_item_total / order_total. Bucketed
-    // by order item created_at so a refund reduces the period the revenue was booked.
+    // Refunds are counted from payment_refunds with status='SUCCESS' (money actually
+    // returned via Paymob). This captures BOTH customer refund requests AND order-
+    // cancellation auto-refunds (which create a PaymentRefund but no RefundRequest) —
+    // a PENDING Paymob refund is not yet counted. A scope's (platform or one supplier)
+    // share is allocated proportionally to its items' value: refund_amount *
+    // scope_item_total / order_total, bucketed by order item created_at.
 
     /** Platform (supplier_id IS NULL) refund allocation, bucketed. Optional store filter. */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
-                   COALESCE(SUM(rr.refund_amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
+                   COALESCE(SUM(pr.amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            JOIN refund_requests rr ON rr.order_id = o.id AND rr.status = 'PAID'
+            JOIN payment_transactions pt ON pt.app_order_id = o.id
+            JOIN payment_refunds pr ON pr.transaction_id = pt.id AND pr.status = 'SUCCESS'
             WHERE oi.supplier_id IS NULL
               AND oi.created_at >= :from
               AND oi.created_at < :to
@@ -146,10 +148,11 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     /** A single supplier's refund allocation, bucketed. */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
-                   COALESCE(SUM(rr.refund_amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
+                   COALESCE(SUM(pr.amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            JOIN refund_requests rr ON rr.order_id = o.id AND rr.status = 'PAID'
+            JOIN payment_transactions pt ON pt.app_order_id = o.id
+            JOIN payment_refunds pr ON pr.transaction_id = pt.id AND pr.status = 'SUCCESS'
             WHERE oi.supplier_id = :supplierId
               AND oi.created_at >= :from
               AND oi.created_at < :to
@@ -165,10 +168,11 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     /** Per-supplier refund allocation totals over a window — for the all-suppliers overview. */
     @Query(value = """
             SELECT oi.supplier_id AS supplier_id,
-                   COALESCE(SUM(rr.refund_amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
+                   COALESCE(SUM(pr.amount * oi.total_price / NULLIF(o.total_amount, 0)), 0) AS refunded
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            JOIN refund_requests rr ON rr.order_id = o.id AND rr.status = 'PAID'
+            JOIN payment_transactions pt ON pt.app_order_id = o.id
+            JOIN payment_refunds pr ON pr.transaction_id = pt.id AND pr.status = 'SUCCESS'
             WHERE oi.supplier_id IS NOT NULL
               AND oi.created_at >= :from
               AND oi.created_at < :to
@@ -187,9 +191,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             SELECT CAST(o.id AS text) AS order_id,
                    MIN(oi.created_at) AS created_at,
                    SUM(oi.total_price) AS gross,
-                   COALESCE((SELECT COALESCE(SUM(rr.refund_amount), 0)
-                             FROM refund_requests rr
-                             WHERE rr.order_id = o.id AND rr.status = 'PAID'), 0)
+                   COALESCE((SELECT COALESCE(SUM(pr.amount), 0)
+                             FROM payment_refunds pr
+                             JOIN payment_transactions pt ON pt.id = pr.transaction_id
+                             WHERE pt.app_order_id = o.id AND pr.status = 'SUCCESS'), 0)
                        * SUM(oi.total_price) / NULLIF(o.total_amount, 0) AS refunded
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
@@ -211,9 +216,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             SELECT CAST(o.id AS text) AS order_id,
                    MIN(oi.created_at) AS created_at,
                    SUM(oi.total_price) AS gross,
-                   COALESCE((SELECT COALESCE(SUM(rr.refund_amount), 0)
-                             FROM refund_requests rr
-                             WHERE rr.order_id = o.id AND rr.status = 'PAID'), 0)
+                   COALESCE((SELECT COALESCE(SUM(pr.amount), 0)
+                             FROM payment_refunds pr
+                             JOIN payment_transactions pt ON pt.id = pr.transaction_id
+                             WHERE pt.app_order_id = o.id AND pr.status = 'SUCCESS'), 0)
                        * SUM(oi.total_price) / NULLIF(o.total_amount, 0) AS refunded
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
