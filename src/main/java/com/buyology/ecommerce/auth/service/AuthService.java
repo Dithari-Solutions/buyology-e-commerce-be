@@ -218,6 +218,10 @@ public class AuthService {
         authCredentialRepository.save(credentials);
 
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
+        // Separately email the public WELCOME10 first-order promo (10% off, one-time per
+        // customer) to nudge the first purchase. Best-effort/@Async — never blocks signup.
+        emailService.sendPromoCodeEmail(otp.getEmail(), "WELCOME10",
+                "Welcome to Buyology! Here's 10% off your first order — one-time use, just for you.");
 
         return buildSigninResponse(credentials, httpRequest);
     }

@@ -56,6 +56,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -73,6 +74,7 @@ public class OrderService {
     private static final String BASE_CURRENCY = "AED";
     private static final BigDecimal EXPRESS_DELIVERY_FEE = new BigDecimal("15.00");
     private static final BigDecimal FREE_SHIPPING_THRESHOLD = new BigDecimal("100.00");
+    private static final String STOREFRONT_URL = "https://buyology.online";
 
     private final OrderRepository orderRepo;
     private final OrderTrackingEventRepository trackingRepo;
@@ -475,6 +477,9 @@ public class OrderService {
                     // Notify suppliers (owning items) + superadmins of the new paid order.
                     notifyNewOrder(order);
 
+                    // Email the customer their order confirmation (climate/SDG content).
+                    sendOrderConfirmationEmailFor(order);
+
                     // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
                         clearCartItemsSafely(order.getCartId());
@@ -582,6 +587,8 @@ public class OrderService {
                     recordPromoUsageOnPaid(order);
                     // Notify suppliers + superadmins of the new paid order.
                     notifyNewOrder(order);
+                    // Email the customer their order confirmation (climate/SDG content).
+                    sendOrderConfirmationEmailFor(order);
                 }
             }
 
@@ -755,11 +762,6 @@ public class OrderService {
     }
 
     private BigDecimal calculateShippingFee(DeliveryMethod method, BigDecimal subtotal, String currency) {
-        // ─── TEMPORARY (TESTING): delivery fee disabled — every order ships free. ───
-        // Restore express-delivery charging by deleting this return and uncommenting
-        // the block below.
-        return BigDecimal.ZERO;
-        /*
         if (method == DeliveryMethod.REGULAR) {
             return BigDecimal.ZERO;
         }
@@ -772,7 +774,6 @@ public class OrderService {
             return BigDecimal.ZERO;
         }
         return currencyExchangeService.convert(EXPRESS_DELIVERY_FEE, BASE_CURRENCY, currency);
-        */
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {
@@ -1113,6 +1114,77 @@ public class OrderService {
         return null;
     }
 
+    /** Best-effort order-confirmation email (with climate/SDG content) once an order is PAID. */
+    private void sendOrderConfirmationEmailFor(Order order) {
+        try {
+            String email = customerEmail(order);
+            if (email == null) return;
+
+            List<com.buyology.ecommerce.common.service.EmailService.OrderEmailItem> lines = new ArrayList<>();
+            int deviceCount = 0;
+            if (order.getItems() != null) {
+                for (OrderItem it : order.getItems()) {
+                    int qty = it.getQuantity() == null ? 0 : it.getQuantity();
+                    deviceCount += qty;
+                    String itemName = (it.getVariantSku() != null && !it.getVariantSku().isBlank())
+                            ? it.getVariantSku() : it.getProductSku();
+                    lines.add(new com.buyology.ecommerce.common.service.EmailService.OrderEmailItem(
+                            itemName, qty, it.getTotalPrice()));
+                }
+            }
+
+            String orderDate = order.getCreatedAt() != null
+                    ? java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy")
+                        .withZone(java.time.ZoneId.of("Asia/Dubai")).format(order.getCreatedAt())
+                    : "";
+            String displayNo = "#" + order.getId().toString().substring(0, 8).toUpperCase();
+            String orderUrl = STOREFRONT_URL + "/en/orders/" + order.getId();
+
+            emailService.sendOrderConfirmationEmail(
+                    email, order.getRecipientFirstName(), displayNo, orderDate, lines, order.getCurrency(),
+                    order.getSubtotal(), order.getShippingFee(), order.getDiscount(), order.getTotalAmount(),
+                    buildAddressBlock(order), order.getEstimatedDeliveryTime(), deviceCount, orderUrl);
+        } catch (Exception e) {
+            log.warn("[ORDER] order-confirmation email failed for {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /** Best-effort per-status fulfilment email (PACKAGING / IN_COURIER / IN_TRANSIT / DELIVERED). */
+    private void sendStatusEmailFor(Order order) {
+        try {
+            String email = customerEmail(order);
+            if (email == null) return;
+            String displayNo = "#" + order.getId().toString().substring(0, 8).toUpperCase();
+            String orderUrl = STOREFRONT_URL + "/en/orders/" + order.getId();
+            emailService.sendOrderStatusEmail(
+                    email, order.getRecipientFirstName(), displayNo, order.getStatus().name(), orderUrl);
+        } catch (Exception e) {
+            log.warn("[ORDER] order-status email failed for {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /** One-line-per-row HTML delivery address built from the order's address snapshot. */
+    private String buildAddressBlock(Order order) {
+        StringBuilder sb = new StringBuilder();
+        String recipient = ((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName()) + " "
+                + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim();
+        appendAddrPart(sb, recipient);
+        appendAddrPart(sb, order.getAddressLine1());
+        appendAddrPart(sb, order.getAddressLine2());
+        String cityLine = java.util.stream.Stream.of(order.getCity(), order.getState(), order.getPostalCode())
+                .filter(s -> s != null && !s.isBlank())
+                .reduce((a, b) -> a + ", " + b).orElse("");
+        appendAddrPart(sb, cityLine);
+        appendAddrPart(sb, order.getCountry());
+        return sb.toString();
+    }
+
+    private void appendAddrPart(StringBuilder sb, String part) {
+        if (part != null && !part.isBlank()) {
+            sb.append(part.replace("<", "&lt;").replace(">", "&gt;")).append("<br/>");
+        }
+    }
+
     // =========================================================================
     // Courier operations
     // =========================================================================
@@ -1288,7 +1360,7 @@ public class OrderService {
         }
     }
 
-    /** Notify the customer that their order's status changed (in-app feed + push). */
+    /** Notify the customer that their order's status changed (in-app feed + push + email). */
     private void notifyCustomerStatus(Order order) {
         try {
             if (order.getUserId() == null) return;
@@ -1299,6 +1371,9 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("[ORDER] Failed to notify customer of status for {}: {}", order.getId(), e.getMessage());
         }
+        // Per-status fulfilment email — no-ops for statuses without a customer milestone
+        // (PAID is emailed as the order confirmation; CANCELLED via the cancellation flow).
+        sendStatusEmailFor(order);
     }
 
     /**

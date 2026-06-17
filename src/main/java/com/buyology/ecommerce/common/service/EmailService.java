@@ -24,8 +24,10 @@ import com.buyology.ecommerce.infrastructure.config.TwilioSendGridProperties;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class EmailService {
@@ -530,6 +532,123 @@ public class EmailService {
         } catch (IOException e) {
             log.warn("Could not send refund-initiated email to {}: {}", toEmail, e.getMessage());
         }
+    }
+
+    // ── Order confirmation & status updates ────────────────────────────────────
+
+    /** A single line on the order-confirmation email. */
+    public record OrderEmailItem(String name, int quantity, BigDecimal lineTotal) {}
+
+    @Async
+    public void sendOrderConfirmationEmail(
+            String toEmail, String recipientName, String orderNumber, String orderDate,
+            List<OrderEmailItem> items, String currency,
+            BigDecimal subtotal, BigDecimal shipping, BigDecimal discount, BigDecimal total,
+            String deliveryAddress, String estimatedDelivery, int deviceCount, String orderUrl) {
+        try {
+            final int co2PerDevice = 300; // good-faith estimate: kg CO2e avoided per refurbished device vs new
+            long co2Total = (long) co2PerDevice * Math.max(deviceCount, 1);
+
+            String discountRow = (discount != null && discount.signum() > 0)
+                    ? "<tr><td style=\"padding:4px 0;color:#16a34a;font-size:14px;\">Discount</td>"
+                      + "<td align=\"right\" style=\"padding:4px 0;color:#16a34a;font-size:14px;\">-"
+                      + money(currency, discount) + "</td></tr>"
+                    : "";
+            String shippingDisplay = (shipping == null || shipping.signum() == 0)
+                    ? "FREE" : money(currency, shipping);
+
+            String html = loadTemplate("static/order-confirmation.html")
+                    .replace("{{RECIPIENT_NAME}}", safeName(recipientName))
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{ORDER_DATE}}", nullToEmpty(orderDate))
+                    .replace("{{ITEMS_ROWS}}", buildOrderItemRows(items, currency))
+                    .replace("{{DISCOUNT_ROW}}", discountRow)
+                    .replace("{{SUBTOTAL}}", money(currency, subtotal))
+                    .replace("{{SHIPPING}}", shippingDisplay)
+                    .replace("{{TOTAL}}", money(currency, total))
+                    .replace("{{DELIVERY_ADDRESS}}", nullToEmpty(deliveryAddress))
+                    .replace("{{ESTIMATED_DELIVERY}}", nullToEmpty(estimatedDelivery))
+                    .replace("{{CO2_TOTAL}}", String.valueOf(co2Total))
+                    .replace("{{CO2_PER_DEVICE}}", String.valueOf(co2PerDevice))
+                    .replace("{{ORDER_URL}}", nullToEmpty(orderUrl));
+            send(toEmail, "Your Buyology order " + nullToEmpty(orderNumber) + " is confirmed", html);
+            log.info("Order confirmation email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send order confirmation email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Per-status customer email for fulfilment milestones. Takes the OrderStatus name as a
+     * String to keep this common service decoupled from the order module. Silently no-ops for
+     * statuses without a customer-facing milestone (PAID and CANCELLED are emailed elsewhere).
+     */
+    @Async
+    public void sendOrderStatusEmail(String toEmail, String recipientName, String orderNumber,
+                                     String statusName, String orderUrl) {
+        try {
+            String title, message, badge, color;
+            switch (statusName == null ? "" : statusName) {
+                case "PACKAGING" -> {
+                    badge = "Packing"; color = "#7c5cff";
+                    title = "We're packing your order";
+                    message = "your items are being carefully prepared for dispatch.";
+                }
+                case "IN_COURIER" -> {
+                    badge = "With courier"; color = "#2563eb";
+                    title = "Your order is with the courier";
+                    message = "your order has been handed to our delivery partner and is on its way to you.";
+                }
+                case "IN_TRANSIT" -> {
+                    badge = "In transit"; color = "#0891b2";
+                    title = "Your order is on the way";
+                    message = "your order is in transit and heading to your address.";
+                }
+                case "DELIVERED" -> {
+                    badge = "Delivered"; color = "#16a34a";
+                    title = "Your order has been delivered";
+                    message = "your order has been delivered. We hope you love it — enjoy!";
+                }
+                default -> { return; }
+            }
+            String html = loadTemplate("static/order-status-update.html")
+                    .replace("{{RECIPIENT_NAME}}", safeName(recipientName))
+                    .replace("{{STATUS_TITLE}}", title)
+                    .replace("{{STATUS_MESSAGE}}", message)
+                    .replace("{{STATUS_BADGE}}", badge)
+                    .replace("{{STATUS_COLOR}}", color)
+                    .replace("{{ORDER_NUMBER}}", nullToEmpty(orderNumber))
+                    .replace("{{ORDER_URL}}", nullToEmpty(orderUrl));
+            send(toEmail, "Order " + nullToEmpty(orderNumber) + " — " + title, html);
+            log.info("Order status ({}) email sent to {}", statusName, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send order status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    private static String buildOrderItemRows(List<OrderEmailItem> items, String currency) {
+        if (items == null || items.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (OrderEmailItem it : items) {
+            sb.append("<tr>")
+              .append("<td style=\"padding:8px 0;color:#333;font-size:14px;border-bottom:1px solid #f1f0f8;\">")
+              .append(escapeHtml(it.name())).append(" &times; ").append(it.quantity())
+              .append("</td>")
+              .append("<td align=\"right\" style=\"padding:8px 0;color:#333;font-size:14px;border-bottom:1px solid #f1f0f8;white-space:nowrap;\">")
+              .append(money(currency, it.lineTotal()))
+              .append("</td></tr>");
+        }
+        return sb.toString();
+    }
+
+    private static String money(String currency, BigDecimal amount) {
+        BigDecimal a = (amount == null ? BigDecimal.ZERO : amount).setScale(2, java.math.RoundingMode.HALF_UP);
+        return nullToEmpty(currency) + " " + a.toPlainString();
+    }
+
+    private static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private static String safeName(String name) {

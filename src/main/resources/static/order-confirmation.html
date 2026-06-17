@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Order confirmed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f4fb;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f4fb;">
+<tr>
+<td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 6px 24px rgba(64,47,117,0.08);">
+
+<!-- Header -->
+<tr>
+<td style="background-color:#402F75;padding:26px 32px;">
+<span style="color:#FBBB14;font-size:24px;font-weight:bold;letter-spacing:1px;">BUYOLOGY</span>
+</td>
+</tr>
+
+<!-- Confirmation hero -->
+<tr>
+<td style="padding:32px 32px 8px;">
+<h1 style="margin:0 0 6px;color:#402F75;font-size:23px;">Thank you, {{RECIPIENT_NAME}}!</h1>
+<p style="margin:0;color:#444;font-size:15px;line-height:1.6;">
+Your payment was successful and your order <strong>{{ORDER_NUMBER}}</strong> is confirmed.
+We'll email you as it moves through packaging and delivery.
+</p>
+<p style="margin:8px 0 0;color:#888;font-size:13px;">Placed on {{ORDER_DATE}}</p>
+</td>
+</tr>
+
+<!-- Items -->
+<tr>
+<td style="padding:20px 32px 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+<tr>
+<td colspan="2" style="padding:0 0 10px;color:#402F75;font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;">Order summary</td>
+</tr>
+{{ITEMS_ROWS}}
+<tr><td colspan="2" style="border-top:1px solid #ececf5;padding-top:12px;"></td></tr>
+<tr>
+<td style="padding:4px 0;color:#666;font-size:14px;">Subtotal</td>
+<td align="right" style="padding:4px 0;color:#333;font-size:14px;">{{SUBTOTAL}}</td>
+</tr>
+{{DISCOUNT_ROW}}
+<tr>
+<td style="padding:4px 0;color:#666;font-size:14px;">Delivery</td>
+<td align="right" style="padding:4px 0;color:#333;font-size:14px;">{{SHIPPING}}</td>
+</tr>
+<tr>
+<td style="border-top:1px solid #ececf5;padding:12px 0 0;color:#402F75;font-size:16px;font-weight:bold;">Total</td>
+<td align="right" style="border-top:1px solid #ececf5;padding:12px 0 0;color:#402F75;font-size:18px;font-weight:bold;">{{TOTAL}}</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<!-- Delivery details -->
+<tr>
+<td style="padding:22px 32px 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f7f6fc;border-radius:12px;">
+<tr><td style="padding:16px 18px;">
+<p style="margin:0 0 4px;color:#402F75;font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;">Delivering to</p>
+<p style="margin:0;color:#444;font-size:14px;line-height:1.5;">{{DELIVERY_ADDRESS}}</p>
+<p style="margin:8px 0 0;color:#666;font-size:13px;">Estimated delivery: <strong>{{ESTIMATED_DELIVERY}}</strong></p>
+</td></tr>
+</table>
+</td>
+</tr>
+
+<!-- Climate impact -->
+<tr>
+<td style="padding:22px 32px 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eef7ee;border:1px solid #cfe8d0;border-radius:12px;">
+<tr><td style="padding:18px 20px;">
+<p style="margin:0 0 6px;color:#2f7a3a;font-size:15px;font-weight:bold;">Your climate impact</p>
+<p style="margin:0;color:#3a5a3f;font-size:14px;line-height:1.6;">
+Most of what we sell is refurbished. By choosing refurbished tech, this order helped avoid an estimated
+<strong>~{{CO2_TOTAL}} kg of CO&#8322;</strong> (around {{CO2_PER_DEVICE}} kg per device) versus buying new —
+keeping good electronics in use and out of landfill.
+</p>
+</td></tr>
+</table>
+</td>
+</tr>
+
+<!-- SDG badges -->
+<tr>
+<td style="padding:18px 32px 0;">
+<p style="margin:0 0 10px;color:#666;font-size:13px;line-height:1.5;">Every refurbished device supports the UN Sustainable Development Goals:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+<tr>
+<td width="25%" align="center" style="padding:4px;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" bgcolor="#FD6925" style="background-color:#FD6925;border-radius:8px;padding:10px 4px;">
+<span style="color:#ffffff;font-size:20px;font-weight:bold;display:block;line-height:1;">9</span>
+<span style="color:#ffffff;font-size:9px;display:block;margin-top:4px;line-height:1.2;">Industry &amp; Innovation</span>
+</td></tr></table>
+</td>
+<td width="25%" align="center" style="padding:4px;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" bgcolor="#FD9D24" style="background-color:#FD9D24;border-radius:8px;padding:10px 4px;">
+<span style="color:#ffffff;font-size:20px;font-weight:bold;display:block;line-height:1;">11</span>
+<span style="color:#ffffff;font-size:9px;display:block;margin-top:4px;line-height:1.2;">Sustainable Cities</span>
+</td></tr></table>
+</td>
+<td width="25%" align="center" style="padding:4px;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" bgcolor="#BF8B2E" style="background-color:#BF8B2E;border-radius:8px;padding:10px 4px;">
+<span style="color:#ffffff;font-size:20px;font-weight:bold;display:block;line-height:1;">12</span>
+<span style="color:#ffffff;font-size:9px;display:block;margin-top:4px;line-height:1.2;">Responsible Consumption</span>
+</td></tr></table>
+</td>
+<td width="25%" align="center" style="padding:4px;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" bgcolor="#3F7E44" style="background-color:#3F7E44;border-radius:8px;padding:10px 4px;">
+<span style="color:#ffffff;font-size:20px;font-weight:bold;display:block;line-height:1;">13</span>
+<span style="color:#ffffff;font-size:9px;display:block;margin-top:4px;line-height:1.2;">Climate Action</span>
+</td></tr></table>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<!-- CTA -->
+<tr>
+<td align="center" style="padding:28px 32px 8px;">
+<a href="{{ORDER_URL}}" style="display:inline-block;background-color:#FBBB14;color:#402F75;text-decoration:none;font-size:15px;font-weight:bold;padding:14px 34px;border-radius:30px;">Track your order</a>
+</td>
+</tr>
+
+<!-- Footer -->
+<tr>
+<td style="padding:18px 32px 30px;">
+<p style="margin:0;color:#999;font-size:12px;line-height:1.6;text-align:center;">
+Buyology FZ Trading LLC &middot; United Arab Emirates<br />
+Need help? <a href="mailto:support@buyology.com" style="color:#402F75;">support@buyology.com</a>
+</p>
+</td>
+</tr>
+
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>
