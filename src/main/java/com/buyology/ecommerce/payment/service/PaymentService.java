@@ -287,29 +287,28 @@ public class PaymentService {
                         "Unknown payer for courier fee: " + req.customerId()));
         userProfileService.checkPaymentReadiness(ownerUserId);
 
-        // Idempotency: re-selecting courier pickup must RESUME the existing pending charge,
-        // not create a second one. Creating another intention for the same refund collides
-        // on a unique payment_transactions column → 409. Reuse the live pending charge.
-        if (req.refundRequestId() != null) {
-            var existing = transactionRepo
-                    .findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
-                            req.refundRequestId(), PaymentPurpose.COURIER_RETURN_FEE,
-                            List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
-                    .orElse(null);
-            if (existing != null && existing.getPaymentKeyToken() != null && existing.getMethodConfig() != null) {
-                String resumeUrl = existing.getMethodConfig().getProvider().getBaseUrl()
-                        + "/unifiedcheckout/?publicKey=" + existing.getMethodConfig().getProvider().getPublicKey()
-                        + "&clientSecret=" + existing.getPaymentKeyToken();
-                log.info("[COURIER-FEE] Resuming pending charge {} for refund {}", existing.getId(), req.refundRequestId());
-                return buildInitiatedResponse(existing, existing.getPaymentKeyToken(), resumeUrl);
-            }
-        }
+        // EXACTLY ONE courier-fee charge per refund. Re-selecting courier pickup must reuse the
+        // existing non-terminal charge, never create a second transaction/intention — a duplicate
+        // collides on a unique payment_transactions column → 409. So we resume the same charge.
+        PaymentTransaction existing = (req.refundRequestId() == null) ? null
+                : transactionRepo.findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        req.refundRequestId(), PaymentPurpose.COURIER_RETURN_FEE,
+                        List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)).orElse(null);
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
         PaymentMethodConfig config = methodConfigRepo
                 .findByProviderAndMethodTypeAndIsActiveTrue(provider, PaymentMethodType.CARD)
                 .orElseThrow(() -> new IllegalStateException("No active card config for courier fee payment"));
+
+        // Existing charge already has a live Paymob intention → resume it (return its checkout URL).
+        if (existing != null && existing.getPaymentKeyToken() != null) {
+            String resumeUrl = provider.getBaseUrl()
+                    + "/unifiedcheckout/?publicKey=" + provider.getPublicKey()
+                    + "&clientSecret=" + existing.getPaymentKeyToken();
+            log.info("[COURIER-FEE] Resuming pending charge {} for refund {}", existing.getId(), req.refundRequestId());
+            return buildInitiatedResponse(existing, existing.getPaymentKeyToken(), resumeUrl);
+        }
 
         String targetCurrency = "AED";
         BigDecimal convertedAmount = currencyExchangeService.convert(req.amount(), req.currency(), targetCurrency);
@@ -339,9 +338,10 @@ public class PaymentService {
 
         int integrationId = Integer.parseInt(config.getIntegrationId());
 
-        // Commit the PENDING transaction first (REQUIRES_NEW) so the row — and its
-        // merchant_order_id — exists before we call Paymob; the webhook resolves on it.
-        PaymentTransaction tx = savePendingCourierFeeTransaction(req, config, convertedAmount, amountCents, targetCurrency);
+        // Reuse the existing (tokenless) charge if present, else create a fresh one — never a
+        // second row for the same refund. createIntention uses the tx id as merchant_order_id.
+        PaymentTransaction tx = (existing != null) ? existing
+                : savePendingCourierFeeTransaction(req, config, convertedAmount, amountCents, targetCurrency);
 
         String redirectionUrl = req.redirectionUrl() != null && !req.redirectionUrl().isBlank()
                 ? req.redirectionUrl()
