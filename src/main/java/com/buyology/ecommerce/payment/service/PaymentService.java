@@ -651,6 +651,39 @@ public class PaymentService {
         return txs.stream().map(this::toTransactionResponse).toList();
     }
 
+    /**
+     * Resolve a transaction by its Paymob order id (the {@code order} param on the
+     * redirect). Unlike {@link #getTransaction}, this performs NO ownership check —
+     * it is only reachable from the HMAC-authenticated redirect-confirm flow, where
+     * the shopper may have no valid session. The caller MUST verify the redirect HMAC
+     * before invoking this (see {@link #verifyRedirectHmac}). Returns {@code null}
+     * when the id is absent/non-numeric or no transaction matches.
+     */
+    @Transactional(readOnly = true)
+    public TransactionResponse resolveByPaymobOrder(String paymobOrderId) {
+        if (paymobOrderId == null || paymobOrderId.isBlank()) return null;
+        try {
+            Long poid = Long.valueOf(paymobOrderId.trim());
+            return transactionRepo.findByPaymobOrderId(poid)
+                    .map(this::toTransactionResponse)
+                    .orElse(null);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Verify a Paymob redirect HMAC against the active provider's secret, using the
+     * already-reconstructed webhook-shaped payload. Lets the redirect-confirm flow
+     * gate transaction disclosure on a valid signature, so an attacker can't read an
+     * order's status by guessing a Paymob order id with a bogus HMAC.
+     */
+    public boolean verifyRedirectHmac(String payload, String receivedHmac) {
+        PaymentProvider provider = providerRepo.findFirstByIsActiveTrue().orElse(null);
+        if (provider == null) return false;
+        return validateHmac(payload, receivedHmac, provider.getHmacSecret());
+    }
+
     private String buildOrderMetadata(InitiatePaymentRequest req) {
         try {
             ObjectNode meta = objectMapper.createObjectNode();

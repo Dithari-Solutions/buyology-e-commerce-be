@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.payment.controller;
 
+import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.payment.dto.TransactionResponse;
 import com.buyology.ecommerce.payment.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
@@ -72,21 +74,30 @@ public class PaymentWebhookController {
      * session token has expired by the time they return from the 3-D Secure step.
      */
     @PostMapping("/confirm-redirect")
-    public ResponseEntity<Void> confirmRedirect(@RequestBody java.util.Map<String, String> params) {
+    public ResponseEntity<ApiResponse<TransactionResponse>> confirmRedirect(
+            @RequestBody java.util.Map<String, String> params) {
+        TransactionResponse resolved = null;
         try {
-            // Reconstruct the webhook-shaped payload, then run it through the *proxied*
-            // handleWebhook so its own @Transactional boundary (and AFTER_COMMIT
-            // order-paid event) apply — exactly as for a real webhook delivery.
+            // Reconstruct the webhook-shaped payload and verify its signature. We only
+            // process / disclose the order when the HMAC is valid, so a forged or
+            // guessed request can't mark an order paid or read its status.
             String payload = paymentService.buildRedirectWebhookPayload(params);
-            if (payload != null) {
+            if (payload != null && paymentService.verifyRedirectHmac(payload, params.get("hmac"))) {
+                // Run through the *proxied* handleWebhook so its @Transactional boundary
+                // (and AFTER_COMMIT order-paid event) apply, exactly as a real webhook —
+                // idempotent with it via the shared Paymob-transaction-id event key.
                 paymentService.handleWebhook(payload, params.get("hmac"));
+                // Resolve by the Paymob order id so the storefront can show status and
+                // route to the order even when its session/orderId are unavailable.
+                resolved = paymentService.resolveByPaymobOrder(params.get("order"));
             }
         } catch (Exception e) {
             // Best-effort fallback: a bad HMAC / unknown order must not break the
             // shopper's return-to-site UX. handleWebhook has already rolled back.
             log.warn("[REDIRECT-CONFIRM] Confirmation failed: {}", e.getMessage());
         }
-        // Always 200 so the storefront's return flow proceeds to status polling.
-        return ResponseEntity.ok().build();
+        // Always 200 so the storefront's return flow proceeds (it falls back to its own
+        // session/orderId polling when the body is null).
+        return ApiResponse.success(resolved, "Redirect processed");
     }
 }
