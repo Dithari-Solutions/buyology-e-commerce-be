@@ -40,7 +40,7 @@ public class OpenApiConfig {
                                 .email("firdovsirz@gmail.com")))
                 .servers(List.of(
                         new Server().url("http://localhost:8080").description("Local development"),
-                        new Server().url("https://api.buyology.com").description("Production")))
+                        new Server().url("https://api.buyology.online").description("Production")))
                 .addSecurityItem(new SecurityRequirement().addList(bearerSchemeName))
                 .components(new Components()
                         .addSecuritySchemes(bearerSchemeName, new SecurityScheme()
