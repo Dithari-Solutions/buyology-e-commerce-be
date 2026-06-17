@@ -12,15 +12,20 @@ import com.buyology.ecommerce.order.repository.OrderRepository;
 import com.buyology.ecommerce.payment.config.PaymobProperties;
 import com.buyology.ecommerce.payment.domain.PaymentRefund;
 import com.buyology.ecommerce.payment.domain.PaymentTransaction;
+import com.buyology.ecommerce.payment.dto.CourierFeeChargeRequest;
+import com.buyology.ecommerce.payment.dto.PaymentInitiatedResponse;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
+import com.buyology.ecommerce.payment.event.CourierFeePaidEvent;
 import com.buyology.ecommerce.payment.repository.PaymentRefundRepository;
 import com.buyology.ecommerce.payment.repository.PaymentTransactionRepository;
+import com.buyology.ecommerce.payment.service.PaymentService;
 import com.buyology.ecommerce.payment.service.PaymobClient;
 import com.buyology.ecommerce.refund.domain.RefundRequest;
 import com.buyology.ecommerce.refund.domain.RefundSetting;
 import com.buyology.ecommerce.refund.dto.RefundRequestResponse;
 import com.buyology.ecommerce.refund.dto.SetReturnMethodRequest;
+import com.buyology.ecommerce.refund.dto.SetReturnMethodResponse;
 import com.buyology.ecommerce.refund.enums.RefundRequestStatus;
 import com.buyology.ecommerce.refund.enums.RefundReturnMethod;
 import com.buyology.ecommerce.refund.exception.RefundException;
@@ -31,7 +36,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
@@ -61,6 +69,7 @@ public class RefundRequestService {
     private final EmailService emailService;
     private final PaymobClient paymobClient;
     private final PaymobProperties paymobProperties;
+    private final PaymentService paymentService;
 
     public RefundRequestService(RefundRequestRepository repository,
                                 RefundSettingService settingService,
@@ -72,7 +81,8 @@ public class RefundRequestService {
                                 CurrencyExchangeService currencyService,
                                 EmailService emailService,
                                 PaymobClient paymobClient,
-                                PaymobProperties paymobProperties) {
+                                PaymobProperties paymobProperties,
+                                PaymentService paymentService) {
         this.repository = repository;
         this.settingService = settingService;
         this.orderRepository = orderRepository;
@@ -84,6 +94,7 @@ public class RefundRequestService {
         this.emailService = emailService;
         this.paymobClient = paymobClient;
         this.paymobProperties = paymobProperties;
+        this.paymentService = paymentService;
     }
 
     // ── Customer ─────────────────────────────────────────────────────────────
@@ -199,19 +210,25 @@ public class RefundRequestService {
     }
 
     @Transactional
-    public RefundRequestResponse setReturnMethod(UUID id, UUID userId, SetReturnMethodRequest request) {
+    public SetReturnMethodResponse setReturnMethod(UUID id, UUID userId, SetReturnMethodRequest request) {
         RefundRequest req = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new RefundException("Refund request not found"));
 
-        // Customer-initiated, money-relevant action (sets the courier fee withheld
-        // from the refund): verify the caller actually owns the underlying order.
+        // Customer-initiated, money-relevant action (the courier fee is charged
+        // separately via Paymob): verify the caller actually owns the underlying order.
         // The order carries an authCredentialId; resolve it to a Users.id and assert
         // the authenticated principal is that user (403 otherwise).
         assertOwnsOrder(req.getOrderId());
 
-        if (req.getStatus() != RefundRequestStatus.APPROVED) {
+        // APPROVED is the first choice; COURIER_FEE_PENDING lets the customer retry the
+        // courier-fee payment (or switch to drop-off) if they abandoned the first attempt.
+        if (req.getStatus() != RefundRequestStatus.APPROVED
+                && req.getStatus() != RefundRequestStatus.COURIER_FEE_PENDING) {
             throw new RefundException("Return method can only be set on an approved request");
         }
+
+        Order order = orderRepository.findById(req.getOrderId()).orElse(null);
+
         if (request.method() == RefundReturnMethod.COURIER_PICKUP) {
             RefundSetting setting = settingService.getOrCreate();
             String currency = (request.currency() == null || request.currency().isBlank())
@@ -222,18 +239,70 @@ public class RefundRequestService {
             req.setCourierFeeAmount(feeLocal);
             req.setCourierFeeCurrency(currency);
             req.setReturnMethod(RefundReturnMethod.COURIER_PICKUP);
-            req.setStatus(RefundRequestStatus.COURIER_REQUESTED);
-        } else {
-            req.setCourierFeeAmount(null);
-            req.setCourierFeeCurrency(null);
-            req.setReturnMethod(RefundReturnMethod.STORE_DROPOFF);
-            req.setStatus(RefundRequestStatus.DROPOFF_SELECTED);
-        }
-        req = repository.save(req);
+            // Hard gate: the request stays in COURIER_FEE_PENDING until the customer pays
+            // the courier fee through Paymob. The CourierFeePaidEvent webhook advances it
+            // to COURIER_REQUESTED. The fee is collected on top of the order and is NOT
+            // deducted from the refund (see pay()).
+            req.setStatus(RefundRequestStatus.COURIER_FEE_PENDING);
+            req = repository.save(req);
 
+            PaymentInitiatedResponse payment = initiateCourierFee(req, order, currency, feeLocal, request.redirectionUrl());
+            return new SetReturnMethodResponse(toResponse(req), payment);
+        }
+
+        req.setCourierFeeAmount(null);
+        req.setCourierFeeCurrency(null);
+        req.setReturnMethod(RefundReturnMethod.STORE_DROPOFF);
+        req.setStatus(RefundRequestStatus.DROPOFF_SELECTED);
+        req = repository.save(req);
+        notifyMethodConfirmed(req, order);
+        return new SetReturnMethodResponse(toResponse(req), null);
+    }
+
+    /** Build and fire the standalone Paymob charge for the courier pickup fee. */
+    private PaymentInitiatedResponse initiateCourierFee(RefundRequest req, Order order,
+                                                        String currency, BigDecimal feeLocal,
+                                                        String redirectionUrl) {
+        if (order == null || order.getAuthCredentialId() == null) {
+            throw new RefundException("Order is not linked to an account; cannot charge the courier fee");
+        }
+        String billingName = customerNameFor(order);
+        CourierFeeChargeRequest charge = new CourierFeeChargeRequest(
+                req.getId(),
+                order.getAuthCredentialId(),
+                feeLocal,
+                currency,
+                emailFor(order),
+                order.getRecipientPhone(),
+                "there".equals(billingName) ? null : billingName,
+                redirectionUrl);
+        return paymentService.initiateCourierFeePayment(charge);
+    }
+
+    /**
+     * Advances a refund request from COURIER_FEE_PENDING to COURIER_REQUESTED once its
+     * standalone courier-fee charge succeeds. Runs in a fresh transaction after the
+     * payment transaction commits to SUCCESS (mirrors the order paid-listener), so a
+     * failure here never rolls back the payment.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onCourierFeePaid(CourierFeePaidEvent event) {
+        if (event.refundRequestId() == null) return;
+        RefundRequest req = repository.findById(event.refundRequestId()).orElse(null);
+        if (req == null) {
+            log.warn("[REFUND] CourierFeePaidEvent for unknown refund {}", event.refundRequestId());
+            return;
+        }
+        if (req.getStatus() != RefundRequestStatus.COURIER_FEE_PENDING) {
+            log.info("[REFUND] CourierFeePaidEvent for refund {} ignored (status {})", req.getId(), req.getStatus());
+            return;
+        }
+        req.setStatus(RefundRequestStatus.COURIER_REQUESTED);
+        req = repository.save(req);
+        log.info("[REFUND] Courier fee paid — refund {} advanced to COURIER_REQUESTED", req.getId());
         Order order = orderRepository.findById(req.getOrderId()).orElse(null);
         notifyMethodConfirmed(req, order);
-        return toResponse(req);
     }
 
     /**
@@ -340,19 +409,11 @@ public class RefundRequestService {
             throw new RefundException("Payment transaction has no Paymob transaction id — cannot refund");
         }
 
-        // Refundable = charged amount − courier fee − amount already refunded.
-        // All math is done in the transaction's currency (what Paymob charged).
+        // Refundable = full charged amount − amount already refunded. The courier
+        // pickup fee is NOT deducted here: the customer pays it separately via Paymob
+        // when requesting the courier (purpose = COURIER_RETURN_FEE), so the order is
+        // refunded in full. All math is done in the transaction's currency (what Paymob charged).
         String txCurrency = txn.getCurrency();
-        BigDecimal courierFee = BigDecimal.ZERO;
-        if (req.getCourierFeeAmount() != null
-                && req.getCourierFeeAmount().compareTo(BigDecimal.ZERO) > 0) {
-            String feeCurrency = req.getCourierFeeCurrency() != null
-                    ? req.getCourierFeeCurrency()
-                    : txCurrency;
-            courierFee = feeCurrency.equalsIgnoreCase(txCurrency)
-                    ? req.getCourierFeeAmount()
-                    : currencyService.convert(req.getCourierFeeAmount(), feeCurrency, txCurrency);
-        }
 
         BigDecimal alreadyRefunded = paymentRefundRepository
                 .sumAmountByTransactionAndStatus(txn, RefundStatus.SUCCESS);
@@ -361,13 +422,12 @@ public class RefundRequestService {
         }
 
         BigDecimal refundAmount = txn.getAmount()
-                .subtract(courierFee)
                 .subtract(alreadyRefunded)
                 .setScale(2, java.math.RoundingMode.HALF_UP);
         if (refundAmount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new RefundException(
                     "Nothing to refund: charged " + txn.getAmount() + " " + txCurrency
-                            + ", courier fee " + courierFee + ", already refunded " + alreadyRefunded);
+                            + ", already refunded " + alreadyRefunded);
         }
 
         long amountCents = refundAmount
@@ -513,9 +573,10 @@ public class RefundRequestService {
         String instructions;
         if (req.getReturnMethod() == RefundReturnMethod.COURIER_PICKUP) {
             method = "Courier pickup";
-            instructions = "A courier will be in touch to schedule pickup. The pickup fee of "
+            instructions = "We've received your pickup fee of "
                     + req.getCourierFeeAmount().toPlainString() + " " + req.getCourierFeeCurrency()
-                    + " will be deducted from your refund.";
+                    + ". A courier will be in touch to schedule pickup. This fee is charged separately and "
+                    + "does not reduce your refund — your order will be refunded in full.";
         } else {
             method = "Drop off at our store";
             instructions = "Please bring the product to our store at your convenience along with your refund request ID.";

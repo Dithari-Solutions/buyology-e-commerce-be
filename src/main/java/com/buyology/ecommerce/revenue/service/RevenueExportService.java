@@ -158,13 +158,13 @@ public class RevenueExportService {
 
     private Tabular reportToTabular(RevenueReportResponse report, String periodHeader) {
         Tabular data = new Tabular(
-                List.of(periodHeader, "Orders", "Gross Revenue", "Refunds", "Net Revenue"), new ArrayList<>());
+                List.of(periodHeader, "Orders", "Gross Revenue", "Refunds", "Net Revenue", "Delivery Fees"), new ArrayList<>());
         report.buckets().forEach(b -> data.rows().add(new String[]{
                 b.period(), String.valueOf(b.orders()), String.valueOf(b.revenue()),
-                String.valueOf(b.refunded()), String.valueOf(b.net())}));
+                String.valueOf(b.refunded()), String.valueOf(b.net()), String.valueOf(b.deliveryFeeRevenue())}));
         data.rows().add(new String[]{"TOTAL", String.valueOf(report.totalOrders()),
                 String.valueOf(report.totalRevenue()), String.valueOf(report.totalRefunded()),
-                String.valueOf(report.netRevenue())});
+                String.valueOf(report.netRevenue()), String.valueOf(report.totalDeliveryFeeRevenue())});
         return data;
     }
 

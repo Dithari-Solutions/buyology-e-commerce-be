@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.revenue.service;
 
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
+import com.buyology.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.buyology.ecommerce.revenue.dto.RevenueBucketRow;
 import com.buyology.ecommerce.revenue.dto.RevenueOrderRow;
 import com.buyology.ecommerce.revenue.dto.RevenueReportResponse;
@@ -34,10 +35,13 @@ public class RevenueService {
 
     private final OrderItemRepository orderItemRepository;
     private final SupplierRepository supplierRepository;
+    private final PaymentTransactionRepository paymentTransactionRepository;
 
-    public RevenueService(OrderItemRepository orderItemRepository, SupplierRepository supplierRepository) {
+    public RevenueService(OrderItemRepository orderItemRepository, SupplierRepository supplierRepository,
+                          PaymentTransactionRepository paymentTransactionRepository) {
         this.orderItemRepository = orderItemRepository;
         this.supplierRepository = supplierRepository;
+        this.paymentTransactionRepository = paymentTransactionRepository;
     }
 
     public RevenueReportResponse platformReport(RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -53,7 +57,10 @@ public class RevenueService {
         Map<String, BigDecimal> refunds = refundMap(
                 orderItemRepository.platformRefundBuckets(period.getTruncUnit(), fromI, toI, store));
         List<RevenueOrderRow> orders = orderRows(orderItemRepository.platformOrderRows(fromI, toI, store));
-        return buildReport(period, window[0], window[1], "Buyology", rows, refunds, orders);
+        // Courier return-pickup fees are platform-level delivery revenue (settlement currency).
+        Map<String, BigDecimal> deliveryFees = bucketMap(
+                paymentTransactionRepository.courierFeeRevenueBuckets(period.getTruncUnit(), fromI, toI));
+        return buildReport(period, window[0], window[1], "Buyology", rows, refunds, orders, deliveryFees);
     }
 
     public RevenueReportResponse supplierReport(UUID supplierId, RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -67,7 +74,8 @@ public class RevenueService {
         String label = supplierRepository.findById(supplierId)
                 .map(Supplier::getBusinessName)
                 .orElse(supplierId.toString());
-        return buildReport(period, window[0], window[1], label, rows, refunds, orders);
+        // Delivery (courier return-pickup) fees are platform revenue, never a supplier's.
+        return buildReport(period, window[0], window[1], label, rows, refunds, orders, Map.of());
     }
 
     public SupplierRevenueOverviewResponse supplierOverview(RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -111,37 +119,51 @@ public class RevenueService {
 
     private RevenueReportResponse buildReport(
             RevenuePeriod period, LocalDate from, LocalDate to, String label,
-            List<Object[]> rows, Map<String, BigDecimal> refunds, List<RevenueOrderRow> orders) {
+            List<Object[]> rows, Map<String, BigDecimal> refunds, List<RevenueOrderRow> orders,
+            Map<String, BigDecimal> deliveryFees) {
         List<RevenueBucketRow> buckets = new ArrayList<>();
         long totalOrders = 0;
         BigDecimal totalRevenue = BigDecimal.ZERO;
         BigDecimal totalRefunded = BigDecimal.ZERO;
+        BigDecimal totalDeliveryFee = BigDecimal.ZERO;
         Set<String> seenPeriods = new LinkedHashSet<>();
         for (Object[] row : rows) {
             String period0 = periodLabel(row[0]);
             long bucketOrders = ((Number) row[1]).longValue();
             BigDecimal revenue = (BigDecimal) row[2];
             BigDecimal refunded = refunds.getOrDefault(period0, BigDecimal.ZERO);
-            buckets.add(new RevenueBucketRow(period0, bucketOrders, revenue, refunded, revenue.subtract(refunded)));
+            BigDecimal deliveryFee = deliveryFees.getOrDefault(period0, BigDecimal.ZERO);
+            buckets.add(new RevenueBucketRow(period0, bucketOrders, revenue, refunded, revenue.subtract(refunded), deliveryFee));
             seenPeriods.add(period0);
             totalOrders += bucketOrders;
             totalRevenue = totalRevenue.add(revenue);
             totalRefunded = totalRefunded.add(refunded);
+            totalDeliveryFee = totalDeliveryFee.add(deliveryFee);
         }
-        // Periods that had refunds but no gross revenue (rare) — surface as negative net.
-        for (Map.Entry<String, BigDecimal> e : refunds.entrySet()) {
-            if (!seenPeriods.contains(e.getKey())) {
-                buckets.add(new RevenueBucketRow(e.getKey(), 0, BigDecimal.ZERO, e.getValue(), e.getValue().negate()));
-                totalRefunded = totalRefunded.add(e.getValue());
-            }
+        // Periods that had refunds and/or delivery fees but no gross product revenue (rare):
+        // surface them so the bucket list and totals stay complete.
+        Set<String> extraPeriods = new LinkedHashSet<>();
+        refunds.keySet().forEach(p -> { if (!seenPeriods.contains(p)) extraPeriods.add(p); });
+        deliveryFees.keySet().forEach(p -> { if (!seenPeriods.contains(p)) extraPeriods.add(p); });
+        for (String p : extraPeriods) {
+            BigDecimal refunded = refunds.getOrDefault(p, BigDecimal.ZERO);
+            BigDecimal deliveryFee = deliveryFees.getOrDefault(p, BigDecimal.ZERO);
+            buckets.add(new RevenueBucketRow(p, 0, BigDecimal.ZERO, refunded, refunded.negate(), deliveryFee));
+            totalRefunded = totalRefunded.add(refunded);
+            totalDeliveryFee = totalDeliveryFee.add(deliveryFee);
         }
         return new RevenueReportResponse(period, from, to, label,
                 totalRevenue, totalRefunded, totalRevenue.subtract(totalRefunded), totalOrders,
-                buckets, orders == null ? List.of() : orders);
+                buckets, orders == null ? List.of() : orders, totalDeliveryFee);
     }
 
     /** period label -> allocated refund amount, from a [period, refunded] row list. */
     private Map<String, BigDecimal> refundMap(List<Object[]> rows) {
+        return bucketMap(rows);
+    }
+
+    /** period label -> amount, from a [period, amount] row list. */
+    private Map<String, BigDecimal> bucketMap(List<Object[]> rows) {
         Map<String, BigDecimal> map = new HashMap<>();
         for (Object[] r : rows) {
             map.put(periodLabel(r[0]), (BigDecimal) r[1]);

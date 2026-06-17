@@ -6,8 +6,11 @@ import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,4 +43,25 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
 
     Optional<PaymentTransaction> findFirstByAppOrderIdAndStatusIn(
             UUID appOrderId, List<PaymentStatus> statuses);
+
+    /**
+     * Delivery-fee revenue, bucketed by time. Sums successfully-charged courier
+     * return-pickup fees (purpose = COURIER_RETURN_FEE) per period. Amounts are in
+     * the settlement currency (AED), the same as {@code amount} is persisted in.
+     * Returns rows of [period (timestamp), revenue].
+     */
+    @Query(value = """
+            SELECT date_trunc(:bucket, pt.created_at) AS period,
+                   COALESCE(SUM(pt.amount), 0) AS revenue
+            FROM payment_transactions pt
+            WHERE pt.purpose = 'COURIER_RETURN_FEE'
+              AND pt.status = 'SUCCESS'
+              AND pt.created_at >= :from
+              AND pt.created_at < :to
+            GROUP BY 1
+            ORDER BY 1
+            """, nativeQuery = true)
+    List<Object[]> courierFeeRevenueBuckets(@Param("bucket") String bucket,
+                                            @Param("from") Instant from,
+                                            @Param("to") Instant to);
 }

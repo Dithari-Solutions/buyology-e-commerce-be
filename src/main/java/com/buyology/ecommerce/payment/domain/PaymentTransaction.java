@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.payment.domain;
 
 import com.buyology.ecommerce.payment.enums.PaymentMethodType;
+import com.buyology.ecommerce.payment.enums.PaymentPurpose;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -50,6 +51,16 @@ public class PaymentTransaction {
     private String intentionId;
 
     // --------------------------------------------------------
+
+    // What this payment is for. ORDER (default) for checkout; COURIER_RETURN_FEE for
+    // a standalone refund courier-pickup fee not tied to an order.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "purpose", nullable = false, length = 30)
+    private PaymentPurpose purpose = PaymentPurpose.ORDER;
+
+    // When purpose == COURIER_RETURN_FEE, the refund request this fee belongs to.
+    @Column(name = "refund_request_id")
+    private UUID refundRequestId;
 
     // FK to orders service — stored as plain UUID (cross-service boundary).
     @Column(name = "app_order_id")
@@ -148,6 +159,12 @@ public class PaymentTransaction {
 
     public String getIntentionId() { return intentionId; }
     public void setIntentionId(String intentionId) { this.intentionId = intentionId; }
+
+    public PaymentPurpose getPurpose() { return purpose; }
+    public void setPurpose(PaymentPurpose purpose) { this.purpose = purpose; }
+
+    public UUID getRefundRequestId() { return refundRequestId; }
+    public void setRefundRequestId(UUID refundRequestId) { this.refundRequestId = refundRequestId; }
 
     public UUID getAppOrderId() { return appOrderId; }
     public void setAppOrderId(UUID appOrderId) { this.appOrderId = appOrderId; }

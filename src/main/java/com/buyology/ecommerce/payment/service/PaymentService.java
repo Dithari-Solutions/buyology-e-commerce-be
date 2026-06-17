@@ -5,8 +5,10 @@ import com.buyology.ecommerce.order.event.PaymentFailedEvent;
 import com.buyology.ecommerce.payment.domain.*;
 import com.buyology.ecommerce.payment.dto.*;
 import com.buyology.ecommerce.payment.enums.PaymentMethodType;
+import com.buyology.ecommerce.payment.enums.PaymentPurpose;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
+import com.buyology.ecommerce.payment.event.CourierFeePaidEvent;
 import com.buyology.ecommerce.payment.repository.*;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
@@ -266,6 +268,118 @@ public class PaymentService {
         return initiatePayment(ip);
     }
 
+    /**
+     * Initiate a STANDALONE Paymob charge for a refund courier return-pickup fee.
+     * Unlike {@link #initiatePayment}, this is not tied to a cart or order: the
+     * transaction is tagged {@code purpose = COURIER_RETURN_FEE} and linked to the
+     * refund request, so the webhook routes its success to the refund flow (advancing
+     * the request to COURIER_REQUESTED) and it is later reported as delivery-fee revenue.
+     * Card only — instalment providers don't make sense for a small fee.
+     */
+    @Transactional
+    public PaymentInitiatedResponse initiateCourierFeePayment(CourierFeeChargeRequest req) {
+        // customerId is an auth_credentials.id — same readiness/ownership check as orders.
+        userProfileService.checkPaymentReadiness(req.customerId());
+
+        PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
+                .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
+        PaymentMethodConfig config = methodConfigRepo
+                .findByProviderAndMethodTypeAndIsActiveTrue(provider, PaymentMethodType.CARD)
+                .orElseThrow(() -> new IllegalStateException("No active card config for courier fee payment"));
+
+        String targetCurrency = "AED";
+        BigDecimal convertedAmount = currencyExchangeService.convert(req.amount(), req.currency(), targetCurrency);
+        long amountCents = convertedAmount
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(0, java.math.RoundingMode.HALF_UP)
+                .longValueExact();
+
+        ObjectNode billingData = buildCourierFeeBilling(req);
+
+        ObjectNode customer = objectMapper.createObjectNode();
+        customer.put("email", req.customerEmail() != null ? req.customerEmail() : "NA");
+        String[] nameParts = req.billingName() != null ? req.billingName().split(" ", 2) : new String[]{"NA", "NA"};
+        customer.put("first_name", nameParts[0]);
+        customer.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
+        if (req.customerPhone() != null) {
+            customer.put("phone_number", req.customerPhone());
+        }
+
+        ArrayNode items = objectMapper.createArrayNode();
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("name", "Courier return pickup fee");
+        item.put("amount", amountCents);
+        item.put("description", "Refund request " + req.refundRequestId());
+        item.put("quantity", 1);
+        items.add(item);
+
+        int integrationId = Integer.parseInt(config.getIntegrationId());
+
+        // Commit the PENDING transaction first (REQUIRES_NEW) so the row — and its
+        // merchant_order_id — exists before we call Paymob; the webhook resolves on it.
+        PaymentTransaction tx = savePendingCourierFeeTransaction(req, config, convertedAmount, amountCents, targetCurrency);
+
+        String redirectionUrl = req.redirectionUrl() != null && !req.redirectionUrl().isBlank()
+                ? req.redirectionUrl()
+                : paymobProperties.getRedirectionUrl();
+
+        PaymobClient.IntentionResult intention = paymobClient.createIntention(
+                provider.getSecretKey(), provider.getBaseUrl(),
+                amountCents, targetCurrency,
+                integrationId, tx.getId().toString(),
+                billingData, customer, items,
+                provider.getNotificationUrl(),
+                redirectionUrl);
+
+        log.info("[COURIER-FEE] Created Paymob Intention for refund {}: tx={}, intention={}",
+                req.refundRequestId(), tx.getId(), intention.intentionId());
+
+        return finalizeTransactionWithProvider(tx.getId(), intention);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentTransaction savePendingCourierFeeTransaction(CourierFeeChargeRequest req,
+                                                               PaymentMethodConfig config,
+                                                               BigDecimal amount,
+                                                               long amountCents,
+                                                               String currency) {
+        PaymentTransaction tx = new PaymentTransaction();
+        tx.setPurpose(PaymentPurpose.COURIER_RETURN_FEE);
+        tx.setRefundRequestId(req.refundRequestId());
+        tx.setMethodConfig(config);
+        tx.setMethodType(PaymentMethodType.CARD);
+        tx.setAmount(amount);
+        tx.setAmountCents(amountCents);
+        tx.setCurrency(currency);
+        tx.setStatus(PaymentStatus.PENDING);
+        tx.setCustomerId(req.customerId());
+        tx.setCustomerEmail(req.customerEmail());
+        tx.setCustomerPhone(req.customerPhone());
+        tx.setBillingName(req.billingName());
+        tx = transactionRepo.save(tx);
+        log.info("[COURIER-FEE] Committed PENDING courier-fee transaction: id={}, refundRequest={}",
+                tx.getId(), req.refundRequestId());
+        return tx;
+    }
+
+    private ObjectNode buildCourierFeeBilling(CourierFeeChargeRequest req) {
+        String[] nameParts = req.billingName() != null ? req.billingName().split(" ", 2) : new String[]{"NA", "NA"};
+        ObjectNode n = objectMapper.createObjectNode();
+        n.put("first_name", nameParts[0]);
+        n.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
+        n.put("phone_number", req.customerPhone() != null ? req.customerPhone() : "NA");
+        n.put("apartment", "NA");
+        n.put("floor", "NA");
+        n.put("street", "NA");
+        n.put("building", "NA");
+        n.put("city", "NA");
+        n.put("country", "AE");
+        n.put("state", "NA");
+        n.put("postal_code", "NA");
+        n.put("email", req.customerEmail() != null ? req.customerEmail() : "NA");
+        return n;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentTransaction savePendingTransaction(InitiatePaymentRequest req,
                                                      PaymentProvider provider, 
@@ -412,16 +526,32 @@ public class PaymentService {
 
             log.info("[WEBHOOK] Transaction {} updated to {}", transaction.getId(), transaction.getStatus());
 
+            boolean isCourierFee = transaction.getPurpose() == PaymentPurpose.COURIER_RETURN_FEE;
             if (transaction.getStatus() == PaymentStatus.SUCCESS) {
-                log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
-                eventPublisher.publishEvent(new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
+                if (isCourierFee) {
+                    log.info("[WEBHOOK] Courier return fee paid for refund {}. Publishing CourierFeePaidEvent.",
+                            transaction.getRefundRequestId());
+                    eventPublisher.publishEvent(new CourierFeePaidEvent(
+                            transaction.getRefundRequestId(), transaction.getId(),
+                            transaction.getAmount(), transaction.getCurrency()));
+                } else {
+                    log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
+                    eventPublisher.publishEvent(new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
+                }
             } else if (transaction.getStatus() == PaymentStatus.FAILED
                     || transaction.getStatus() == PaymentStatus.CANCELLED) {
-                log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
-                eventPublisher.publishEvent(new PaymentFailedEvent(
-                        transaction.getAppOrderId(),
-                        transaction.getId(),
-                        transaction.getFailureReason()));
+                if (isCourierFee) {
+                    // No order to fail — the refund request simply stays COURIER_FEE_PENDING
+                    // so the customer can retry the fee payment or switch to store drop-off.
+                    log.info("[WEBHOOK] Courier return fee charge {} for refund {}.",
+                            transaction.getStatus(), transaction.getRefundRequestId());
+                } else {
+                    log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
+                    eventPublisher.publishEvent(new PaymentFailedEvent(
+                            transaction.getAppOrderId(),
+                            transaction.getId(),
+                            transaction.getFailureReason()));
+                }
             }
 
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, null);

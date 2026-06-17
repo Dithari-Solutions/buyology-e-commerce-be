@@ -20,5 +20,6 @@ public record RevenueReportResponse(
         BigDecimal netRevenue,
         long totalOrders,
         List<RevenueBucketRow> buckets,
-        List<RevenueOrderRow> orders) {
+        List<RevenueOrderRow> orders,
+        BigDecimal totalDeliveryFeeRevenue) {
 }

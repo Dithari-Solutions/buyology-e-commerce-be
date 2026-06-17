@@ -3,6 +3,7 @@ package com.buyology.ecommerce.refund.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.refund.dto.RefundRequestResponse;
 import com.buyology.ecommerce.refund.dto.SetReturnMethodRequest;
+import com.buyology.ecommerce.refund.dto.SetReturnMethodResponse;
 import com.buyology.ecommerce.refund.service.RefundRequestService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
@@ -62,9 +63,15 @@ public class CustomerRefundController {
                 "Refund request fetched");
     }
 
+    /**
+     * Choose the return method for an approved refund. For STORE_DROPOFF the request
+     * is confirmed immediately. For COURIER_PICKUP the response carries a Paymob
+     * checkout session ({@code payment}) the customer must complete to pay the courier
+     * pickup fee; the request only advances to COURIER_REQUESTED once that payment succeeds.
+     */
     @PostMapping("/{id}/return-method")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<RefundRequestResponse>> setReturnMethod(
+    public ResponseEntity<ApiResponse<SetReturnMethodResponse>> setReturnMethod(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,
             @Valid @RequestBody SetReturnMethodRequest body) {

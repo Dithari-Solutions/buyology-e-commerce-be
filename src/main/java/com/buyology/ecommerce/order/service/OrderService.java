@@ -221,7 +221,7 @@ public class OrderService {
 
         // Resolve delivery method and fees if not explicitly provided (or even if provided, re-calculate for security)
         DeliveryMethod method = req.getDeliveryMethod() != null ? req.getDeliveryMethod() : resolveDeliveryMethod(cartItems, address);
-        BigDecimal shippingFee = calculateShippingFee(method, cart.getTotalPrice(), cart.getCurrency());
+        BigDecimal shippingFee = calculateShippingFee(cart.getTotalPrice(), cart.getCurrency());
         String estimatedDeliveryTime = estimateDeliveryTime(method);
 
         order.setDeliveryMethod(method);
@@ -761,12 +761,11 @@ public class OrderService {
         return allLocal ? DeliveryMethod.EXPRESS : DeliveryMethod.REGULAR;
     }
 
-    private BigDecimal calculateShippingFee(DeliveryMethod method, BigDecimal subtotal, String currency) {
-        if (method == DeliveryMethod.REGULAR) {
-            return BigDecimal.ZERO;
-        }
-        // Free express delivery once subtotal (in AED equivalent) reaches the threshold;
-        // otherwise charge 15 AED converted to the cart's display currency.
+    private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency) {
+        // Flat delivery policy — same source-of-truth as CartService, applied to every
+        // delivery method so the order total matches the fee shown in the cart:
+        // free once the subtotal (in AED equivalent) reaches the threshold, otherwise
+        // charge 15 AED converted to the cart's display currency.
         BigDecimal subtotalAed = BASE_CURRENCY.equalsIgnoreCase(currency)
                 ? subtotal
                 : currencyExchangeService.convert(subtotal, currency, BASE_CURRENCY);
