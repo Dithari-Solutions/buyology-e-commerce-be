@@ -36,6 +36,20 @@ public interface RefundRequestRepository extends JpaRepository<RefundRequest, UU
                                            @Param("status") RefundRequestStatus status,
                                            Pageable pageable);
 
+    /**
+     * Refunds that touch a given store — i.e. the refund's order contains at least one
+     * order item priced from that store. Used by the admin "Refunds → store" view.
+     */
+    @Query("""
+            SELECT DISTINCT r FROM RefundRequest r, OrderItem i
+            WHERE i.order.id = r.orderId
+              AND i.storeId = :storeId
+              AND (:status IS NULL OR r.status = :status)
+            """)
+    Page<RefundRequest> findAllForStore(@Param("storeId") UUID storeId,
+                                        @Param("status") RefundRequestStatus status,
+                                        Pageable pageable);
+
     /** Single refund visible to a supplier only if its order contains that supplier's item. */
     @Query("""
             SELECT DISTINCT r FROM RefundRequest r, OrderItem i

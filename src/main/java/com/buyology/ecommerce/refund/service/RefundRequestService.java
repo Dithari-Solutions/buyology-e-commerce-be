@@ -327,11 +327,17 @@ public class RefundRequestService {
     // ── Admin ───────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public Page<RefundRequestResponse> listForAdmin(RefundRequestStatus status, int page, int size) {
+    public Page<RefundRequestResponse> listForAdmin(RefundRequestStatus status, UUID storeId, int page, int size) {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<RefundRequest> result = (status == null)
-                ? repository.findAll(pageable)
-                : repository.findAllByStatus(status, pageable);
+        Page<RefundRequest> result;
+        if (storeId != null) {
+            // Scope to refunds whose order contains an item priced from that store.
+            result = repository.findAllForStore(storeId, status, pageable);
+        } else if (status == null) {
+            result = repository.findAll(pageable);
+        } else {
+            result = repository.findAllByStatus(status, pageable);
+        }
         return result.map(this::toResponse);
     }
 

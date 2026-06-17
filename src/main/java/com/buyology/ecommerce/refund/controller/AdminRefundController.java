@@ -52,9 +52,10 @@ public class AdminRefundController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Page<RefundRequestResponse>>> list(
             @RequestParam(required = false) RefundRequestStatus status,
+            @RequestParam(required = false) UUID storeId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(refundService.listForAdmin(status, page, size), "Refund requests fetched");
+        return ApiResponse.success(refundService.listForAdmin(status, storeId, page, size), "Refund requests fetched");
     }
 
     @GetMapping("/refunds/{id}")
