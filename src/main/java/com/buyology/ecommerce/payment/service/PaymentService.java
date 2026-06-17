@@ -141,6 +141,14 @@ public class PaymentService {
                     throw new org.springframework.security.access.AccessDeniedException(
                             "You are not allowed to pay for this order");
                 }
+                // Bind the stored transaction to the order's authoritative auth_credentials.id
+                // so ownership reads (requireOwnsByCredentialId) resolve correctly regardless
+                // of the customerId the client supplied. checkPaymentReadiness above already
+                // validated the client value against the principal; this only corrects what we
+                // persist, so a client sending its users.id can no longer 403 itself on read.
+                if (order.getAuthCredentialId() != null) {
+                    req.setCustomerId(order.getAuthCredentialId());
+                }
                 BigDecimal orderTotal = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
                 BigDecimal totalInReqCcy = order.getCurrency() != null
                         && order.getCurrency().equalsIgnoreCase(req.getCurrency())
