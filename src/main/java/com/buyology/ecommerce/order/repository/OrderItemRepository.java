@@ -60,6 +60,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
      *  Optional store filter (pass null storeId for all stores). */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
+                   o.currency AS currency,
                    COUNT(DISTINCT oi.order_id) AS orders,
                    COALESCE(SUM(oi.total_price), 0) AS revenue
             FROM order_items oi
@@ -69,7 +70,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
-            GROUP BY 1
+            GROUP BY 1, o.currency
             ORDER BY 1
             """, nativeQuery = true)
     List<Object[]> platformRevenueBuckets(
@@ -81,6 +82,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     /** A single supplier's revenue, bucketed by the given unit. */
     @Query(value = """
             SELECT date_trunc(:bucket, oi.created_at) AS period,
+                   o.currency AS currency,
                    COUNT(DISTINCT oi.order_id) AS orders,
                    COALESCE(SUM(oi.total_price), 0) AS revenue
             FROM order_items oi
@@ -89,7 +91,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
-            GROUP BY 1
+            GROUP BY 1, o.currency
             ORDER BY 1
             """, nativeQuery = true)
     List<Object[]> supplierRevenueBuckets(
@@ -101,6 +103,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     /** Per-supplier revenue totals over a window — powers the all-suppliers overview. */
     @Query(value = """
             SELECT oi.supplier_id AS supplier_id,
+                   o.currency AS currency,
                    COUNT(DISTINCT oi.order_id) AS orders,
                    COALESCE(SUM(oi.total_price), 0) AS revenue
             FROM order_items oi
@@ -109,8 +112,8 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
-            GROUP BY oi.supplier_id
-            ORDER BY 3 DESC
+            GROUP BY oi.supplier_id, o.currency
+            ORDER BY 4 DESC
             """, nativeQuery = true)
     List<Object[]> supplierRevenueTotals(
             @Param("from") Instant from,
@@ -190,6 +193,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     @Query(value = """
             SELECT CAST(o.id AS text) AS order_id,
                    MIN(oi.created_at) AS created_at,
+                   o.currency AS currency,
                    SUM(oi.total_price) AS gross,
                    COALESCE((SELECT COALESCE(SUM(pr.amount), 0)
                              FROM payment_refunds pr
@@ -203,7 +207,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
-            GROUP BY o.id, o.total_amount
+            GROUP BY o.id, o.total_amount, o.currency
             ORDER BY MIN(oi.created_at) DESC
             """, nativeQuery = true)
     List<Object[]> platformOrderRows(
@@ -215,6 +219,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     @Query(value = """
             SELECT CAST(o.id AS text) AS order_id,
                    MIN(oi.created_at) AS created_at,
+                   o.currency AS currency,
                    SUM(oi.total_price) AS gross,
                    COALESCE((SELECT COALESCE(SUM(pr.amount), 0)
                              FROM payment_refunds pr
@@ -227,7 +232,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
-            GROUP BY o.id, o.total_amount
+            GROUP BY o.id, o.total_amount, o.currency
             ORDER BY MIN(oi.created_at) DESC
             """, nativeQuery = true)
     List<Object[]> supplierOrderRows(

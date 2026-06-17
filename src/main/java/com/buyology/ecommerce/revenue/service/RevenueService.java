@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.revenue.service;
 
+import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
 import com.buyology.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.buyology.ecommerce.revenue.dto.RevenueBucketRow;
@@ -18,6 +19,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,15 +35,33 @@ import java.util.stream.Collectors;
 @Service
 public class RevenueService {
 
+    /** All revenue figures are reported in this currency. */
+    private static final String REPORT_CURRENCY = "AED";
+
     private final OrderItemRepository orderItemRepository;
     private final SupplierRepository supplierRepository;
     private final PaymentTransactionRepository paymentTransactionRepository;
+    private final CurrencyExchangeService currencyExchangeService;
 
     public RevenueService(OrderItemRepository orderItemRepository, SupplierRepository supplierRepository,
-                          PaymentTransactionRepository paymentTransactionRepository) {
+                          PaymentTransactionRepository paymentTransactionRepository,
+                          CurrencyExchangeService currencyExchangeService) {
         this.orderItemRepository = orderItemRepository;
         this.supplierRepository = supplierRepository;
         this.paymentTransactionRepository = paymentTransactionRepository;
+        this.currencyExchangeService = currencyExchangeService;
+    }
+
+    /** Convert a gross amount from an order's display currency to the report currency (AED). */
+    private BigDecimal toAed(BigDecimal amount, String currency) {
+        if (amount == null) return BigDecimal.ZERO;
+        if (currency == null || currency.isBlank() || REPORT_CURRENCY.equalsIgnoreCase(currency)) return amount;
+        try {
+            return currencyExchangeService.convert(amount, currency, REPORT_CURRENCY);
+        } catch (Exception e) {
+            // If a live rate isn't available, fall back to the raw amount rather than dropping it.
+            return amount;
+        }
     }
 
     public RevenueReportResponse platformReport(RevenuePeriod period, LocalDate from, LocalDate to) {
@@ -95,14 +115,26 @@ public class RevenueService {
                         s.getBusinessName() != null ? s.getBusinessName() : s.getId().toString(),
                         (a, b) -> a));
 
+        // Totals rows arrive per [supplier_id, currency, orders, revenue]; convert each
+        // currency's revenue to AED and aggregate per supplier.
+        Map<UUID, Long> ordersBySupplier = new LinkedHashMap<>();
+        Map<UUID, BigDecimal> revenueBySupplier = new LinkedHashMap<>();
+        for (Object[] row : rows) {
+            UUID supplierId = (UUID) row[0];
+            String ccy = (String) row[1];
+            long orders = ((Number) row[2]).longValue();
+            BigDecimal revenue = toAed((BigDecimal) row[3], ccy);
+            ordersBySupplier.merge(supplierId, orders, Long::sum);
+            revenueBySupplier.merge(supplierId, revenue, BigDecimal::add);
+        }
+
         List<SupplierRevenueRow> suppliers = new ArrayList<>();
         long totalOrders = 0;
         BigDecimal totalRevenue = BigDecimal.ZERO;
         BigDecimal totalRefunded = BigDecimal.ZERO;
-        for (Object[] row : rows) {
-            UUID supplierId = (UUID) row[0];
-            long orders = ((Number) row[1]).longValue();
-            BigDecimal revenue = (BigDecimal) row[2];
+        for (UUID supplierId : revenueBySupplier.keySet()) {
+            long orders = ordersBySupplier.getOrDefault(supplierId, 0L);
+            BigDecimal revenue = revenueBySupplier.get(supplierId);
             BigDecimal refunded = refundBySupplier.getOrDefault(supplierId, BigDecimal.ZERO);
             suppliers.add(new SupplierRevenueRow(
                     supplierId, names.getOrDefault(supplierId, supplierId.toString()),
@@ -121,34 +153,39 @@ public class RevenueService {
             RevenuePeriod period, LocalDate from, LocalDate to, String label,
             List<Object[]> rows, Map<String, BigDecimal> refunds, List<RevenueOrderRow> orders,
             Map<String, BigDecimal> deliveryFees) {
+        // Gross revenue rows arrive per [period, currency, orders, revenue]; convert each
+        // currency's revenue to AED and aggregate by period. (Refunds and delivery fees are
+        // already in AED.)
+        Map<String, BigDecimal> revenueByPeriod = new LinkedHashMap<>();
+        Map<String, Long> ordersByPeriod = new LinkedHashMap<>();
+        for (Object[] row : rows) {
+            String period0 = periodLabel(row[0]);
+            String ccy = (String) row[1];
+            long bucketOrders = ((Number) row[2]).longValue();
+            BigDecimal revenue = toAed((BigDecimal) row[3], ccy);
+            revenueByPeriod.merge(period0, revenue, BigDecimal::add);
+            ordersByPeriod.merge(period0, bucketOrders, Long::sum);
+        }
+
+        // Union of every period that has revenue, refunds or delivery fees.
+        Set<String> periods = new LinkedHashSet<>();
+        periods.addAll(revenueByPeriod.keySet());
+        periods.addAll(refunds.keySet());
+        periods.addAll(deliveryFees.keySet());
+
         List<RevenueBucketRow> buckets = new ArrayList<>();
         long totalOrders = 0;
         BigDecimal totalRevenue = BigDecimal.ZERO;
         BigDecimal totalRefunded = BigDecimal.ZERO;
         BigDecimal totalDeliveryFee = BigDecimal.ZERO;
-        Set<String> seenPeriods = new LinkedHashSet<>();
-        for (Object[] row : rows) {
-            String period0 = periodLabel(row[0]);
-            long bucketOrders = ((Number) row[1]).longValue();
-            BigDecimal revenue = (BigDecimal) row[2];
-            BigDecimal refunded = refunds.getOrDefault(period0, BigDecimal.ZERO);
-            BigDecimal deliveryFee = deliveryFees.getOrDefault(period0, BigDecimal.ZERO);
-            buckets.add(new RevenueBucketRow(period0, bucketOrders, revenue, refunded, revenue.subtract(refunded), deliveryFee));
-            seenPeriods.add(period0);
-            totalOrders += bucketOrders;
-            totalRevenue = totalRevenue.add(revenue);
-            totalRefunded = totalRefunded.add(refunded);
-            totalDeliveryFee = totalDeliveryFee.add(deliveryFee);
-        }
-        // Periods that had refunds and/or delivery fees but no gross product revenue (rare):
-        // surface them so the bucket list and totals stay complete.
-        Set<String> extraPeriods = new LinkedHashSet<>();
-        refunds.keySet().forEach(p -> { if (!seenPeriods.contains(p)) extraPeriods.add(p); });
-        deliveryFees.keySet().forEach(p -> { if (!seenPeriods.contains(p)) extraPeriods.add(p); });
-        for (String p : extraPeriods) {
+        for (String p : periods) {
+            BigDecimal revenue = revenueByPeriod.getOrDefault(p, BigDecimal.ZERO);
+            long bucketOrders = ordersByPeriod.getOrDefault(p, 0L);
             BigDecimal refunded = refunds.getOrDefault(p, BigDecimal.ZERO);
             BigDecimal deliveryFee = deliveryFees.getOrDefault(p, BigDecimal.ZERO);
-            buckets.add(new RevenueBucketRow(p, 0, BigDecimal.ZERO, refunded, refunded.negate(), deliveryFee));
+            buckets.add(new RevenueBucketRow(p, bucketOrders, revenue, refunded, revenue.subtract(refunded), deliveryFee));
+            totalOrders += bucketOrders;
+            totalRevenue = totalRevenue.add(revenue);
             totalRefunded = totalRefunded.add(refunded);
             totalDeliveryFee = totalDeliveryFee.add(deliveryFee);
         }
@@ -171,14 +208,15 @@ public class RevenueService {
         return map;
     }
 
-    /** [order_id, created_at, gross, refunded] rows -> per-order revenue rows. */
+    /** [order_id, created_at, currency, gross, refunded] rows -> per-order revenue rows (gross in AED). */
     private List<RevenueOrderRow> orderRows(List<Object[]> rows) {
         List<RevenueOrderRow> result = new ArrayList<>();
         for (Object[] r : rows) {
             String orderId = r[0] != null ? r[0].toString() : null;
             String createdAt = instantString(r[1]);
-            BigDecimal gross = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
-            BigDecimal refunded = r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO;
+            String ccy = (String) r[2];
+            BigDecimal gross = toAed(r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO, ccy);
+            BigDecimal refunded = r[4] != null ? (BigDecimal) r[4] : BigDecimal.ZERO;
             result.add(new RevenueOrderRow(orderId, createdAt, gross, refunded, gross.subtract(refunded)));
         }
         return result;
