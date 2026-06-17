@@ -63,9 +63,11 @@ public class AdminUserService {
 
     // ─── List all users (paginated) ───────────────────────────────────────────
 
-    public ResponseEntity<ApiResponse<AdminUserListResponse>> listUsers(int page, int size) {
+    public ResponseEntity<ApiResponse<AdminUserListResponse>> listUsers(int page, int size, String search) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<Users> usersPage = userRepository.findAll(pageable);
+        Page<Users> usersPage = (search == null || search.isBlank())
+                ? userRepository.findAll(pageable)
+                : userRepository.searchUsers(search.trim(), pageable);
 
         List<AdminUserSummaryResponse> summaries = usersPage.getContent().stream()
                 .map(this::toSummary)

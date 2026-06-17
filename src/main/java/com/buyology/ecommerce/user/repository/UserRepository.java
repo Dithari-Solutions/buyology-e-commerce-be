@@ -30,4 +30,15 @@ public interface UserRepository extends JpaRepository<Users, UUID> {
     /** Accounts in the given status whose soft-delete timestamp is past {@code cutoff}.
      *  Used by the account-deletion purge job to finalize deletions after the grace window. */
     List<Users> findByStatusAndDeletedAtBefore(String status, Instant cutoff);
+
+    /** Admin user search by first/last name or any of the user's credential emails. */
+    @Query("""
+            SELECT DISTINCT u FROM Users u
+            WHERE LOWER(u.firstName) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR LOWER(u.lastName) LIKE LOWER(CONCAT('%', :q, '%'))
+               OR EXISTS (SELECT 1 FROM com.buyology.ecommerce.auth.domain.AuthCredentials c
+                          WHERE c.userId = u.id AND LOWER(c.email) LIKE LOWER(CONCAT('%', :q, '%')))
+            """)
+    org.springframework.data.domain.Page<Users> searchUsers(
+            @Param("q") String q, org.springframework.data.domain.Pageable pageable);
 }

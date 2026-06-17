@@ -36,8 +36,9 @@ public class AdminUserController {
     @GetMapping
     public ResponseEntity<ApiResponse<AdminUserListResponse>> listUsers(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return adminUserService.listUsers(page, size);
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String search) {
+        return adminUserService.listUsers(page, size, search);
     }
 
     @Operation(summary = "Get full user detail by authCredentialId — includes profile, favorites, and active cart")
