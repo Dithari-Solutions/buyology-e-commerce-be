@@ -278,8 +278,14 @@ public class PaymentService {
      */
     @Transactional
     public PaymentInitiatedResponse initiateCourierFeePayment(CourierFeeChargeRequest req) {
-        // customerId is an auth_credentials.id — same readiness/ownership check as orders.
-        userProfileService.checkPaymentReadiness(req.customerId());
+        // req.customerId() is an auth_credentials.id, but checkPaymentReadiness keys by the
+        // users.id principal (userRepo.findById + requireSelfOrAdmin) — passing the credential
+        // id makes findUser throw (→ 500). Resolve the owning user first, then check readiness.
+        UUID ownerUserId = authCredentialRepo.findById(req.customerId())
+                .map(c -> c.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown payer for courier fee: " + req.customerId()));
+        userProfileService.checkPaymentReadiness(ownerUserId);
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
