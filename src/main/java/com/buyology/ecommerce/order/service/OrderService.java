@@ -3,6 +3,7 @@ package com.buyology.ecommerce.order.service;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.product.domain.Product;
+import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.domain.StoreProduct;
@@ -61,6 +62,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -88,6 +90,7 @@ public class OrderService {
     private final StoreLocationRepository storeLocationRepo;
     private final StoreProductRepository storeProductRepo;
     private final StoreProductVariantRepository storeProductVariantRepo;
+    private final ProductTranslationRepository productTranslationRepository;
     private final UserProfilesRepository userProfileRepo;
     private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
@@ -115,6 +118,7 @@ public class OrderService {
                         StoreLocationRepository storeLocationRepo,
                         StoreProductRepository storeProductRepo,
                         StoreProductVariantRepository storeProductVariantRepo,
+                        ProductTranslationRepository productTranslationRepository,
                         UserProfilesRepository userProfileRepo,
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
@@ -140,6 +144,7 @@ public class OrderService {
         this.storeLocationRepo = storeLocationRepo;
         this.storeProductRepo = storeProductRepo;
         this.storeProductVariantRepo = storeProductVariantRepo;
+        this.productTranslationRepository = productTranslationRepository;
         this.userProfileRepo = userProfileRepo;
         this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
@@ -1194,17 +1199,21 @@ public class OrderService {
             String email = customerEmail(order);
             if (email == null) return;
 
+            List<OrderItem> orderItems = order.getItems() != null ? order.getItems() : java.util.List.of();
+            // The order item only snapshots SKUs — resolve the English product name to show in the email.
+            Map<UUID, String> nameByProductId = resolveEnglishProductNames(orderItems);
+
             List<com.buyology.ecommerce.common.service.EmailService.OrderEmailItem> lines = new ArrayList<>();
             int deviceCount = 0;
-            if (order.getItems() != null) {
-                for (OrderItem it : order.getItems()) {
-                    int qty = it.getQuantity() == null ? 0 : it.getQuantity();
-                    deviceCount += qty;
-                    String itemName = (it.getVariantSku() != null && !it.getVariantSku().isBlank())
-                            ? it.getVariantSku() : it.getProductSku();
-                    lines.add(new com.buyology.ecommerce.common.service.EmailService.OrderEmailItem(
-                            itemName, qty, it.getUnitPrice(), it.getTotalPrice()));
-                }
+            for (OrderItem it : orderItems) {
+                int qty = it.getQuantity() == null ? 0 : it.getQuantity();
+                deviceCount += qty;
+                String fallbackSku = (it.getVariantSku() != null && !it.getVariantSku().isBlank())
+                        ? it.getVariantSku() : it.getProductSku();
+                String itemName = it.getProductId() != null ? nameByProductId.get(it.getProductId()) : null;
+                if (itemName == null || itemName.isBlank()) itemName = fallbackSku;
+                lines.add(new com.buyology.ecommerce.common.service.EmailService.OrderEmailItem(
+                        itemName, qty, it.getUnitPrice(), it.getTotalPrice()));
             }
 
             String orderDate = order.getCreatedAt() != null
@@ -1221,6 +1230,37 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("[ORDER] order-confirmation email failed for {}: {}", order.getId(), e.getMessage());
         }
+    }
+
+    /**
+     * Resolves a display name for each order item's product, preferring the English title and
+     * falling back to any available translation. Returns a productId → name map (one bulk query,
+     * no Product proxies). Callers fall back to the SKU when a product has no translation.
+     */
+    private Map<UUID, String> resolveEnglishProductNames(List<OrderItem> items) {
+        List<UUID> productIds = items.stream()
+                .map(OrderItem::getProductId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        if (productIds.isEmpty()) return java.util.Map.of();
+
+        Map<UUID, String> english = new java.util.HashMap<>();
+        Map<UUID, String> fallback = new java.util.HashMap<>();
+        for (Object[] row : productTranslationRepository.findTitleRowsByProductIds(productIds)) {
+            UUID pid = (UUID) row[0];
+            String lang = (String) row[1];
+            String title = (String) row[2];
+            if (pid == null || title == null || title.isBlank()) continue;
+            if ("EN".equalsIgnoreCase(lang)) {
+                english.putIfAbsent(pid, title);
+            } else {
+                fallback.putIfAbsent(pid, title);
+            }
+        }
+        Map<UUID, String> result = new java.util.HashMap<>(fallback);
+        result.putAll(english); // English wins over any fallback translation
+        return result;
     }
 
     /** Best-effort per-status fulfilment email (PACKAGING / IN_COURIER / IN_TRANSIT / DELIVERED). */

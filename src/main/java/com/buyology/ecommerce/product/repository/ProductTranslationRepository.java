@@ -15,6 +15,14 @@ public interface ProductTranslationRepository extends JpaRepository<ProductTrans
 
     List<ProductTranslation> findByProductIdIn(List<UUID> productIds);
 
+    /**
+     * Lightweight (productId, language, title) rows for the given products — used to label
+     * order-confirmation emails without initialising the Product proxies. Each row is
+     * [UUID productId, String language, String title].
+     */
+    @Query("SELECT t.product.id, t.language, t.title FROM ProductTranslation t WHERE t.product.id IN :ids")
+    List<Object[]> findTitleRowsByProductIds(@Param("ids") List<UUID> ids);
+
     Optional<ProductTranslation> findByLanguageAndSlug(String language, String slug);
 
     /** Resolve a product by its slug in ANY language (slugs are per-language), restricted to active products. */
