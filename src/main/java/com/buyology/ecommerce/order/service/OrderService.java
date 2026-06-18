@@ -821,6 +821,9 @@ public class OrderService {
     }
 
     private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency) {
+        // === TEMP: delivery fee disabled for order-confirmation-email test — RESTORE the block below ===
+        return BigDecimal.ZERO;
+        /* RESTORE-DELIVERY-FEE: uncomment to re-enable the flat delivery policy
         // Flat delivery policy — same source-of-truth as CartService, applied to every
         // delivery method so the order total matches the fee shown in the cart:
         // free once the subtotal (in AED equivalent) reaches the threshold, otherwise
@@ -832,6 +835,7 @@ public class OrderService {
             return BigDecimal.ZERO;
         }
         return currencyExchangeService.convert(EXPRESS_DELIVERY_FEE, BASE_CURRENCY, currency);
+        */
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {
