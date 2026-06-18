@@ -485,17 +485,12 @@ public class CartService {
                     ? POLICY_FREE_SHIPPING_AED
                     : currencyExchangeService.convert(POLICY_FREE_SHIPPING_AED, POLICY_BASE_CURRENCY, displayCurrency);
             BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
-            // === TEMP: delivery fee disabled for order-confirmation-email test — RESTORE the block below ===
-            boolean qualifies = true;
-            BigDecimal deliveryFee = BigDecimal.ZERO;
-            /* RESTORE-DELIVERY-FEE: uncomment to re-enable the flat delivery policy
             boolean qualifies = subtotal.compareTo(threshold) >= 0;
             BigDecimal deliveryFee = qualifies
                     ? BigDecimal.ZERO
                     : (POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
                             ? POLICY_DELIVERY_FEE_AED
                             : currencyExchangeService.convert(POLICY_DELIVERY_FEE_AED, POLICY_BASE_CURRENCY, displayCurrency));
-            */
             response.setFreeShippingThreshold(threshold);
             response.setDeliveryFee(deliveryFee);
             response.setQualifiesForFreeShipping(qualifies);
