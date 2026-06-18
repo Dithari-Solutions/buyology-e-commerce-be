@@ -23,6 +23,7 @@ import com.buyology.ecommerce.store.domain.StoreProduct;
 import com.buyology.ecommerce.store.domain.StoreProductVariant;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
+import com.buyology.ecommerce.user.service.AccountStatusValidator;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
@@ -54,6 +55,7 @@ public class CartService {
     private final StoreProductVariantRepository storeProductVariantRepository;
     private final StoreLocationRepository storeLocationRepository;
     private final UserProfilesRepository userProfileRepo;
+    private final AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
 
     public CartService(
@@ -68,6 +70,7 @@ public class CartService {
             StoreProductVariantRepository storeProductVariantRepository,
             StoreLocationRepository storeLocationRepository,
             UserProfilesRepository userProfileRepo,
+            AccountStatusValidator accountStatusValidator,
             CurrencyExchangeService currencyExchangeService) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
@@ -80,6 +83,7 @@ public class CartService {
         this.storeProductVariantRepository = storeProductVariantRepository;
         this.storeLocationRepository = storeLocationRepository;
         this.userProfileRepo = userProfileRepo;
+        this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
     }
 
@@ -106,6 +110,8 @@ public class CartService {
                 request.getStoreId(), request.getQuantity());
 
         AuthCredentials authCredential = requireOwnedCredential(authCredentialId);
+        // Block carting for accounts pending deletion — they must recover their account first.
+        accountStatusValidator.requireActiveAccount(authCredential.getUserId());
 
         if (request.getProductId() == null) {
             log.warn("addItem rejected — productId is null [authCredentialId={}]", authCredentialId);

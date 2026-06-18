@@ -31,13 +31,16 @@ public class FavoriteService {
     private final FavoriteRepository favoriteRepository;
     private final AuthCredentialRepository authCredentialRepository;
     private final ProductRepository productRepository;
+    private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
 
     public FavoriteService(FavoriteRepository favoriteRepository,
                            AuthCredentialRepository authCredentialRepository,
-                           ProductRepository productRepository) {
+                           ProductRepository productRepository,
+                           com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator) {
         this.favoriteRepository = favoriteRepository;
         this.authCredentialRepository = authCredentialRepository;
         this.productRepository = productRepository;
+        this.accountStatusValidator = accountStatusValidator;
     }
 
     // ─── Add product to favorites ─────────────────────────────────────────────
@@ -45,6 +48,8 @@ public class FavoriteService {
     @Transactional
     public ResponseEntity<ApiResponse<FavoriteItemResponse>> addFavorite(UUID authCredentialId, UUID productId) {
         AuthCredentials authCredential = requireOwnedCredential(authCredentialId);
+        // Block favouriting for accounts pending deletion — they must recover their account first.
+        accountStatusValidator.requireActiveAccount(authCredential.getUserId());
 
         Product product = productRepository.findById(productId).orElse(null);
         if (product == null || "DELETED".equals(product.getStatus())) {

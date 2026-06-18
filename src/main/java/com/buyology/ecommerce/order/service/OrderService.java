@@ -92,6 +92,7 @@ public class OrderService {
     private final StoreProductVariantRepository storeProductVariantRepo;
     private final ProductTranslationRepository productTranslationRepository;
     private final UserProfilesRepository userProfileRepo;
+    private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
     private final CourierServiceClient courierServiceClient;
@@ -120,6 +121,7 @@ public class OrderService {
                         StoreProductVariantRepository storeProductVariantRepo,
                         ProductTranslationRepository productTranslationRepository,
                         UserProfilesRepository userProfileRepo,
+                        com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator,
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
                         CourierServiceClient courierServiceClient,
@@ -146,6 +148,7 @@ public class OrderService {
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
         this.userProfileRepo = userProfileRepo;
+        this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
         this.courierServiceClient = courierServiceClient;
@@ -173,6 +176,9 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse createOrder(UUID userId, UUID authCredentialId, CreateOrderRequest req) {
+        // Block ordering for accounts pending deletion — they must recover their account first.
+        accountStatusValidator.requireActiveAccount(userId);
+
         Cart cart = cartRepo.findById(req.getCartId())
                 .orElseThrow(() -> new IllegalArgumentException("Cart not found: " + req.getCartId()));
 
@@ -406,6 +412,9 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse createBuyNowOrder(UUID userId, UUID authCredentialId, BuyNowOrderRequest req) {
+        // Block ordering for accounts pending deletion — they must recover their account first.
+        accountStatusValidator.requireActiveAccount(userId);
+
         if (req.getProductId() == null || req.getStoreId() == null) {
             throw new IllegalArgumentException("productId and storeId are required");
         }

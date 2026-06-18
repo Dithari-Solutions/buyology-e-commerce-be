@@ -55,6 +55,7 @@ public class PaymentService {
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider;
     private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepo;
+    private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
 
     public PaymentService(
             PaymentProviderRepository providerRepo,
@@ -72,7 +73,8 @@ public class PaymentService {
             com.buyology.ecommerce.payment.config.PaymobProperties paymobProperties,
             org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.CreditPaybackService> creditPaybackProvider,
             org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.order.repository.OrderRepository> orderRepoProvider,
-            com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepo) {
+            com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepo,
+            com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator) {
         this.providerRepo = providerRepo;
         this.methodConfigRepo = methodConfigRepo;
         this.transactionRepo = transactionRepo;
@@ -89,6 +91,7 @@ public class PaymentService {
         this.creditPaybackProvider = creditPaybackProvider;
         this.orderRepoProvider = orderRepoProvider;
         this.authCredentialRepo = authCredentialRepo;
+        this.accountStatusValidator = accountStatusValidator;
     }
 
     /**
@@ -119,6 +122,9 @@ public class PaymentService {
         // already blocked — we must NOT overwrite it with the principal's users.id, which
         // findUser cannot resolve.
         UUID currentUserId = SecurityUtils.currentUserId();
+        // Block payment for accounts pending deletion — they must recover their account first
+        // (also prevents charging the cart-first flow before its order is created on success).
+        accountStatusValidator.requireActiveAccount(currentUserId);
         userProfileService.checkPaymentReadiness(req.getCustomerId());
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
