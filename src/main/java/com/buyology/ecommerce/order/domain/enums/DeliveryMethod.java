@@ -9,11 +9,15 @@ import com.fasterxml.jackson.annotation.JsonCreator;
  *                     Courier updates are GPS-tracked in OrderTrackingEvent.
  *
  * REGULAR     — standard local delivery for distances > 30 minutes within the same country.
+ *
+ * PICKUP      — customer collects the order from a chosen store branch; no delivery address,
+ *               no shipping fee.
  */
 public enum DeliveryMethod {
     EXPRESS,
     REGULAR,
-    INTERNATIONAL;
+    INTERNATIONAL,
+    PICKUP;
 
     @JsonCreator
     public static DeliveryMethod fromValue(String value) {

@@ -17,8 +17,11 @@ public class InitiatePaymentRequest {
     @NotNull
     private UUID cartId;
 
-    @NotNull
+    // Required for delivery; null for store pickup (validated contextually in the order flow).
     private UUID addressId;
+
+    // Store pickup: the chosen store branch the customer collects from (deliveryMethod == PICKUP).
+    private UUID pickupStoreId;
 
     // Delivery method is now auto-determined by the backend based on store proximity
     private String deliveryMethod;
@@ -67,6 +70,9 @@ public class InitiatePaymentRequest {
 
     public UUID getAddressId() { return addressId; }
     public void setAddressId(UUID addressId) { this.addressId = addressId; }
+
+    public UUID getPickupStoreId() { return pickupStoreId; }
+    public void setPickupStoreId(UUID pickupStoreId) { this.pickupStoreId = pickupStoreId; }
 
     public String getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(String deliveryMethod) { this.deliveryMethod = deliveryMethod; }

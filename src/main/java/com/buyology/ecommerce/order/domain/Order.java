@@ -165,6 +165,19 @@ public class Order {
     @Column(name = "promo_code_id")
     private UUID promoCodeId;
 
+    // ── Store pickup (deliveryMethod == PICKUP) ──────────────────────────────
+    // The customer collects from a chosen store branch instead of having it delivered.
+    // A snapshot of the branch is stored so the admin/customer see where to collect.
+
+    @Column(name = "pickup_store_id")
+    private UUID pickupStoreId;
+
+    @Column(name = "pickup_store_name", length = 200)
+    private String pickupStoreName;
+
+    @Column(name = "pickup_store_address", length = 500)
+    private String pickupStoreAddress;
+
     // ── Carrier info (admin-set on SHIPPED) ──────────────────────────────────
 
     @Column(name = "tracking_code", length = 100)
@@ -344,6 +357,15 @@ public class Order {
     public void setCouponCode(String couponCode) { this.couponCode = couponCode; }
     public UUID getPromoCodeId() { return promoCodeId; }
     public void setPromoCodeId(UUID promoCodeId) { this.promoCodeId = promoCodeId; }
+
+    public UUID getPickupStoreId() { return pickupStoreId; }
+    public void setPickupStoreId(UUID pickupStoreId) { this.pickupStoreId = pickupStoreId; }
+
+    public String getPickupStoreName() { return pickupStoreName; }
+    public void setPickupStoreName(String pickupStoreName) { this.pickupStoreName = pickupStoreName; }
+
+    public String getPickupStoreAddress() { return pickupStoreAddress; }
+    public void setPickupStoreAddress(String pickupStoreAddress) { this.pickupStoreAddress = pickupStoreAddress; }
 
     public String getTrackingCode() { return trackingCode; }
     public void setTrackingCode(String trackingCode) { this.trackingCode = trackingCode; }

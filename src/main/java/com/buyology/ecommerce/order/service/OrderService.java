@@ -3,6 +3,8 @@ package com.buyology.ecommerce.order.service;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.product.domain.Product;
+import com.buyology.ecommerce.store.domain.Store;
+import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.domain.StoreProduct;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.order.dto.BuyNowOrderRequest;
@@ -184,21 +186,12 @@ public class OrderService {
             throw new IllegalStateException("Cannot create an order from an empty cart");
         }
 
-        UserAddress address = addressRepo.findById(req.getAddressId())
-                .orElseThrow(() -> new IllegalArgumentException("Address not found: " + req.getAddressId()));
-
-        if (!userId.equals(address.getUser().getId())) {
-            throw new IllegalArgumentException("Address does not belong to the authenticated user");
-        }
-
-        // Validate customer country. The order is constrained to the user's market:
-        // their explicitly selected country, or (if unset) the country the cart was
-        // browsed/priced in. If neither is set there is no market constraint, so we
-        // accept delivery to the address's own country instead of failing with "(null)".
+        // The order is constrained to the user's market: their explicitly selected country,
+        // or (if unset) the country the cart was browsed/priced in.
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
 
-        // A verified phone number is required to place an order (delivery contact).
+        // A verified phone number is required to place an order (delivery / pickup contact).
         if (!profile.isPhoneVerified()) {
             throw new IllegalStateException("Please verify your phone number before placing an order.");
         }
@@ -207,11 +200,8 @@ public class OrderService {
         if (marketCountry == null || marketCountry.isBlank()) {
             marketCountry = cart.getCountryCode();
         }
-        if (marketCountry != null && !marketCountry.isBlank()
-                && !isSameCountry(address.getCountry(), marketCountry)) {
-            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
-                    + marketCountry + ").");
-        }
+
+        boolean isPickup = req.getDeliveryMethod() == DeliveryMethod.PICKUP;
 
         // Build order
         Order order = new Order();
@@ -219,29 +209,85 @@ public class OrderService {
         order.setAuthCredentialId(authCredentialId);
         order.setCartId(cart.getId());
 
-        // Resolve delivery method and fees if not explicitly provided (or even if provided, re-calculate for security)
-        DeliveryMethod method = req.getDeliveryMethod() != null ? req.getDeliveryMethod() : resolveDeliveryMethod(cartItems, address);
-        BigDecimal shippingFee = calculateShippingFee(cart.getTotalPrice(), cart.getCurrency());
-        String estimatedDeliveryTime = estimateDeliveryTime(method);
+        if (isPickup) {
+            // ── Store pickup: customer collects from a chosen branch; no address, no shipping ──
+            if (req.getPickupStoreId() == null) {
+                throw new IllegalArgumentException("Please choose a store to pick up from.");
+            }
+            StoreLocation branch = storeLocationRepo
+                    .findByStoreIdAndIsPrimary(req.getPickupStoreId(), true)
+                    .orElseGet(() -> storeLocationRepo
+                            .findAllByStoreIdAndIsActive(req.getPickupStoreId(), true)
+                            .stream().findFirst().orElse(null));
+            if (branch == null) {
+                throw new IllegalArgumentException("The selected store is not available for pickup.");
+            }
+            Store pickupStore = branch.getStore();
 
-        order.setDeliveryMethod(method);
-        order.setShippingFee(shippingFee);
-        order.setEstimatedDeliveryTime(estimatedDeliveryTime);
+            // The customer may only collect from a store in their own market/country.
+            String storeCountry = (branch.getCountry() != null && !branch.getCountry().isBlank())
+                    ? branch.getCountry()
+                    : (pickupStore.getCountry() != null ? pickupStore.getCountry().getCode() : null);
+            if (marketCountry != null && !marketCountry.isBlank()
+                    && storeCountry != null && !isSameCountry(storeCountry, marketCountry)) {
+                throw new IllegalArgumentException(
+                        "You can only pick up from a store in your selected country (" + marketCountry + ").");
+            }
+
+            order.setDeliveryMethod(DeliveryMethod.PICKUP);
+            order.setShippingFee(BigDecimal.ZERO);
+            order.setEstimatedDeliveryTime(estimateDeliveryTime(DeliveryMethod.PICKUP));
+            order.setPickupStoreId(pickupStore.getId());
+            order.setPickupStoreName(pickupStore.getName());
+            order.setPickupStoreAddress(buildPickupAddress(branch));
+            // Pickup contact + market snapshot (no delivery address).
+            order.setRecipientFirstName(profile.getUser() != null ? profile.getUser().getFirstName() : null);
+            order.setRecipientLastName(profile.getUser() != null ? profile.getUser().getLastName() : null);
+            order.setRecipientPhone(profile.getPhoneNumber());
+            order.setCountry(storeCountry);
+            order.setCountryCode(marketCountry);
+        } else {
+            UserAddress address = addressRepo.findById(req.getAddressId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            req.getAddressId() == null
+                                    ? "addressId is required for delivery"
+                                    : "Address not found: " + req.getAddressId()));
+
+            if (!userId.equals(address.getUser().getId())) {
+                throw new IllegalArgumentException("Address does not belong to the authenticated user");
+            }
+
+            // The delivery address must be in the user's market (when one is set).
+            if (marketCountry != null && !marketCountry.isBlank()
+                    && !isSameCountry(address.getCountry(), marketCountry)) {
+                throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
+                        + marketCountry + ").");
+            }
+
+            // Resolve delivery method and fees if not explicitly provided (or even if provided, re-calculate for security)
+            DeliveryMethod method = req.getDeliveryMethod() != null ? req.getDeliveryMethod() : resolveDeliveryMethod(cartItems, address);
+            BigDecimal shippingFee = calculateShippingFee(cart.getTotalPrice(), cart.getCurrency());
+
+            order.setDeliveryMethod(method);
+            order.setShippingFee(shippingFee);
+            order.setEstimatedDeliveryTime(estimateDeliveryTime(method));
+
+            // Address snapshot
+            order.setDeliveryAddressId(address.getId());
+            order.setRecipientFirstName(address.getFirstName());
+            order.setRecipientLastName(address.getLastName());
+            order.setRecipientPhone(address.getPhoneNumber());
+            order.setAddressLine1(address.getAddressLine1());
+            order.setAddressLine2(address.getAddressLine2());
+            order.setCity(address.getCity());
+            order.setState(address.getState());
+            order.setCountry(address.getCountry());
+            order.setPostalCode(address.getPostalCode());
+            order.setDeliveryLatitude(address.getLatitude());
+            order.setDeliveryLongitude(address.getLongitude());
+        }
+
         order.setStatus(OrderStatus.PENDING_PAYMENT);
-
-        // Address snapshot
-        order.setDeliveryAddressId(address.getId());
-        order.setRecipientFirstName(address.getFirstName());
-        order.setRecipientLastName(address.getLastName());
-        order.setRecipientPhone(address.getPhoneNumber());
-        order.setAddressLine1(address.getAddressLine1());
-        order.setAddressLine2(address.getAddressLine2());
-        order.setCity(address.getCity());
-        order.setState(address.getState());
-        order.setCountry(address.getCountry());
-        order.setPostalCode(address.getPostalCode());
-        order.setDeliveryLatitude(address.getLatitude());
-        order.setDeliveryLongitude(address.getLongitude());
 
         // Pricing
         BigDecimal subtotal = cart.getTotalPrice();
@@ -262,7 +308,7 @@ public class OrderService {
 
         // Clamp discount so it can never exceed subtotal + shipping (otherwise the total
         // would go negative). Then clamp the total at zero as a final safety floor.
-        BigDecimal grossTotal = subtotal.add(shippingFee);
+        BigDecimal grossTotal = subtotal.add(order.getShippingFee());
         if (discount.compareTo(grossTotal) > 0) {
             discount = grossTotal;
         }
@@ -285,7 +331,7 @@ public class OrderService {
         }
         order.setCurrency(currency);
         
-        order.setCountryCode(marketCountry != null && !marketCountry.isBlank() ? marketCountry : address.getCountry());
+        order.setCountryCode(marketCountry != null && !marketCountry.isBlank() ? marketCountry : order.getCountry());
         order.setCouponCode(req.getCouponCode());
         order.setPromoCodeId(appliedPromoId);
 
@@ -503,8 +549,9 @@ public class OrderService {
                 return;
             }
 
-            // Parse address, shipping fee, and delivery method from transaction metadata
+            // Parse address, shipping fee, delivery method, and pickup store from transaction metadata
             UUID addressId = null;
+            UUID pickupStoreId = null;
             BigDecimal shippingFee = BigDecimal.ZERO;
             DeliveryMethod metaDeliveryMethod = null;
             try {
@@ -512,6 +559,7 @@ public class OrderService {
                     log.info("[ORDER] Transaction metadata: {}", tx.getMetadata());
                     JsonNode meta = objectMapper.readTree(tx.getMetadata());
                     if (meta.has("addressId")) addressId = UUID.fromString(meta.get("addressId").asText());
+                    if (meta.has("pickupStoreId")) pickupStoreId = UUID.fromString(meta.get("pickupStoreId").asText());
                     if (meta.has("shippingFee")) shippingFee = new BigDecimal(meta.get("shippingFee").asText());
                     if (meta.has("deliveryMethod")) {
                         metaDeliveryMethod = DeliveryMethod.fromValue(meta.get("deliveryMethod").asText());
@@ -523,16 +571,7 @@ public class OrderService {
                 log.warn("[ORDER] Failed to parse transaction metadata: {}", e.getMessage());
             }
 
-            if (addressId == null) {
-                log.warn("[ORDER] addressId is null — cannot create order. metadata={}", tx.getMetadata());
-                return;
-            }
-
-            UserAddress address = addressRepo.findById(addressId).orElse(null);
-            if (address == null) {
-                log.warn("[ORDER] UserAddress not found: addressId={}", addressId);
-                return;
-            }
+            boolean isPickup = metaDeliveryMethod == DeliveryMethod.PICKUP;
 
             if (cart.getAuthCredential() == null) {
                 log.warn("[ORDER] Cart has no authCredential: cartId={}", cart.getId());
@@ -551,19 +590,39 @@ public class OrderService {
                 cartRepo.save(cart);
             }
 
-            // Use delivery method from metadata if the frontend sent it, BUT only trust
-            // EXPRESS when the address has lat/lng — without coordinates we cannot route
-            // to the courier backend. Fall back to resolveDeliveryMethod otherwise.
-            boolean addressHasCoordinates = address.getLatitude() != null && address.getLongitude() != null;
-            DeliveryMethod deliveryMethod = (metaDeliveryMethod != null && (metaDeliveryMethod != DeliveryMethod.EXPRESS || addressHasCoordinates))
-                    ? metaDeliveryMethod
-                    : resolveDeliveryMethod(cartItems, address);
-
             CreateOrderRequest req = new CreateOrderRequest();
             req.setCartId(tx.getCartId());
-            req.setAddressId(addressId);
-            req.setDeliveryMethod(deliveryMethod);
-            req.setShippingFee(shippingFee);
+
+            if (isPickup) {
+                if (pickupStoreId == null) {
+                    log.warn("[ORDER] PICKUP order but pickupStoreId is null — cannot create order. metadata={}", tx.getMetadata());
+                    return;
+                }
+                req.setDeliveryMethod(DeliveryMethod.PICKUP);
+                req.setPickupStoreId(pickupStoreId);
+                req.setShippingFee(BigDecimal.ZERO);
+            } else {
+                if (addressId == null) {
+                    log.warn("[ORDER] addressId is null — cannot create order. metadata={}", tx.getMetadata());
+                    return;
+                }
+                UserAddress address = addressRepo.findById(addressId).orElse(null);
+                if (address == null) {
+                    log.warn("[ORDER] UserAddress not found: addressId={}", addressId);
+                    return;
+                }
+
+                // Use delivery method from metadata if the frontend sent it, BUT only trust
+                // EXPRESS when the address has lat/lng — without coordinates we cannot route
+                // to the courier backend. Fall back to resolveDeliveryMethod otherwise.
+                boolean addressHasCoordinates = address.getLatitude() != null && address.getLongitude() != null;
+                DeliveryMethod deliveryMethod = (metaDeliveryMethod != null && (metaDeliveryMethod != DeliveryMethod.EXPRESS || addressHasCoordinates))
+                        ? metaDeliveryMethod
+                        : resolveDeliveryMethod(cartItems, address);
+                req.setAddressId(addressId);
+                req.setDeliveryMethod(deliveryMethod);
+                req.setShippingFee(shippingFee);
+            }
 
             OrderResponse orderResponse = createOrder(userId, authCredentialId, req);
 
@@ -776,11 +835,23 @@ public class OrderService {
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {
-        if (method == DeliveryMethod.EXPRESS) {
+        if (method == DeliveryMethod.PICKUP) {
+            return "Ready for pickup within 24 hours";
+        } else if (method == DeliveryMethod.EXPRESS) {
             return "Within 30 minutes";
         } else {
             return "2-3 business days"; // Placeholder for regular order estimate
         }
+    }
+
+    /** Builds a single-line address for a pickup store branch (snapshotted onto the order). */
+    private String buildPickupAddress(StoreLocation branch) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        if (branch.getBranchName() != null && !branch.getBranchName().isBlank()) parts.add(branch.getBranchName());
+        if (branch.getAddress() != null && !branch.getAddress().isBlank()) parts.add(branch.getAddress());
+        if (branch.getCity() != null && !branch.getCity().isBlank()) parts.add(branch.getCity());
+        if (branch.getCountry() != null && !branch.getCountry().isBlank()) parts.add(branch.getCountry());
+        return String.join(", ", parts);
     }
 
     // =========================================================================
@@ -1165,6 +1236,12 @@ public class OrderService {
     /** One-line-per-row HTML delivery address built from the order's address snapshot. */
     private String buildAddressBlock(Order order) {
         StringBuilder sb = new StringBuilder();
+        // Store pickup: show the branch the customer collects from instead of a delivery address.
+        if (order.getDeliveryMethod() == DeliveryMethod.PICKUP) {
+            appendAddrPart(sb, "Collect from: " + (order.getPickupStoreName() == null ? "our store" : order.getPickupStoreName()));
+            appendAddrPart(sb, order.getPickupStoreAddress());
+            return sb.toString();
+        }
         String recipient = ((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName()) + " "
                 + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim();
         appendAddrPart(sb, recipient);
@@ -1601,6 +1678,9 @@ public class OrderService {
         res.setPostalCode(o.getPostalCode());
         res.setDeliveryLatitude(o.getDeliveryLatitude());
         res.setDeliveryLongitude(o.getDeliveryLongitude());
+        res.setPickupStoreId(o.getPickupStoreId());
+        res.setPickupStoreName(o.getPickupStoreName());
+        res.setPickupStoreAddress(o.getPickupStoreAddress());
         res.setSubtotal(o.getSubtotal());
         res.setShippingFee(o.getShippingFee());
         res.setDiscount(o.getDiscount());
@@ -1662,6 +1742,9 @@ public class OrderService {
         res.setPostalCode(base.getPostalCode());
         res.setDeliveryLatitude(base.getDeliveryLatitude());
         res.setDeliveryLongitude(base.getDeliveryLongitude());
+        res.setPickupStoreId(base.getPickupStoreId());
+        res.setPickupStoreName(base.getPickupStoreName());
+        res.setPickupStoreAddress(base.getPickupStoreAddress());
         res.setSubtotal(base.getSubtotal());
         res.setShippingFee(base.getShippingFee());
         res.setDiscount(base.getDiscount());

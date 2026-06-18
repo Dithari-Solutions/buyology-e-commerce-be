@@ -35,6 +35,11 @@ public class OrderResponse {
     private Double deliveryLatitude;
     private Double deliveryLongitude;
 
+    // Store pickup snapshot (deliveryMethod == PICKUP)
+    private UUID pickupStoreId;
+    private String pickupStoreName;
+    private String pickupStoreAddress;
+
     // Store Location
     private Double storeLatitude;
     private Double storeLongitude;
@@ -137,6 +142,15 @@ public class OrderResponse {
 
     public Double getDeliveryLongitude() { return deliveryLongitude; }
     public void setDeliveryLongitude(Double deliveryLongitude) { this.deliveryLongitude = deliveryLongitude; }
+
+    public UUID getPickupStoreId() { return pickupStoreId; }
+    public void setPickupStoreId(UUID pickupStoreId) { this.pickupStoreId = pickupStoreId; }
+
+    public String getPickupStoreName() { return pickupStoreName; }
+    public void setPickupStoreName(String pickupStoreName) { this.pickupStoreName = pickupStoreName; }
+
+    public String getPickupStoreAddress() { return pickupStoreAddress; }
+    public void setPickupStoreAddress(String pickupStoreAddress) { this.pickupStoreAddress = pickupStoreAddress; }
 
     public Double getStoreLatitude() { return storeLatitude; }
     public void setStoreLatitude(Double storeLatitude) { this.storeLatitude = storeLatitude; }

@@ -11,11 +11,14 @@ public class CreateOrderRequest {
     @NotNull(message = "cartId is required")
     private UUID cartId;
 
-    @NotNull(message = "addressId is required")
+    /** Required for EXPRESS/REGULAR delivery; omitted for PICKUP (validated in the service). */
     private UUID addressId;
 
     @NotNull(message = "deliveryMethod is required")
     private DeliveryMethod deliveryMethod;
+
+    /** Required for PICKUP: the store branch the customer collects from. */
+    private UUID pickupStoreId;
 
     private BigDecimal shippingFee;
 
@@ -30,6 +33,9 @@ public class CreateOrderRequest {
 
     public UUID getAddressId() { return addressId; }
     public void setAddressId(UUID addressId) { this.addressId = addressId; }
+
+    public UUID getPickupStoreId() { return pickupStoreId; }
+    public void setPickupStoreId(UUID pickupStoreId) { this.pickupStoreId = pickupStoreId; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }
