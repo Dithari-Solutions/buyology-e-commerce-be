@@ -1128,7 +1128,7 @@ public class OrderService {
                     String itemName = (it.getVariantSku() != null && !it.getVariantSku().isBlank())
                             ? it.getVariantSku() : it.getProductSku();
                     lines.add(new com.buyology.ecommerce.common.service.EmailService.OrderEmailItem(
-                            itemName, qty, it.getTotalPrice()));
+                            itemName, qty, it.getUnitPrice(), it.getTotalPrice()));
                 }
             }
 

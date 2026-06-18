@@ -537,7 +537,7 @@ public class EmailService {
     // ── Order confirmation & status updates ────────────────────────────────────
 
     /** A single line on the order-confirmation email. */
-    public record OrderEmailItem(String name, int quantity, BigDecimal lineTotal) {}
+    public record OrderEmailItem(String name, int quantity, BigDecimal unitPrice, BigDecimal lineTotal) {}
 
     @Async
     public void sendOrderConfirmationEmail(
@@ -631,10 +631,14 @@ public class EmailService {
         StringBuilder sb = new StringBuilder();
         for (OrderEmailItem it : items) {
             sb.append("<tr>")
-              .append("<td style=\"padding:8px 0;color:#333;font-size:14px;border-bottom:1px solid #f1f0f8;\">")
-              .append(escapeHtml(it.name())).append(" &times; ").append(it.quantity())
+              // Item name + a "Qty x Unit price" line beneath it (invoice detail).
+              .append("<td style=\"padding:10px 0;border-bottom:1px solid #f1f0f8;\">")
+              .append("<span style=\"color:#333;font-size:14px;\">").append(escapeHtml(it.name())).append("</span>")
+              .append("<br/><span style=\"color:#999;font-size:12px;\">")
+              .append(it.quantity()).append(" &times; ").append(money(currency, it.unitPrice()))
+              .append("</span>")
               .append("</td>")
-              .append("<td align=\"right\" style=\"padding:8px 0;color:#333;font-size:14px;border-bottom:1px solid #f1f0f8;white-space:nowrap;\">")
+              .append("<td align=\"right\" valign=\"top\" style=\"padding:10px 0;color:#333;font-size:14px;border-bottom:1px solid #f1f0f8;white-space:nowrap;\">")
               .append(money(currency, it.lineTotal()))
               .append("</td></tr>");
         }

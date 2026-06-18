@@ -38,7 +38,8 @@ We'll email you as it moves through packaging and delivery.
 <td style="padding:20px 32px 0;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
 <tr>
-<td colspan="2" style="padding:0 0 10px;color:#402F75;font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;">Order summary</td>
+<td style="padding:0 0 10px;color:#402F75;font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;">Tax invoice</td>
+<td align="right" style="padding:0 0 10px;color:#888;font-size:12px;">{{ORDER_NUMBER}} &middot; {{ORDER_DATE}}</td>
 </tr>
 {{ITEMS_ROWS}}
 <tr><td colspan="2" style="border-top:1px solid #ececf5;padding-top:12px;"></td></tr>
@@ -54,6 +55,9 @@ We'll email you as it moves through packaging and delivery.
 <tr>
 <td style="border-top:1px solid #ececf5;padding:12px 0 0;color:#402F75;font-size:16px;font-weight:bold;">Total</td>
 <td align="right" style="border-top:1px solid #ececf5;padding:12px 0 0;color:#402F75;font-size:18px;font-weight:bold;">{{TOTAL}}</td>
+</tr>
+<tr>
+<td colspan="2" style="padding:8px 0 0;color:#999;font-size:11px;">Prices include VAT where applicable. This email serves as your tax invoice.</td>
 </tr>
 </table>
 </td>
