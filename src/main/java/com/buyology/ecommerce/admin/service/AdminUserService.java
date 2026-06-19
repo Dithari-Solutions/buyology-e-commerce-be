@@ -3,8 +3,16 @@ package com.buyology.ecommerce.admin.service;
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserSummaryResponse;
+import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.common.utils.PasswordUtils;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
+import com.buyology.ecommerce.role.domain.Role;
+import com.buyology.ecommerce.role.domain.UserRole;
+import com.buyology.ecommerce.role.domain.UserRoleId;
+import com.buyology.ecommerce.role.repository.RoleRepository;
+import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.cart.dto.CartItemResponse;
@@ -44,6 +52,8 @@ public class AdminUserService {
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
     private final CartItemSpecSelectionRepository specSelectionRepository;
+    private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
 
     public AdminUserService(UserRepository userRepository,
                             UserProfilesRepository profilesRepository,
@@ -51,7 +61,9 @@ public class AdminUserService {
                             FavoriteRepository favoriteRepository,
                             CartRepository cartRepository,
                             CartItemRepository cartItemRepository,
-                            CartItemSpecSelectionRepository specSelectionRepository) {
+                            CartItemSpecSelectionRepository specSelectionRepository,
+                            RoleRepository roleRepository,
+                            UserRoleRepository userRoleRepository) {
         this.userRepository = userRepository;
         this.profilesRepository = profilesRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -59,6 +71,77 @@ public class AdminUserService {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
+        this.roleRepository = roleRepository;
+        this.userRoleRepository = userRoleRepository;
+    }
+
+    // ─── Create an admin user with roles (SUPERADMIN only) ────────────────────
+
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> createAdmin(CreateAdminRequest req) {
+        String email = req.getEmail() == null ? null : req.getEmail().trim().toLowerCase();
+        if (email == null || email.isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is required");
+        }
+        if (authCredentialRepository.findByEmailAndProvider(email, "LOCAL").isPresent()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
+        }
+
+        // Resolve + validate every requested role before creating anything.
+        List<Role> roles = new ArrayList<>();
+        if (req.getRoleIds() != null) {
+            for (UUID roleId : req.getRoleIds()) {
+                Role role = roleRepository.findById(roleId).orElse(null);
+                if (role == null) {
+                    return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Role not found: " + roleId);
+                }
+                roles.add(role);
+            }
+        }
+        if (roles.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "At least one role is required");
+        }
+
+        Users user = new Users();
+        user.setFirstName(req.getFirstName() == null ? null : req.getFirstName().trim());
+        user.setLastName(req.getLastName() == null ? null : req.getLastName().trim());
+        user.setUserType(Users.UserType.ADMIN);
+        user.setIsGuest(false);
+        user.setStatus("ACTIVE");
+        userRepository.save(user);
+
+        AuthCredentials credentials = new AuthCredentials();
+        credentials.setUserId(user.getId());
+        credentials.setEmail(email);
+        credentials.setPasswordHash(PasswordUtils.hashPassword(req.getPassword()));
+        credentials.setProvider("LOCAL");
+        credentials.setIsActive(true);
+        authCredentialRepository.save(credentials);
+
+        Users assignedBy = SecurityUtils.currentUserId() != null
+                ? userRepository.findById(SecurityUtils.currentUserId()).orElse(null)
+                : null;
+        for (Role role : roles) {
+            if (!userRoleRepository.existsByIdUserIdAndIdRoleId(user.getId(), role.getId())) {
+                UserRole ur = new UserRole();
+                ur.setId(new UserRoleId(user.getId(), role.getId()));
+                ur.setUser(user);
+                ur.setRole(role);
+                ur.setAssignedBy(assignedBy);
+                userRoleRepository.save(ur);
+            }
+        }
+
+        AdminUserDetailResponse detail = new AdminUserDetailResponse();
+        detail.setUserId(user.getId());
+        detail.setAuthCredentialId(credentials.getId());
+        detail.setEmail(email);
+        detail.setUserType(user.getUserType().name());
+        detail.setStatus(user.getStatus());
+        detail.setJoinedAt(user.getCreatedAt());
+        detail.setFirstName(user.getFirstName());
+        detail.setLastName(user.getLastName());
+        return ApiResponse.created(detail, "Admin created");
     }
 
     // ─── List all users (paginated) ───────────────────────────────────────────

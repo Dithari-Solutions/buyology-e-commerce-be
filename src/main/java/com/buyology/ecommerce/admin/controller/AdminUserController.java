@@ -2,12 +2,14 @@ package com.buyology.ecommerce.admin.controller;
 
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
+import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
 import com.buyology.ecommerce.admin.service.AdminInactivityService;
 import com.buyology.ecommerce.admin.service.AdminUserService;
 import com.buyology.ecommerce.auth.service.MfaService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +32,15 @@ public class AdminUserController {
         this.adminUserService = adminUserService;
         this.adminInactivityService = adminInactivityService;
         this.mfaService = mfaService;
+    }
+
+    @Operation(summary = "Create an admin user and assign roles (SUPERADMIN only)",
+               description = "Provisions a new ADMIN-type user with a LOCAL password and the given roles.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PostMapping
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> createAdmin(
+            @Valid @RequestBody CreateAdminRequest request) {
+        return adminUserService.createAdmin(request);
     }
 
     @Operation(summary = "List all users (paginated)")
