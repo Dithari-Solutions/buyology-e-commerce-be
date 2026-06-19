@@ -46,6 +46,22 @@ public class PromoCode {
     @Column(name = "applicable_category_ids", columnDefinition = "text")
     private String applicableCategoryIds;
 
+    /**
+     * JSON array of category UUIDs the code may NOT be used on — null means no exclusions.
+     * If any item in the order belongs to an excluded category, the code is rejected.
+     * (Used by WELCOME10 to exclude laptops.)
+     */
+    @Column(name = "excluded_category_ids", columnDefinition = "text")
+    private String excludedCategoryIds;
+
+    /**
+     * When set, the code is only valid for this many days after the customer's signup
+     * (a per-user window, independent of {@link #expiresAt}). null = no signup window.
+     * (Used by WELCOME10 for its 1-week validity.)
+     */
+    @Column(name = "valid_days_from_signup")
+    private Integer validDaysFromSignup;
+
     @Column(name = "expires_at")
     private Instant expiresAt;
 
@@ -104,6 +120,10 @@ public class PromoCode {
     public void setApplicableProductIds(String applicableProductIds) { this.applicableProductIds = applicableProductIds; }
     public String getApplicableCategoryIds() { return applicableCategoryIds; }
     public void setApplicableCategoryIds(String applicableCategoryIds) { this.applicableCategoryIds = applicableCategoryIds; }
+    public String getExcludedCategoryIds() { return excludedCategoryIds; }
+    public void setExcludedCategoryIds(String excludedCategoryIds) { this.excludedCategoryIds = excludedCategoryIds; }
+    public Integer getValidDaysFromSignup() { return validDaysFromSignup; }
+    public void setValidDaysFromSignup(Integer validDaysFromSignup) { this.validDaysFromSignup = validDaysFromSignup; }
     public Instant getExpiresAt() { return expiresAt; }
     public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
     public UUID getTargetUserId() { return targetUserId; }

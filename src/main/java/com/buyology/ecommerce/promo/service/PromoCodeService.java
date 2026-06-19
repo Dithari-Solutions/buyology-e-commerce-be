@@ -11,6 +11,7 @@ import com.buyology.ecommerce.promo.dto.*;
 import com.buyology.ecommerce.promo.repository.PromoCodeRepository;
 import com.buyology.ecommerce.promo.repository.PromoCodeUsageRepository;
 import com.buyology.ecommerce.promo.repository.TokenRedemptionConfigRepository;
+import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
@@ -50,6 +51,7 @@ public class PromoCodeService {
     private final ObjectMapper objectMapper;
     private final TokenRedemptionConfigRepository tokenConfigRepo;
     private final UserProfilesRepository userProfilesRepo;
+    private final ProductRepository productRepository;
 
     public PromoCodeService(PromoCodeRepository promoCodeRepo,
                             PromoCodeUsageRepository usageRepo,
@@ -59,7 +61,8 @@ public class PromoCodeService {
                             EmailService emailService,
                             ObjectMapper objectMapper,
                             TokenRedemptionConfigRepository tokenConfigRepo,
-                            UserProfilesRepository userProfilesRepo) {
+                            UserProfilesRepository userProfilesRepo,
+                            ProductRepository productRepository) {
         this.promoCodeRepo = promoCodeRepo;
         this.usageRepo = usageRepo;
         this.userRepo = userRepo;
@@ -69,6 +72,7 @@ public class PromoCodeService {
         this.objectMapper = objectMapper;
         this.tokenConfigRepo = tokenConfigRepo;
         this.userProfilesRepo = userProfilesRepo;
+        this.productRepository = productRepository;
     }
 
     // ── Customer: validate promo code ────────────────────────────────────────
@@ -91,6 +95,19 @@ public class PromoCodeService {
             return ValidatePromoCodeResponse.invalid("Promo code has expired");
         }
 
+        // Per-user signup window (e.g. WELCOME10 is valid for 7 days after the customer signs up).
+        if (pc.getValidDaysFromSignup() != null) {
+            Users user = userRepo.findById(userId).orElse(null);
+            if (user == null || user.getCreatedAt() == null) {
+                return ValidatePromoCodeResponse.invalid("This promo code is not valid for your account");
+            }
+            Instant windowEnd = user.getCreatedAt().plus(pc.getValidDaysFromSignup(), ChronoUnit.DAYS);
+            if (Instant.now().isAfter(windowEnd)) {
+                return ValidatePromoCodeResponse.invalid(
+                        "This welcome offer is only valid for " + pc.getValidDaysFromSignup() + " days after signup");
+            }
+        }
+
         if (pc.getMinimumOrderAmount() != null && orderAmount.compareTo(pc.getMinimumOrderAmount()) < 0) {
             return ValidatePromoCodeResponse.invalid(
                     "Minimum order amount of " + pc.getMinimumOrderAmount() + " required");
@@ -110,6 +127,20 @@ public class PromoCodeService {
                 boolean hasMatch = productIds.stream().anyMatch(allowedProducts::contains);
                 if (!hasMatch) {
                     return ValidatePromoCodeResponse.invalid("Promo code is not applicable to the selected products");
+                }
+            }
+        }
+
+        // Excluded categories (e.g. WELCOME10 cannot be used on laptops): reject the whole
+        // order if any item belongs to an excluded category.
+        if (pc.getExcludedCategoryIds() != null && productIds != null && !productIds.isEmpty()) {
+            List<UUID> excludedCategories = parseUuidList(pc.getExcludedCategoryIds());
+            if (!excludedCategories.isEmpty()) {
+                List<UUID> orderCategoryIds = productRepository.findCategoryIdsByProductIds(productIds);
+                boolean hasExcluded = orderCategoryIds.stream().anyMatch(excludedCategories::contains);
+                if (hasExcluded) {
+                    return ValidatePromoCodeResponse.invalid(
+                            "This promo code can't be used on some items in your order (e.g. laptops)");
                 }
             }
         }
@@ -156,6 +187,7 @@ public class PromoCodeService {
         pc.setMaxUsesTotal(req.getMaxUsesTotal());
         pc.setMaxUsesPerCustomer(req.getMaxUsesPerCustomer());
         pc.setExpiresAt(req.getExpiresAt());
+        pc.setValidDaysFromSignup(req.getValidDaysFromSignup());
         pc.setDescription(req.getDescription());
         pc.setActive(true);
 
@@ -164,6 +196,9 @@ public class PromoCodeService {
         }
         if (req.getApplicableCategoryIds() != null && !req.getApplicableCategoryIds().isEmpty()) {
             pc.setApplicableCategoryIds(toJson(req.getApplicableCategoryIds()));
+        }
+        if (req.getExcludedCategoryIds() != null && !req.getExcludedCategoryIds().isEmpty()) {
+            pc.setExcludedCategoryIds(toJson(req.getExcludedCategoryIds()));
         }
 
         return toResponse(promoCodeRepo.save(pc));

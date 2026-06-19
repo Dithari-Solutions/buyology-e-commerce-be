@@ -51,6 +51,10 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 
     List<Product> findByStatusNotAndCategoryId(String status, UUID categoryId);
 
+    /** Distinct category ids for the given products — used to enforce promo category exclusions. */
+    @Query("SELECT DISTINCT p.category.id FROM Product p WHERE p.id IN :productIds")
+    List<UUID> findCategoryIdsByProductIds(@Param("productIds") List<UUID> productIds);
+
     List<Product> findByStatusAndDeletedAtBefore(String status, Instant cutoff);
 
     boolean existsBySku(String sku);

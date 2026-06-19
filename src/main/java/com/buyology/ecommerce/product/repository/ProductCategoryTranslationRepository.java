@@ -2,6 +2,8 @@ package com.buyology.ecommerce.product.repository;
 
 import com.buyology.ecommerce.product.domain.ProductCategoryTranslation;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -16,4 +18,12 @@ public interface ProductCategoryTranslationRepository extends JpaRepository<Prod
     Optional<ProductCategoryTranslation> findByCategoryIdAndLanguage(UUID categoryId, String language);
 
     List<ProductCategoryTranslation> findAllByCategoryId(UUID categoryId);
+
+    /**
+     * Category ids whose name (in the given language) contains the term, case-insensitive.
+     * Used to resolve the laptop category/categories for the WELCOME10 exclusion.
+     */
+    @Query("SELECT DISTINCT t.category.id FROM ProductCategoryTranslation t "
+            + "WHERE LOWER(t.language) = LOWER(:language) AND LOWER(t.name) LIKE LOWER(CONCAT('%', :term, '%'))")
+    List<UUID> findCategoryIdsByNameContaining(@Param("language") String language, @Param("term") String term);
 }
