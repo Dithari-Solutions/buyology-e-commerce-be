@@ -129,6 +129,10 @@ public class RoleDataInitializer implements ApplicationRunner {
                     "Manages product assignments and inventory for their store",
                     STORE_ADMIN_PERMISSIONS),
             new RoleDefinition(
+                    "MARKETING",
+                    "Manages marketing: promo codes, newsletters, banners, stories and games",
+                    List.of()),
+            new RoleDefinition(
                     "SUPPLIER",
                     "Third-party supplier: manage own products and view own analytics",
                     SUPPLIER_PERMISSIONS),
