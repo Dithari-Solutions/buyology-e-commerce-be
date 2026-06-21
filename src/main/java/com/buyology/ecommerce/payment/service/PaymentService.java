@@ -864,21 +864,39 @@ public class PaymentService {
     }
 
     private ObjectNode buildBillingData(InitiatePaymentRequest req, UserAddress address) {
+        // Paymob rejects null billing fields ("This field may not be null"). The simplified
+        // address form leaves state/postalCode (and others) blank, so coalesce EVERY field to
+        // a non-blank fallback — never put a raw address value that could be null.
         String[] nameParts = req.getBillingName() != null ? req.getBillingName().split(" ", 2) : new String[]{"NA", "NA"};
+        String addrPhone   = address != null ? address.getPhoneNumber() : null;
+        String addrStreet  = address != null ? address.getAddressLine1() : null;
+        String addrCity    = address != null ? address.getCity() : null;
+        String addrState   = address != null ? address.getState() : null;
+        String addrPostal  = address != null ? address.getPostalCode() : null;
+        String addrCountry = address != null ? address.getCountry() : null;
+
         ObjectNode n = objectMapper.createObjectNode();
-        n.put("first_name", nameParts[0]);
-        n.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
-        n.put("phone_number", req.getCustomerPhone() != null ? req.getCustomerPhone() : (address != null ? address.getPhoneNumber() : "NA"));
-        n.put("apartment", req.getBillingApartment() != null ? req.getBillingApartment() : "NA");
-        n.put("floor", req.getBillingFloor() != null ? req.getBillingFloor() : "NA");
-        n.put("street", req.getBillingStreet() != null ? req.getBillingStreet() : (address != null ? address.getAddressLine1() : "NA"));
-        n.put("building", req.getBillingBuilding() != null ? req.getBillingBuilding() : "NA");
-        n.put("city", req.getBillingCity() != null ? req.getBillingCity() : (address != null ? address.getCity() : "NA"));
-        n.put("country", req.getBillingCountry() != null ? req.getBillingCountry() : (address != null ? address.getCountry() : "AE"));
-        n.put("state", req.getBillingState() != null ? req.getBillingState() : (address != null ? address.getState() : "NA"));
-        n.put("postal_code", req.getBillingPostalCode() != null ? req.getBillingPostalCode() : (address != null ? address.getPostalCode() : "NA"));
-        n.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
+        n.put("first_name", coalesce(nameParts[0], "NA"));
+        n.put("last_name", coalesce(nameParts.length > 1 ? nameParts[1] : null, "NA"));
+        n.put("phone_number", coalesce(req.getCustomerPhone(), addrPhone, "NA"));
+        n.put("apartment", coalesce(req.getBillingApartment(), "NA"));
+        n.put("floor", coalesce(req.getBillingFloor(), "NA"));
+        n.put("street", coalesce(req.getBillingStreet(), addrStreet, "NA"));
+        n.put("building", coalesce(req.getBillingBuilding(), "NA"));
+        n.put("city", coalesce(req.getBillingCity(), addrCity, "NA"));
+        n.put("country", coalesce(req.getBillingCountry(), addrCountry, "AE"));
+        n.put("state", coalesce(req.getBillingState(), addrState, addrCity, "NA"));
+        n.put("postal_code", coalesce(req.getBillingPostalCode(), addrPostal, "NA"));
+        n.put("email", coalesce(req.getCustomerEmail(), "NA"));
         return n;
+    }
+
+    /** First non-null, non-blank value; falls back to "NA" so Paymob never receives null. */
+    private static String coalesce(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return "NA";
     }
 
     private PaymentInitiatedResponse buildInitiatedResponse(PaymentTransaction tx, String clientSecret, String checkoutUrl) {
