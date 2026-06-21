@@ -53,6 +53,7 @@ public class AuthService {
     private final EmailService emailService;
     private final OtpProperties otpProperties;
     private final UserRoleRepository userRoleRepository;
+    private final com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository;
     private final LoginAttemptService loginAttemptService;
     private final com.buyology.ecommerce.common.audit.AuditService auditService;
     private final MfaService mfaService;
@@ -71,6 +72,7 @@ public class AuthService {
             EmailService emailService,
             OtpProperties otpProperties,
             UserRoleRepository userRoleRepository,
+            com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository,
             LoginAttemptService loginAttemptService,
             com.buyology.ecommerce.common.audit.AuditService auditService,
             MfaService mfaService,
@@ -83,6 +85,7 @@ public class AuthService {
         this.emailService = emailService;
         this.otpProperties = otpProperties;
         this.userRoleRepository = userRoleRepository;
+        this.userProfilesRepository = userProfilesRepository;
         this.loginAttemptService = loginAttemptService;
         this.auditService = auditService;
         this.mfaService = mfaService;
@@ -216,6 +219,12 @@ public class AuthService {
         credentials.setProvider("LOCAL");
         credentials.setIsActive(true);
         authCredentialRepository.save(credentials);
+
+        // Create the profile row up-front so cart/order flows never hit "User profile not
+        // found" before the user first opens their profile page.
+        com.buyology.ecommerce.user.domain.UserProfiles profile = new com.buyology.ecommerce.user.domain.UserProfiles();
+        profile.setUser(newUser);
+        userProfilesRepository.save(profile);
 
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
         // Separately email the public WELCOME10 first-order promo (10% off, one-time per

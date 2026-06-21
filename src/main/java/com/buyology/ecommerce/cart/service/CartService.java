@@ -24,7 +24,10 @@ import com.buyology.ecommerce.store.domain.StoreProductVariant;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.service.AccountStatusValidator;
+import com.buyology.ecommerce.store.domain.StoreLocation;
+import com.buyology.ecommerce.store.domain.StoreOperatingHours;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
+import com.buyology.ecommerce.store.repository.StoreOperatingHoursRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
 import org.slf4j.Logger;
@@ -54,6 +57,7 @@ public class CartService {
     private final StoreProductRepository storeProductRepository;
     private final StoreProductVariantRepository storeProductVariantRepository;
     private final StoreLocationRepository storeLocationRepository;
+    private final StoreOperatingHoursRepository operatingHoursRepository;
     private final UserProfilesRepository userProfileRepo;
     private final AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
@@ -69,6 +73,7 @@ public class CartService {
             StoreProductRepository storeProductRepository,
             StoreProductVariantRepository storeProductVariantRepository,
             StoreLocationRepository storeLocationRepository,
+            StoreOperatingHoursRepository operatingHoursRepository,
             UserProfilesRepository userProfileRepo,
             AccountStatusValidator accountStatusValidator,
             CurrencyExchangeService currencyExchangeService) {
@@ -82,6 +87,7 @@ public class CartService {
         this.storeProductRepository = storeProductRepository;
         this.storeProductVariantRepository = storeProductVariantRepository;
         this.storeLocationRepository = storeLocationRepository;
+        this.operatingHoursRepository = operatingHoursRepository;
         this.userProfileRepo = userProfileRepo;
         this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
@@ -176,11 +182,12 @@ public class CartService {
         log.debug("addItem — resolved storeId={} countryCode={} currency={}",
                 request.getStoreId(), itemCountryCode, itemCurrency);
 
-        // Fetch user profile to check home country
-        UserProfiles userProfile = userProfileRepo.findByUserId(authCredential.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+        // Fetch user profile to check home country. A brand-new user may not have a
+        // profile row yet (it's created lazily) — that just means no market country is
+        // selected, so there is no country restriction to enforce. Never 400 here.
+        UserProfiles userProfile = userProfileRepo.findByUserId(authCredential.getUserId()).orElse(null);
 
-        String userCountry = userProfile.getSelectedCountryCode();
+        String userCountry = userProfile != null ? userProfile.getSelectedCountryCode() : null;
         if (userCountry != null && !userCountry.isBlank()
                 && !CountryCodeUtil.isSameCountry(itemCountryCode, userCountry)) {
             log.warn("addItem rejected — country mismatch storeCountry={} homeCountry={} [authCredentialId={}]",
@@ -454,10 +461,46 @@ public class CartService {
      * Returns the set of store IDs within the 30-minute delivery radius.
      * Returns an empty set when coordinates are not provided.
      */
+    // Quick (30-minute) delivery is timezone-checked in the platform's business zone.
+    private static final java.time.ZoneId BUSINESS_ZONE = java.time.ZoneId.of("Asia/Dubai");
+
     private Set<UUID> resolveNearbyStoreIds(Double lat, Double lng) {
         if (lat == null || lng == null) return Collections.emptySet();
         List<UUID> ids = storeLocationRepository.findStoreIdsWithinRadius(lat, lng, THIRTY_MIN_RADIUS_KM);
-        return new HashSet<>(ids);
+        // Quick delivery is only offered while the store is OPEN — validate its working hours.
+        return ids.stream().filter(this::isStoreOpenNow).collect(java.util.stream.Collectors.toSet());
+    }
+
+    /**
+     * Whether a store is currently within its operating hours. A store with NO hours
+     * configured at all is treated as always-open (legacy proximity-only behaviour); once
+     * hours are configured, quick delivery is only offered inside an open window.
+     */
+    private boolean isStoreOpenNow(UUID storeId) {
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(BUSINESS_ZONE);
+        java.time.DayOfWeek today = now.getDayOfWeek();
+        java.time.LocalTime time = now.toLocalTime();
+
+        boolean anyHoursConfigured = false;
+        for (StoreLocation loc : storeLocationRepository.findAllByStoreIdAndIsActive(storeId, true)) {
+            List<StoreOperatingHours> hours = operatingHoursRepository.findAllByLocationId(loc.getId());
+            if (!hours.isEmpty()) anyHoursConfigured = true;
+            for (StoreOperatingHours h : hours) {
+                if (h.getDayOfWeek() == today && isOpenAt(h, time)) return true;
+            }
+        }
+        return !anyHoursConfigured;
+    }
+
+    private boolean isOpenAt(StoreOperatingHours h, java.time.LocalTime time) {
+        if (Boolean.TRUE.equals(h.getIsClosed())) return false;
+        java.time.LocalTime open = h.getOpenTime();
+        java.time.LocalTime close = h.getCloseTime();
+        if (open == null || close == null) return false;
+        // Same-day window (e.g. 09:00–22:00) or an overnight window (e.g. 20:00–02:00).
+        return close.isAfter(open)
+                ? (!time.isBefore(open) && time.isBefore(close))
+                : (!time.isBefore(open) || time.isBefore(close));
     }
 
     // Pricing policy (same source-of-truth as OrderService).
