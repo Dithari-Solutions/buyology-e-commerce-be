@@ -6,11 +6,13 @@ import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.infrastructure.config.OtpProperties;
 import com.buyology.ecommerce.user.domain.PhoneOtp;
 import com.buyology.ecommerce.user.domain.UserAddress;
+import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.dto.AddressResponse;
 import com.buyology.ecommerce.user.dto.SaveAddressRequest;
 import com.buyology.ecommerce.user.repository.PhoneOtpRepository;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
+import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class UserAddressService {
     private final UserAddressRepository addressRepo;
     private final PhoneOtpRepository phoneOtpRepo;
     private final UserRepository userRepo;
+    private final UserProfilesRepository profilesRepo;
     private final AuthCredentialRepository authCredentialRepo;
     private final SmsService smsService;
     private final OtpProperties otpProperties;
@@ -37,12 +40,14 @@ public class UserAddressService {
     public UserAddressService(UserAddressRepository addressRepo,
                                PhoneOtpRepository phoneOtpRepo,
                                UserRepository userRepo,
+                               UserProfilesRepository profilesRepo,
                                AuthCredentialRepository authCredentialRepo,
                                SmsService smsService,
                                OtpProperties otpProperties) {
         this.addressRepo = addressRepo;
         this.phoneOtpRepo = phoneOtpRepo;
         this.userRepo = userRepo;
+        this.profilesRepo = profilesRepo;
         this.authCredentialRepo = authCredentialRepo;
         this.smsService = smsService;
         this.otpProperties = otpProperties;
@@ -93,19 +98,31 @@ public class UserAddressService {
             addressRepo.clearDefaultForUser(user);
         }
 
+        // The simplified storefront form only sends an address line + map pin. Fill the
+        // recipient (name from the user, phone from their verified profile) and city from
+        // the request when present, otherwise sensible fallbacks — the columns are NOT NULL.
+        UserProfiles profile = profilesRepo.findByUser(user).orElse(null);
+        String country = normalizeCountry(req.getCountry());
+        String firstName = notBlank(req.getFirstName()) ? req.getFirstName() : nullToEmpty(user.getFirstName());
+        String lastName = notBlank(req.getLastName()) ? req.getLastName() : nullToEmpty(user.getLastName());
+        String phone = notBlank(req.getPhoneNumber()) ? req.getPhoneNumber()
+                : nullToEmpty(profile != null ? profile.getPhoneNumber() : null);
+        String city = notBlank(req.getCity()) ? req.getCity() : country;
+        boolean phoneVerified = !notBlank(req.getPhoneNumber()) && profile != null && profile.isPhoneVerified();
+
         // ── 4. Persist address ────────────────────────────────────────────────
         UserAddress address = new UserAddress();
         address.setUser(user);
-        address.setFirstName(req.getFirstName());
-        address.setLastName(req.getLastName());
-        address.setPhoneNumber(req.getPhoneNumber());
-        address.setPhoneVerified(false); // set to true once SMS OTP is re-enabled
+        address.setFirstName(firstName);
+        address.setLastName(lastName);
+        address.setPhoneNumber(phone);
+        address.setPhoneVerified(phoneVerified);
         address.setLabel(req.getLabel());
         address.setAddressLine1(req.getAddressLine1());
         address.setAddressLine2(req.getAddressLine2());
-        address.setCity(req.getCity());
+        address.setCity(city);
         address.setState(req.getState());
-        address.setCountry(normalizeCountry(req.getCountry()));
+        address.setCountry(country);
         address.setPostalCode(req.getPostalCode());
         // Use coordinates from the frontend map picker if provided;
         // full geocoding (formatted address, verification) will be added when the map service is integrated.
@@ -116,6 +133,14 @@ public class UserAddressService {
         address.setDefault(req.isDefault());
 
         return toResponse(addressRepo.save(address));
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     // =========================================================================

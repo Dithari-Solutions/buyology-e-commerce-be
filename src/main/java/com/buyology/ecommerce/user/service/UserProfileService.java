@@ -304,7 +304,7 @@ public class UserProfileService {
     private List<String> computeMissingFields(Users user, UserProfiles profile) {
         List<String> missing = new ArrayList<>();
         if (isBlank(user.getFirstName()))      missing.add("firstName");
-        if (isBlank(user.getLastName()))       missing.add("lastName");
+        // lastName (surname) is optional — not part of payment readiness.
         if (isBlank(profile.getPhoneNumber())) missing.add("phoneNumber");
         else if (!profile.isPhoneVerified())   missing.add("phoneVerification");
         if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");

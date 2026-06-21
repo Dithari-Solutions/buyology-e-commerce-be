@@ -9,16 +9,15 @@ import jakarta.validation.constraints.Size;
 public class SaveAddressRequest {
 
     // ── Recipient ─────────────────────────────────────────────────────────────
+    // Optional: the simplified storefront form no longer collects these — the service
+    // fills them from the user's profile (name) and verified phone when blank.
 
-    @NotBlank
     @Size(max = 100)
     private String firstName;
 
-    @NotBlank
     @Size(max = 100)
     private String lastName;
 
-    @NotBlank
     @Pattern(regexp = "^\\+[1-9]\\d{6,14}$", message = "Phone number must be in E.164 format, e.g. +971501234567")
     private String phoneNumber;
 
@@ -33,7 +32,8 @@ public class SaveAddressRequest {
     @Size(max = 255)
     private String addressLine2;
 
-    @NotBlank
+    // Optional — derived from the map pin (reverse-geocoded) or left blank; the service
+    // falls back to the country when not provided.
     @Size(max = 100)
     private String city;
 
