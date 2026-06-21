@@ -32,19 +32,38 @@ public class GameService {
     private final UserStreakRepository userStreakRepository;
     private final UserRepository userRepository;
     private final com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository;
+    private final com.buyology.ecommerce.game.repository.GameRewardConfigRepository gameRewardConfigRepository;
 
     public GameService(DailyGameConfigRepository dailyGameConfigRepository,
                        QuizQuestionRepository quizQuestionRepository,
                        GameResultRepository gameResultRepository,
                        UserStreakRepository userStreakRepository,
                        UserRepository userRepository,
-                       com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository) {
+                       com.buyology.ecommerce.user.repository.UserProfilesRepository userProfilesRepository,
+                       com.buyology.ecommerce.game.repository.GameRewardConfigRepository gameRewardConfigRepository) {
         this.dailyGameConfigRepository = dailyGameConfigRepository;
         this.quizQuestionRepository = quizQuestionRepository;
         this.gameResultRepository = gameResultRepository;
         this.userStreakRepository = userStreakRepository;
         this.userRepository = userRepository;
         this.userProfilesRepository = userProfilesRepository;
+        this.gameRewardConfigRepository = gameRewardConfigRepository;
+    }
+
+    // ── Admin-tunable token reward config ────────────────────────────────────
+    public com.buyology.ecommerce.game.domain.GameRewardConfig getOrCreateRewardConfig() {
+        return gameRewardConfigRepository.findTopByOrderByUpdatedAtAsc()
+                .orElseGet(() -> gameRewardConfigRepository.save(
+                        new com.buyology.ecommerce.game.domain.GameRewardConfig()));
+    }
+
+    public com.buyology.ecommerce.game.dto.GameRewardConfigDto updateRewardConfig(
+            com.buyology.ecommerce.game.dto.GameRewardConfigDto dto) {
+        com.buyology.ecommerce.game.domain.GameRewardConfig cfg = getOrCreateRewardConfig();
+        cfg.setQuizReward(Math.max(0, dto.getQuizReward()));
+        cfg.setMiniGameReward(Math.max(0, dto.getMiniGameReward()));
+        return com.buyology.ecommerce.game.dto.GameRewardConfigDto.from(
+                gameRewardConfigRepository.save(cfg));
     }
 
     // Admin Methods
@@ -147,12 +166,8 @@ public class GameService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Tokens awarded for a successful daily game.
-     * Flat 10 for now; structured as a method so we can scale by score/time later
-     * without touching call sites.
-     */
-    private static final int TOKENS_PER_WIN = 10;
+    // Token rewards are now admin-configurable via GameRewardConfig (see
+    // getOrCreateRewardConfig); the old flat TOKENS_PER_WIN constant was removed.
 
     /**
      * Server-side outcome of a submission. Success and score are derived here
@@ -228,7 +243,11 @@ public class GameService {
             throw new AlreadyPlayedException("Already played today");
         }
 
-        int tokensEarned = outcome.success() ? TOKENS_PER_WIN : 0;
+        com.buyology.ecommerce.game.domain.GameRewardConfig rewardConfig = getOrCreateRewardConfig();
+        int reward = request.getGameType() == GameType.QUIZ
+                ? rewardConfig.getQuizReward()
+                : rewardConfig.getMiniGameReward();
+        int tokensEarned = outcome.success() ? reward : 0;
         int newTotalTokens = userProfilesRepository.findByUser(user)
                 .map(profile -> {
                     int updated = profile.getTokens() + tokensEarned;

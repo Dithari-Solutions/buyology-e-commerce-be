@@ -3,6 +3,7 @@ package com.buyology.ecommerce.game.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.game.domain.DailyGameConfig;
 import com.buyology.ecommerce.game.dto.DailyGameConfigDto;
+import com.buyology.ecommerce.game.dto.GameRewardConfigDto;
 import com.buyology.ecommerce.game.dto.QuizQuestionRequest;
 import com.buyology.ecommerce.game.dto.QuizQuestionResponse;
 import com.buyology.ecommerce.game.service.GameService;
@@ -75,5 +76,20 @@ public class AdminGameController {
         LocalDate target = date != null ? date : LocalDate.now();
         DailyGameConfig config = gameService.getDailyGameConfig(target);
         return ApiResponse.success(config, "Daily game configuration retrieved");
+    }
+
+    @Operation(summary = "Get the token-reward config (tokens awarded per game/quiz)")
+    @GetMapping("/reward-config")
+    public ResponseEntity<ApiResponse<GameRewardConfigDto>> getRewardConfig() {
+        return ApiResponse.success(
+                GameRewardConfigDto.from(gameService.getOrCreateRewardConfig()),
+                "Game reward config fetched");
+    }
+
+    @Operation(summary = "Update the token-reward config (tokens awarded per game/quiz)")
+    @PutMapping("/reward-config")
+    public ResponseEntity<ApiResponse<GameRewardConfigDto>> updateRewardConfig(
+            @RequestBody GameRewardConfigDto dto) {
+        return ApiResponse.success(gameService.updateRewardConfig(dto), "Game reward config updated");
     }
 }
