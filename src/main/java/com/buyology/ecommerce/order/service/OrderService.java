@@ -234,6 +234,9 @@ public class OrderService {
                 throw new IllegalArgumentException("The selected store is not available for pickup.");
             }
             Store pickupStore = branch.getStore();
+            if (pickupStore == null) {
+                throw new IllegalArgumentException("The selected store is not available for pickup.");
+            }
 
             // The customer may only collect from a store in their own market/country.
             String storeCountry = (branch.getCountry() != null && !branch.getCountry().isBlank())
@@ -264,7 +267,7 @@ public class OrderService {
                                     ? "addressId is required for delivery"
                                     : "Address not found: " + req.getAddressId()));
 
-            if (!userId.equals(address.getUser().getId())) {
+            if (address.getUser() == null || !userId.equals(address.getUser().getId())) {
                 throw new IllegalArgumentException("Address does not belong to the authenticated user");
             }
 
@@ -275,8 +278,25 @@ public class OrderService {
                         + marketCountry + ").");
             }
 
-            // Resolve delivery method and fees if not explicitly provided (or even if provided, re-calculate for security)
-            DeliveryMethod method = req.getDeliveryMethod() != null ? req.getDeliveryMethod() : resolveDeliveryMethod(cartItems, address);
+            // Honor the customer's choice. EXPRESS is re-validated against the address
+            // (store within the 30-min radius); if it can't be fulfilled we quietly downgrade
+            // to REGULAR rather than failing the order — this must never throw, so it can't
+            // regress an order that previously succeeded.
+            DeliveryMethod requested = req.getDeliveryMethod();
+            DeliveryMethod method;
+            if (requested == DeliveryMethod.EXPRESS) {
+                DeliveryMethod resolved;
+                try {
+                    resolved = resolveDeliveryMethod(cartItems, address);
+                } catch (RuntimeException ex) {
+                    resolved = DeliveryMethod.REGULAR;
+                }
+                method = resolved;
+            } else if (requested != null) {
+                method = requested;
+            } else {
+                method = resolveDeliveryMethod(cartItems, address);
+            }
             BigDecimal shippingFee = calculateShippingFee(cart.getTotalPrice(), cart.getCurrency());
 
             order.setDeliveryMethod(method);
@@ -817,9 +837,17 @@ public class OrderService {
         }
 
         String deliveryCountry = address.getCountry();
+        // Without a delivery country we can't assert store-country parity → fall back to
+        // REGULAR instead of throwing a spurious "same country" error on a valid order.
+        if (deliveryCountry == null || deliveryCountry.isBlank()) {
+            return DeliveryMethod.REGULAR;
+        }
         boolean allMatchCountry = cartItems.stream()
                 .allMatch(item -> storeProductRepo.findByStore_IdAndProduct_IdAndIsActiveTrue(item.getStoreId(), item.getProduct().getId())
-                        .map(sp -> sp.getStore().getCountry().getCode().equalsIgnoreCase(deliveryCountry))
+                        .map(sp -> sp.getStore() != null
+                                && sp.getStore().getCountry() != null
+                                && sp.getStore().getCountry().getCode() != null
+                                && sp.getStore().getCountry().getCode().equalsIgnoreCase(deliveryCountry))
                         .orElse(false));
 
         if (!allMatchCountry) {

@@ -60,6 +60,22 @@ public class PushTokenController {
     }
 
     /**
+     * Delete a notification from the authenticated user's history.
+     */
+    @DeleteMapping("/history/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> deleteNotification(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id) {
+        historyRepository.findById(id).ifPresent(n -> {
+            if (n.getUserId().equals(userId)) {
+                historyRepository.delete(n);
+            }
+        });
+        return ApiResponse.success(null, "Notification deleted");
+    }
+
+    /**
      * Get the count of unread notifications for the authenticated user.
      */
     @GetMapping("/unread-count")

@@ -69,4 +69,11 @@ public class CartController {
     public ResponseEntity<ApiResponse<CartResponse>> checkout(@PathVariable UUID authCredentialId) {
         return cartService.checkout(authCredentialId);
     }
+
+    @Operation(summary = "Get the item/quantity count of the active cart (for badge display)")
+    @GetMapping("/{authCredentialId}/count")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.cart.dto.CartCountResponse>> getCartCount(
+            @PathVariable UUID authCredentialId) {
+        return cartService.getCartCount(authCredentialId);
+    }
 }

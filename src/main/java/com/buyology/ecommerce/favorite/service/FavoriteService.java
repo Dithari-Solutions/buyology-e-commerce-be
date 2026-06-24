@@ -98,6 +98,14 @@ public class FavoriteService {
         return ApiResponse.success(new FavoriteListResponse(authCredentialId, items), "Favorites retrieved");
     }
 
+    /** Lightweight favourites count for badge display. */
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.favorite.dto.FavoriteCountResponse>> getFavoriteCount(UUID authCredentialId) {
+        requireOwnedCredential(authCredentialId);
+        long count = favoriteRepository.countByAuthCredential_Id(authCredentialId);
+        return ApiResponse.success(
+                new com.buyology.ecommerce.favorite.dto.FavoriteCountResponse(count), "Favorites count retrieved");
+    }
+
     // ─── Check if product is favorited ────────────────────────────────────────
 
     public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkFavorite(UUID authCredentialId, UUID productId) {

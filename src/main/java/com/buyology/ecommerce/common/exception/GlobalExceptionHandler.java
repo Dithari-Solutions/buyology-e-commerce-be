@@ -126,6 +126,17 @@ public class GlobalExceptionHandler {
         return ApiResponse.failure(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
     }
 
+    // ── External payment gateway ──────────────────────────────────────────────
+
+    @ExceptionHandler(com.buyology.ecommerce.payment.exception.PaymentGatewayException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentGateway(
+            com.buyology.ecommerce.payment.exception.PaymentGatewayException ex) {
+        // The gateway's real reason (already logged in full by PaymobClient) is propagated
+        // here so the client sees a payment-specific message instead of the opaque 500.
+        log.error("Payment gateway error: {}", ex.getMessage());
+        return ApiResponse.failure(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         log.error("Unexpected error: {}", ex.getMessage(), ex);

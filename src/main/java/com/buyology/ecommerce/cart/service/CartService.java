@@ -107,6 +107,25 @@ public class CartService {
         return ApiResponse.success(buildCartResponse(cart, nearbyStoreIds), "Cart retrieved successfully");
     }
 
+    /**
+     * Lightweight count of the active cart for badge display — does NOT create a cart.
+     */
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.cart.dto.CartCountResponse>> getCartCount(UUID authCredentialId) {
+        requireOwnedCredential(authCredentialId);
+        Cart cart = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .orElse(null);
+        if (cart == null) {
+            return ApiResponse.success(new com.buyology.ecommerce.cart.dto.CartCountResponse(0, 0), "Cart count retrieved");
+        }
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
+        int itemCount = items.size();
+        int totalQuantity = items.stream().mapToInt(CartItem::getQuantity).sum();
+        return ApiResponse.success(
+                new com.buyology.ecommerce.cart.dto.CartCountResponse(itemCount, totalQuantity),
+                "Cart count retrieved");
+    }
+
     // ─── Add item to cart ─────────────────────────────────────────────────────
 
     @Transactional

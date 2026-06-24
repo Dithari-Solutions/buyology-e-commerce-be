@@ -85,6 +85,8 @@ import java.util.stream.Collectors;
 @Service
 public class ProductService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProductService.class);
+
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
@@ -920,8 +922,19 @@ public class ProductService {
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProductsElastic(
             String query, String lang, String countryCode, String currency, Double lat, Double lng) {
-        List<com.buyology.ecommerce.product.search.domain.ProductDocument> searchResults = productSearchService.search(query);
-        
+        List<com.buyology.ecommerce.product.search.domain.ProductDocument> searchResults;
+        try {
+            searchResults = productSearchService.search(query);
+        } catch (Exception ex) {
+            // Elasticsearch unreachable → fall back to the DB-backed search so search never 500s.
+            log.warn("[SEARCH] Elasticsearch search failed ('{}'), falling back to DB search: {}",
+                    query, ex.getMessage());
+            com.buyology.ecommerce.product.dto.ProductFilterRequest filter =
+                    new com.buyology.ecommerce.product.dto.ProductFilterRequest();
+            filter.setQ(query);
+            return searchProducts(filter, lang, countryCode, currency, lat, lng);
+        }
+
         List<UUID> productIds = searchResults.stream()
                 .map(com.buyology.ecommerce.product.search.domain.ProductDocument::getId)
                 .collect(Collectors.toList());

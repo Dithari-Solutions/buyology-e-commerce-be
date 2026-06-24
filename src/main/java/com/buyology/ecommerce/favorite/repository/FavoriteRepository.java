@@ -23,6 +23,8 @@ public interface FavoriteRepository extends JpaRepository<Favorite, UUID> {
 
     void deleteByAuthCredential_Id(UUID authCredentialId);
 
+    long countByAuthCredential_Id(UUID authCredentialId);
+
     // Admin: all favorites across all users, paginated
     @Query("SELECT f FROM Favorite f JOIN FETCH f.authCredential JOIN FETCH f.product")
     Page<Favorite> findAllWithDetails(Pageable pageable);

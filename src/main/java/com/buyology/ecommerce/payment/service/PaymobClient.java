@@ -145,8 +145,20 @@ public class PaymobClient {
             HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(body), headers);
             ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
             return objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            // A non-2xx from Paymob (bad secret key, wrong integration id, unsupported
+            // currency, malformed billing, etc.). The response body carries the real reason —
+            // log it in full and propagate a trimmed version so it's diagnosable client-side.
+            String responseBody = e.getResponseBodyAsString();
+            log.error("[PAYMOB] {} from {} — body={}", e.getStatusCode(), url, responseBody);
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Payment provider rejected the request (" + e.getStatusCode() + "): "
+                            + (responseBody == null || responseBody.isBlank() ? e.getMessage() : responseBody),
+                    e);
         } catch (Exception e) {
-            throw new RuntimeException("Paymob API call failed for URL " + url + ": " + e.getMessage(), e);
+            log.error("[PAYMOB] Call to {} failed", url, e);
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Could not reach the payment provider: " + e.getMessage(), e);
         }
     }
 }

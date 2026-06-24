@@ -60,4 +60,11 @@ public class FavoriteController {
             @PathVariable UUID productId) {
         return favoriteService.checkFavorite(authCredentialId, productId);
     }
+
+    @Operation(summary = "Get the count of a user's favorites (for badge display)")
+    @GetMapping("/{authCredentialId}/count")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.favorite.dto.FavoriteCountResponse>> getFavoriteCount(
+            @PathVariable UUID authCredentialId) {
+        return favoriteService.getFavoriteCount(authCredentialId);
+    }
 }
