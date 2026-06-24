@@ -93,6 +93,13 @@ public class PaymobClient {
         JsonNode response = post(url, body, "Token " + secretKey);
         log.info("[PAYMOB] Intention response: {}", response.toString());
         
+        // Defensive: a 200 with an unexpected body (no id/client_secret) must NOT NPE on
+        // .asText() — surface it as a clear PaymentGatewayException instead of a generic 500.
+        if (!response.has("id") || response.get("id").isNull()
+                || !response.has("client_secret") || response.get("client_secret").isNull()) {
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Payment provider returned an unexpected response: " + response.toString(), null);
+        }
         String intentionId = response.get("id").asText();
         String clientSecret = response.get("client_secret").asText();
         Long paymobOrderId = null;
@@ -103,7 +110,7 @@ public class PaymobClient {
             log.info("[PAYMOB] Extracted numeric paymobOrderId: {}", paymobOrderId);
         } else if (response.has("order") && !response.get("order").isNull()) {
             JsonNode respOrder = response.get("order");
-            if (respOrder.has("id")) {
+            if (respOrder.has("id") && !respOrder.get("id").isNull()) {
                 paymobOrderId = respOrder.get("id").asLong();
                 log.info("[PAYMOB] Extracted numeric paymobOrderId from order.id: {}", paymobOrderId);
             }

@@ -292,25 +292,38 @@ public class GameService {
         LocalDate today = LocalDate.now();
         List<GameResult> results = gameResultRepository.findDailyLeaderboard(today.atStartOfDay(), today.atTime(LocalTime.MAX));
         
-        return results.stream().map(r -> {
-            UserStreak streak = userStreakRepository.findByUser(r.getUser()).orElse(null);
-            return new LeaderboardResponse(
-                    r.getUser().getId(),
-                    r.getUser().getFirstName() + " " + r.getUser().getLastName(),
-                    r.getScore(),
-                    streak != null ? streak.getCurrentStreak() : 0
-            );
-        }).collect(Collectors.toList());
+        return results.stream().map(r -> new LeaderboardResponse(
+                r.getUser().getId(),
+                displayName(r.getUser()),
+                avatarUrlFor(r.getUser()),
+                r.getScore(),
+                userStreakRepository.findByUser(r.getUser()).map(UserStreak::getCurrentStreak).orElse(0)
+        )).collect(Collectors.toList());
     }
 
     public List<LeaderboardResponse> getStreakLeaderboard() {
         return userStreakRepository.findTop10ByOrderByCurrentStreakDesc().stream()
                 .map(s -> new LeaderboardResponse(
                         s.getUser().getId(),
-                        s.getUser().getFirstName() + " " + s.getUser().getLastName(),
+                        displayName(s.getUser()),
+                        avatarUrlFor(s.getUser()),
                         0, // Score not relevant for streak leaderboard
                         s.getCurrentStreak()
                 )).collect(Collectors.toList());
+    }
+
+    /** Safe display name — never "null null"; returns null when the user has no name set. */
+    private String displayName(Users u) {
+        String first = u.getFirstName() != null ? u.getFirstName().trim() : "";
+        String last = u.getLastName() != null ? u.getLastName().trim() : "";
+        String name = (first + " " + last).trim();
+        return name.isEmpty() ? null : name;
+    }
+
+    private String avatarUrlFor(Users u) {
+        return userProfilesRepository.findByUser(u)
+                .map(com.buyology.ecommerce.user.domain.UserProfiles::getAvatarUrl)
+                .orElse(null);
     }
 
     private Users getCurrentUser() {

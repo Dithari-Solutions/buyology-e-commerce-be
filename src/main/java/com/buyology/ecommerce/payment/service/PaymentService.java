@@ -230,14 +230,27 @@ public class PaymentService {
                 ? req.getRedirectionUrl()
                 : paymobProperties.getRedirectionUrl();
 
-        // 2. Call Paymob API using tx.id as merchant_order_id
-        PaymobClient.IntentionResult intention = paymobClient.createIntention(
-                provider.getSecretKey(), provider.getBaseUrl(),
-                amountCents, targetCurrency,
-                integrationId, tx.getId().toString(),
-                billingData, customer, items,
-                provider.getNotificationUrl(),
-                redirectionUrl);
+        // 2. Call Paymob API using tx.id as merchant_order_id. Any failure here (HTTP error,
+        // malformed response, parse NPE, …) is converted to a PaymentGatewayException so the
+        // client gets a clear 502 message instead of the opaque "An unexpected error occurred".
+        PaymobClient.IntentionResult intention;
+        try {
+            intention = paymobClient.createIntention(
+                    provider.getSecretKey(), provider.getBaseUrl(),
+                    amountCents, targetCurrency,
+                    integrationId, tx.getId().toString(),
+                    billingData, customer, items,
+                    provider.getNotificationUrl(),
+                    redirectionUrl);
+        } catch (com.buyology.ecommerce.payment.exception.PaymentGatewayException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[PAYMENT] Paymob intention creation failed", e);
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Payment gateway error: "
+                            + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()),
+                    e);
+        }
 
         log.info("[PAYMENT] Created Paymob Intention: id={}, paymobOrderId={}", intention.intentionId(), intention.paymobOrderId());
 
