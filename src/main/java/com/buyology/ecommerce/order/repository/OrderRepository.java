@@ -31,6 +31,11 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByDeliveryOrderId(UUID deliveryOrderId);
 
+    // Idempotency for createOrder: detect an order already produced from this cart so a
+    // re-entered checkout (e.g. app killed mid-payment, then re-paid) reuses it instead
+    // of creating a duplicate order + charge.
+    Optional<Order> findFirstByCartIdAndStatusIn(UUID cartId, List<OrderStatus> statuses);
+
     @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
            "WHERE (:status IS NULL OR o.status = :status) " +
            "AND (:deliveryMethod IS NULL OR o.deliveryMethod = :deliveryMethod) " +

@@ -63,6 +63,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -190,6 +191,21 @@ public class OrderService {
         if (cart.getStatus() != Cart.CartStatus.CHECKED_OUT) {
             throw new IllegalStateException(
                     "Cart must be in CHECKED_OUT status to create an order. Current status: " + cart.getStatus());
+        }
+
+        // Idempotency: if this cart already produced an order that is still payable or paid
+        // — e.g. the app was killed after createOrder but before payment, the cart stayed
+        // CHECKED_OUT, and the user re-entered checkout and paid again — return THAT order
+        // instead of creating a duplicate order + second charge for the same cart. (The
+        // in-app repay path already covers the same-session case; this closes the
+        // relaunch/cross-session case. Buy Now uses a fresh ephemeral cart per call, so it
+        // never matches here.)
+        Optional<Order> existingOrder = orderRepo.findFirstByCartIdAndStatusIn(
+                cart.getId(), List.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID));
+        if (existingOrder.isPresent()) {
+            log.info("[ORDER] createOrder: reusing existing {} order {} for cart {} (idempotent)",
+                    existingOrder.get().getStatus(), existingOrder.get().getId(), cart.getId());
+            return toOrderResponse(existingOrder.get());
         }
 
         List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
