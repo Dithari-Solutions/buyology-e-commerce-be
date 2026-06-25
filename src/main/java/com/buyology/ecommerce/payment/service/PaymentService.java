@@ -125,7 +125,19 @@ public class PaymentService {
         // Block payment for accounts pending deletion — they must recover their account first
         // (also prevents charging the cart-first flow before its order is created on success).
         accountStatusValidator.requireActiveAccount(currentUserId);
-        userProfileService.checkPaymentReadiness(currentUserId);
+        // Store-pickup orders need no delivery address; only enforce the address
+        // requirement for deliver-to-me orders (the order-first flow — mobile — has
+        // the order here, so its delivery method tells us which). The cart-first flow
+        // (no appOrderId yet) keeps the address requirement.
+        boolean requireAddress = true;
+        if (req.getAppOrderId() != null) {
+            var preOrder = orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null);
+            if (preOrder != null
+                    && preOrder.getDeliveryMethod() == com.buyology.ecommerce.order.domain.enums.DeliveryMethod.PICKUP) {
+                requireAddress = false;
+            }
+        }
+        userProfileService.checkPaymentReadiness(currentUserId, requireAddress);
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));

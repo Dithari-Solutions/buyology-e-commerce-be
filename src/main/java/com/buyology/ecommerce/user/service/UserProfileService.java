@@ -219,16 +219,28 @@ public class UserProfileService {
     // =========================================================================
 
     public void checkPaymentReadiness(UUID userId) {
+        // Default: require a delivery address (the common deliver-to-me order).
+        checkPaymentReadiness(userId, true);
+    }
+
+    /**
+     * @param requireAddress false for store-PICKUP orders, which need no delivery
+     *                       address — otherwise a pickup-only customer who never saved
+     *                       an address is permanently blocked from paying.
+     */
+    public void checkPaymentReadiness(UUID userId, boolean requireAddress) {
         Users user = findUser(userId);
         UserProfiles profile = findOrCreateProfile(user);
 
         List<String> missing = new ArrayList<>();
 
+        // Surname is OPTIONAL (commit 9687130) — keep this guard in lock-step with
+        // computeMissingFields()/paymentReady, otherwise the client enables "Pay"
+        // (paymentReady=true) but payment-init throws on a missing lastName.
         if (isBlank(user.getFirstName()))         missing.add("firstName");
-        if (isBlank(user.getLastName()))          missing.add("lastName");
         if (isBlank(profile.getPhoneNumber()))    missing.add("phoneNumber");
         else if (!profile.isPhoneVerified())      missing.add("phoneVerification");
-        if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
+        if (requireAddress && addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
 
         if (!missing.isEmpty()) {
             throw new IllegalStateException(
