@@ -137,6 +137,15 @@ public class GlobalExceptionHandler {
         return ApiResponse.failure(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 
+    // ── Missing resource (404) ────────────────────────────────────────────────
+    // e.g. "Wallet not found" for a non-B2B user, or a missing record — return a clear
+    // 404 with the message instead of an opaque 500. (Clients already treat 404 as "none".)
+    @ExceptionHandler(java.util.NoSuchElementException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoSuchElement(java.util.NoSuchElementException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        return ApiResponse.failure(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         log.error("Unexpected error: {}", ex.getMessage(), ex);

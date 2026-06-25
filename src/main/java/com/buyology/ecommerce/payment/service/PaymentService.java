@@ -116,16 +116,16 @@ public class PaymentService {
 
     @Transactional
     public PaymentInitiatedResponse initiatePayment(InitiatePaymentRequest req) {
-        // customerId from the client is an auth_credentials.id. checkPaymentReadiness
-        // resolves it to a user and asserts it belongs to the authenticated principal
-        // (its findUser does requireSelfOrAdmin), so paying on another user's behalf is
-        // already blocked — we must NOT overwrite it with the principal's users.id, which
-        // findUser cannot resolve.
+        // The authenticated principal IS the users.id (JwtAuthenticationFilter sets it to
+        // credentials.getUserId()). checkPaymentReadiness / findUser look up by users.id, so
+        // we must pass currentUserId here — NOT req.getCustomerId(), which is an
+        // auth_credentials.id and would throw "User not found" (the cause of the opaque 500
+        // on mobile, which sends its auth_credentials.id as customerId).
         UUID currentUserId = SecurityUtils.currentUserId();
         // Block payment for accounts pending deletion — they must recover their account first
         // (also prevents charging the cart-first flow before its order is created on success).
         accountStatusValidator.requireActiveAccount(currentUserId);
-        userProfileService.checkPaymentReadiness(req.getCustomerId());
+        userProfileService.checkPaymentReadiness(currentUserId);
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
