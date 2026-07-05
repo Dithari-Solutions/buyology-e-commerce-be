@@ -120,6 +120,15 @@ public class ProductResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean quoteOnly;
 
+    /**
+     * The id of the b2bEnabled {@link com.buyology.ecommerce.store.domain.StoreProduct} assignment
+     * backing this product on the B2B channel for the requested country. The storefront must pass
+     * this as {@code storeProductId} when calling POST /api/b2b/quote/cart/items to add the product
+     * to the RFQ quote cart. Present only on B2B responses; omitted (null) on consumer responses.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UUID storeProductId;
+
     private List<MediaDto> media;
     private List<SpecGroupDto> specs;
     private List<ColorOptionDto> colors;
@@ -371,6 +380,8 @@ public class ProductResponse {
     public void setStoreOptions(List<StoreOptionDto> storeOptions) { this.storeOptions = storeOptions; }
     public Boolean getQuoteOnly() { return quoteOnly; }
     public void setQuoteOnly(Boolean quoteOnly) { this.quoteOnly = quoteOnly; }
+    public UUID getStoreProductId() { return storeProductId; }
+    public void setStoreProductId(UUID storeProductId) { this.storeProductId = storeProductId; }
     public List<MediaDto> getMedia() { return media; }
     public void setMedia(List<MediaDto> media) { this.media = media; }
     public List<SpecGroupDto> getSpecs() { return specs; }

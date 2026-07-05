@@ -850,11 +850,30 @@ public class ProductService {
     }
 
     /**
-     * Marks a B2B batch as quote-only: suppresses every price/delivery/store field so the
-     * storefront shows "Request a Quote" and can never derive a buyable price. Ratings are
-     * still populated (useful on B2B cards).
+     * Resolves, for each product in the country-scoped B2B catalog, the id of the b2bEnabled
+     * StoreProduct assignment the storefront must reference when adding it to the RFQ quote cart.
+     * The B2B assignment query is ordered by store-product id, so keeping the first row per product
+     * (merge keeps the existing/earlier one) picks a single deterministic assignment per product.
      */
-    private void applyB2bQuoteOnly(List<ProductResponse> responses, List<Product> products) {
+    private java.util.Map<UUID, UUID> b2bStoreProductIdsByProduct(String countryCode) {
+        List<StoreProduct> assignments = (countryCode != null && !countryCode.isBlank())
+                ? storeProductRepository.findB2bActiveAssignmentsByCountryCode(countryCode.toUpperCase())
+                : storeProductRepository.findB2bActiveAssignmentsInB2bCountries();
+        java.util.Map<UUID, UUID> byProduct = new java.util.HashMap<>();
+        for (StoreProduct sp : assignments) {
+            byProduct.merge(sp.getProduct().getId(), sp.getId(), (existing, ignored) -> existing);
+        }
+        return byProduct;
+    }
+
+    /**
+     * Marks a B2B batch as quote-only: suppresses every price/delivery/store field so the
+     * storefront shows "Request a Quote" and can never derive a buyable price, while exposing the
+     * backing b2bEnabled store-product id (storeProductId) needed to add the product to the RFQ
+     * quote cart. Ratings are still populated (useful on B2B cards).
+     */
+    private void applyB2bQuoteOnly(List<ProductResponse> responses, List<Product> products,
+            java.util.Map<UUID, UUID> storeProductIdsByProduct) {
         for (ProductResponse r : responses) {
             r.setQuoteOnly(true);
             r.setStoreId(null);
@@ -865,6 +884,7 @@ public class ProductService {
             r.setExpressDelivery(null);
             r.setFreeDelivery(null);
             r.setDeliveryFee(null);
+            r.setStoreProductId(storeProductIdsByProduct.get(r.getId()));
         }
         applyRatingsBatch(responses, products);
     }
@@ -886,7 +906,7 @@ public class ProductService {
         List<Product> products = all.stream().skip(skip).limit(pageSize).toList();
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
-        applyB2bQuoteOnly(responses, products);
+        applyB2bQuoteOnly(responses, products, b2bStoreProductIdsByProduct(countryCode));
         // Price sorts are meaningless with no price; keep source order for POPULAR/PRICE_*,
         // honour NEWEST (already applied above).
         return ApiResponse.success(responses, "B2B products fetched successfully");
@@ -910,7 +930,7 @@ public class ProductService {
                 .toList();
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
-        applyB2bQuoteOnly(responses, products);
+        applyB2bQuoteOnly(responses, products, b2bStoreProductIdsByProduct(countryCode));
         return ApiResponse.success(responses, "B2B products fetched successfully");
     }
 
@@ -938,7 +958,7 @@ public class ProductService {
 
         ProductResponse response = toResponse(product, lang, false);
         List<ProductResponse> single = new java.util.ArrayList<>(List.of(response));
-        applyB2bQuoteOnly(single, List.of(product));
+        applyB2bQuoteOnly(single, List.of(product), b2bStoreProductIdsByProduct(countryCode));
         return ApiResponse.success(response, "B2B product fetched successfully");
     }
 

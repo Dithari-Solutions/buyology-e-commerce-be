@@ -125,6 +125,40 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
     List<Product> findB2bActiveProductsInB2bCountries();
 
     /**
+     * B2B channel: the actual b2bEnabled StoreProduct assignments (not just the products) for the
+     * given B2B-enabled country. Ordered by id so callers can deterministically pick one row per
+     * product (the storeProductId the storefront needs to add the product to the RFQ quote cart).
+     */
+    @Query("""
+            SELECT sp FROM StoreProduct sp
+            WHERE sp.store.country.code = :countryCode
+              AND sp.store.country.b2bEnabled = true
+              AND sp.isActive = true
+              AND sp.b2bEnabled = true
+              AND sp.deletedAt IS NULL
+              AND sp.product.status = 'ACTIVE'
+              AND sp.store.deletedAt IS NULL
+            ORDER BY sp.id ASC
+            """)
+    List<StoreProduct> findB2bActiveAssignmentsByCountryCode(@Param("countryCode") String countryCode);
+
+    /**
+     * B2B channel (no country): b2bEnabled StoreProduct assignments across ANY B2B-enabled country.
+     * Ordered by id for deterministic one-row-per-product selection.
+     */
+    @Query("""
+            SELECT sp FROM StoreProduct sp
+            WHERE sp.store.country.b2bEnabled = true
+              AND sp.isActive = true
+              AND sp.b2bEnabled = true
+              AND sp.deletedAt IS NULL
+              AND sp.product.status = 'ACTIVE'
+              AND sp.store.deletedAt IS NULL
+            ORDER BY sp.id ASC
+            """)
+    List<StoreProduct> findB2bActiveAssignmentsInB2bCountries();
+
+    /**
      * Returns the lowest store price for a product in the given country.
      * The price is in the country's native currency (Country.currency).
      */
