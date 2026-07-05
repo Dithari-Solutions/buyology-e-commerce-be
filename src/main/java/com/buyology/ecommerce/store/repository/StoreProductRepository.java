@@ -78,6 +78,22 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
     List<UUID> findB2cActiveProductIds();
 
     /**
+     * B2C channel: whether a product has at least one active, consumer-visible (b2cEnabled)
+     * store assignment. Used to gate the consumer product-detail endpoints so a B2B-only
+     * product (b2c off) is never reachable by direct id/slug on the consumer channel.
+     */
+    @Query("""
+            SELECT CASE WHEN COUNT(sp) > 0 THEN true ELSE false END FROM StoreProduct sp
+            WHERE sp.product.id = :productId
+              AND sp.isActive = true
+              AND sp.b2cEnabled = true
+              AND sp.deletedAt IS NULL
+              AND sp.product.status = 'ACTIVE'
+              AND sp.store.deletedAt IS NULL
+            """)
+    boolean existsB2cActiveByProductId(@Param("productId") UUID productId);
+
+    /**
      * B2B channel: distinct products offered for B2B (sp.b2bEnabled) in stores of the given
      * country, only when that country is B2B-enabled (country.b2bEnabled). Country-scoped B2B browse.
      */

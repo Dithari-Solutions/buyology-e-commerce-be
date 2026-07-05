@@ -716,6 +716,12 @@ public class ProductService {
         if (!"ACTIVE".equals(product.getStatus())) {
             throw new ProductNotFoundException(id);
         }
+        // Consumer channel: a B2B-only product (no active b2cEnabled store assignment) must not
+        // be reachable by direct id/slug — otherwise its full detail (title/media/specs) leaks
+        // even though its price is suppressed. The B2B catalog is served by the /b2b* endpoints.
+        if (!storeProductRepository.existsB2cActiveByProductId(id)) {
+            throw new ProductNotFoundException(id);
+        }
         ProductResponse response = toResponse(product, lang, false);
         applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
         applyDeliveryInfo(response);

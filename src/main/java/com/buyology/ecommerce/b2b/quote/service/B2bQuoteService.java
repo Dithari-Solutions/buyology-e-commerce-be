@@ -299,6 +299,7 @@ public class B2bQuoteService {
     /** Member accepts a QUOTED price before it expires (QUOTED → ACCEPTED). */
     @Transactional
     public B2bQuoteResponse accept(UUID userId, UUID quoteId) {
+        requireActiveMembership(userId);
         UUID credentialId = resolveCredentialId(userId);
         B2bQuote quote = quoteRepo.findById(quoteId)
                 .orElseThrow(() -> new NoSuchElementException("Quote not found: " + quoteId));
@@ -360,6 +361,7 @@ public class B2bQuoteService {
      */
     @Transactional
     public PaymentInitiatedResponse checkout(UUID userId, UUID quoteId, CheckoutQuoteRequest req) {
+        requireActiveMembership(userId);
         UUID credentialId = resolveCredentialId(userId);
         B2bQuote quote = quoteRepo.findById(quoteId)
                 .orElseThrow(() -> new NoSuchElementException("Quote not found: " + quoteId));
