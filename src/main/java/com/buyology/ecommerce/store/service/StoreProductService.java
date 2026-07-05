@@ -74,6 +74,8 @@ public class StoreProductService {
         storeProduct.setDiscountType(request.getDiscountType());
         storeProduct.setDiscountValue(request.getDiscountValue());
         storeProduct.setIsActive(request.getIsActive() != null ? request.getIsActive() : true);
+        storeProduct.setB2cEnabled(request.getB2cEnabled() != null ? request.getB2cEnabled() : true);
+        storeProduct.setB2bEnabled(request.getB2bEnabled() != null ? request.getB2bEnabled() : false);
         StoreProduct saved = storeProductRepository.save(storeProduct);
 
         // Assign variants if provided inline
@@ -118,6 +120,12 @@ public class StoreProductService {
         }
         if (request.getIsActive() != null) {
             sp.setIsActive(request.getIsActive());
+        }
+        if (request.getB2cEnabled() != null) {
+            sp.setB2cEnabled(request.getB2cEnabled());
+        }
+        if (request.getB2bEnabled() != null) {
+            sp.setB2bEnabled(request.getB2bEnabled());
         }
 
         return ApiResponse.success(toResponse(storeProductRepository.save(sp)), "Store product updated");
@@ -247,6 +255,8 @@ public class StoreProductService {
         r.setDiscountType(sp.getDiscountType() != null ? sp.getDiscountType().name() : null);
         r.setDiscountValue(sp.getDiscountValue());
         r.setIsActive(sp.getIsActive());
+        r.setB2cEnabled(sp.getB2cEnabled());
+        r.setB2bEnabled(sp.getB2bEnabled());
         r.setCreatedAt(sp.getCreatedAt());
         r.setUpdatedAt(sp.getUpdatedAt());
 

@@ -45,6 +45,14 @@ public class StoreProduct {
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 
+    // Channel flags — independent of isActive. b2c_enabled (default true) keeps the product in the
+    // consumer shop as before; b2b_enabled (default false) opts it into the B2B quote catalog.
+    @Column(name = "b2c_enabled", nullable = false)
+    private Boolean b2cEnabled = true;
+
+    @Column(name = "b2b_enabled", nullable = false)
+    private Boolean b2bEnabled = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -73,6 +81,8 @@ public class StoreProduct {
         this.createdAt = now;
         this.updatedAt = now;
         if (this.isActive == null) this.isActive = true;
+        if (this.b2cEnabled == null) this.b2cEnabled = true;
+        if (this.b2bEnabled == null) this.b2bEnabled = false;
     }
 
     @PreUpdate
@@ -168,6 +178,22 @@ public class StoreProduct {
 
     public void setIsActive(Boolean isActive) {
         this.isActive = isActive;
+    }
+
+    public Boolean getB2cEnabled() {
+        return b2cEnabled;
+    }
+
+    public void setB2cEnabled(Boolean b2cEnabled) {
+        this.b2cEnabled = b2cEnabled;
+    }
+
+    public Boolean getB2bEnabled() {
+        return b2bEnabled;
+    }
+
+    public void setB2bEnabled(Boolean b2bEnabled) {
+        this.b2bEnabled = b2bEnabled;
     }
 
     public Instant getCreatedAt() {

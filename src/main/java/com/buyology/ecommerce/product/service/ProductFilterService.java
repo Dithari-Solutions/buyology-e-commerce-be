@@ -68,6 +68,17 @@ public class ProductFilterService {
      */
     public ResponseEntity<ApiResponse<ProductFiltersResponse>> getAvailableFilters(
             String countryCode, String lang, String displayCurrency, Double lat, Double lng) {
+        return getAvailableFilters(countryCode, lang, displayCurrency, lat, lng, ProductService.Channel.B2C);
+    }
+
+    /**
+     * Channel-aware filter options. On the B2B channel there is no buyable price, so the
+     * price range is suppressed (0..0) and the storefront must not render a price slider.
+     * Category / brand / spec / condition options are catalog-wide (same as consumer).
+     */
+    public ResponseEntity<ApiResponse<ProductFiltersResponse>> getAvailableFilters(
+            String countryCode, String lang, String displayCurrency, Double lat, Double lng,
+            ProductService.Channel channel) {
 
         String langUpper = lang != null ? lang.trim().toUpperCase() : "EN";
 
@@ -76,8 +87,10 @@ public class ProductFilterService {
         // 1. Price range — resolved DISPLAY prices (discounted + currency-converted +
         // country/global), using the same pricing as the search, so the slider bounds
         // are in the display currency and match exactly what the cards show and what
-        // the search filters on.
-        BigDecimal[] priceRange = productService.resolveDisplayPriceRange(countryCode, displayCurrency, lat, lng);
+        // the search filters on. B2B has no buyable price → suppress the range.
+        BigDecimal[] priceRange = channel == ProductService.Channel.B2B
+                ? null
+                : productService.resolveDisplayPriceRange(countryCode, displayCurrency, lat, lng);
         if (priceRange != null) {
             response.setPriceRange(new PriceRangeDto(priceRange[0], priceRange[1]));
         } else {

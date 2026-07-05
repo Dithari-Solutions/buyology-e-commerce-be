@@ -18,4 +18,6 @@ public interface CountryRepository extends JpaRepository<Country, UUID> {
     Optional<Country> findByCode(String code);
 
     List<Country> findAllByIsActive(Boolean isActive);
+
+    List<Country> findAllByB2bEnabled(Boolean b2bEnabled);
 }

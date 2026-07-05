@@ -33,6 +33,12 @@ public class AssignProductRequest {
     @Schema(description = "Whether this product is active in the store", defaultValue = "true")
     private Boolean isActive = true;
 
+    @Schema(description = "Whether this product is available in the consumer shop (B2C channel)", defaultValue = "true")
+    private Boolean b2cEnabled = true;
+
+    @Schema(description = "Whether this product is available for B2B (quote) browse", defaultValue = "false")
+    private Boolean b2bEnabled = false;
+
     @Valid
     @Schema(description = "Optional list of variants to assign at the same time. Can also be added later via the variants endpoint.")
     private List<AssignVariantRequest> variants;
@@ -53,6 +59,12 @@ public class AssignProductRequest {
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+
+    public Boolean getB2cEnabled() { return b2cEnabled; }
+    public void setB2cEnabled(Boolean b2cEnabled) { this.b2cEnabled = b2cEnabled; }
+
+    public Boolean getB2bEnabled() { return b2bEnabled; }
+    public void setB2bEnabled(Boolean b2bEnabled) { this.b2bEnabled = b2bEnabled; }
 
     public List<AssignVariantRequest> getVariants() { return variants; }
     public void setVariants(List<AssignVariantRequest> variants) { this.variants = variants; }

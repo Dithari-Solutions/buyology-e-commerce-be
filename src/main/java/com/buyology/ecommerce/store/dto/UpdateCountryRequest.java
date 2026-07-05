@@ -15,6 +15,9 @@ public class UpdateCountryRequest {
 
     private Boolean isActive;
 
+    // Nullable: only applied when present (super-admin controlled B2B region toggle).
+    private Boolean b2bEnabled;
+
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
 
@@ -26,4 +29,7 @@ public class UpdateCountryRequest {
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+
+    public Boolean getB2bEnabled() { return b2bEnabled; }
+    public void setB2bEnabled(Boolean b2bEnabled) { this.b2bEnabled = b2bEnabled; }
 }

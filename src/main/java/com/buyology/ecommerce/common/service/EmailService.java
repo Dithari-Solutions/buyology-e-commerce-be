@@ -534,6 +534,66 @@ public class EmailService {
         }
     }
 
+    // ── B2B RFQ (quotes) ───────────────────────────────────────────────────────
+
+    /** Internal notification to procurement: a member submitted a quote request. */
+    @Async
+    public void sendB2bQuoteSubmittedNotification(String procurementEmail, String companyName,
+                                                  String quoteRef, int lineCount, String reviewUrl) {
+        try {
+            String body = "<p>A B2B member has submitted a new quote request.</p>"
+                    + "<p><strong>Company:</strong> " + nullToEmpty(companyName) + "<br/>"
+                    + "<strong>Quote:</strong> " + nullToEmpty(quoteRef) + "<br/>"
+                    + "<strong>Lines:</strong> " + lineCount + "</p>"
+                    + "<p>Please price it in the Procurement → Quotes section"
+                    + (reviewUrl != null && !reviewUrl.isBlank()
+                        ? ": <a href=\"" + reviewUrl + "\">" + reviewUrl + "</a>" : ".") + "</p>";
+            send(procurementEmail, "New B2B quote request from " + nullToEmpty(companyName),
+                    accountEmailHtml("New quote request", body));
+            log.info("B2B quote-submitted notification sent to {}", procurementEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B quote-submitted notification to {}: {}", procurementEmail, e.getMessage());
+        }
+    }
+
+    /** Member notification: procurement has priced their quote and it awaits acceptance. */
+    @Async
+    public void sendB2bQuoteReadyEmail(String toEmail, String memberName, String quoteRef,
+                                       String total, String currency, String validUntil, String quoteUrl) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>Your quote request <strong>" + nullToEmpty(quoteRef) + "</strong> has been priced by our "
+                    + "procurement team.</p>"
+                    + "<p><strong>Total:</strong> " + nullToEmpty(currency) + " " + nullToEmpty(total)
+                    + (validUntil != null && !validUntil.isBlank() ? "<br/><strong>Valid until:</strong> " + validUntil : "")
+                    + "</p>"
+                    + "<p>Review the quoted prices and accept to proceed to checkout"
+                    + (quoteUrl != null && !quoteUrl.isBlank()
+                        ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
+            send(toEmail, "Your Buyology B2B quote is ready", accountEmailHtml("Your quote is ready", body));
+            log.info("B2B quote-ready email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B quote-ready email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Member notification: procurement declined to quote the request. */
+    @Async
+    public void sendB2bQuoteRejectedEmail(String toEmail, String memberName, String quoteRef, String reason) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>Unfortunately we're unable to quote your request <strong>" + nullToEmpty(quoteRef)
+                    + "</strong> at this time"
+                    + (reason != null && !reason.isBlank() ? " — " + reason : "") + ".</p>"
+                    + "<p>You're welcome to start a new request or contact support@buyology.com for assistance.</p>";
+            send(toEmail, "Update on your Buyology B2B quote request",
+                    accountEmailHtml("Quote request update", body));
+            log.info("B2B quote-rejected email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B quote-rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Order confirmation & status updates ────────────────────────────────────
 
     /** A single line on the order-confirmation email. */

@@ -87,6 +87,13 @@ public class ProductService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProductService.class);
 
+    /**
+     * Browse channel. B2C = consumer shop (only b2cEnabled store products, real buyable price).
+     * B2B = bulk/quote catalog (only b2bEnabled store products in B2B-enabled countries; no
+     * buyable price exposed — responses are marked quoteOnly=true).
+     */
+    public enum Channel { B2C, B2B }
+
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
@@ -709,6 +716,12 @@ public class ProductService {
         if (!"ACTIVE".equals(product.getStatus())) {
             throw new ProductNotFoundException(id);
         }
+        // Consumer channel: a B2B-only product (no active b2cEnabled store assignment) must not
+        // be reachable by direct id/slug — otherwise its full detail (title/media/specs) leaks
+        // even though its price is suppressed. The B2B catalog is served by the /b2b* endpoints.
+        if (!storeProductRepository.existsB2cActiveByProductId(id)) {
+            throw new ProductNotFoundException(id);
+        }
         ProductResponse response = toResponse(product, lang, false);
         applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
         applyDeliveryInfo(response);
@@ -737,13 +750,15 @@ public class ProductService {
                 .orElseThrow(() -> new ProductNotFoundException(productId));
 
         // Get products from same category, exclude current product, keep only those
-        // available in the selected country, then limit to 4.
-        List<Product> related = filterToCountry(
-                productRepository.findByStatusAndCategoryId("ACTIVE", product.getCategory().getId())
-                        .stream()
-                        .filter(p -> !p.getId().equals(productId))
-                        .toList(),
-                countryCode)
+        // available (consumer channel) in the selected country — or globally B2C-visible
+        // when no country — then limit to 4.
+        List<Product> sameCategory = productRepository.findByStatusAndCategoryId("ACTIVE", product.getCategory().getId())
+                .stream()
+                .filter(p -> !p.getId().equals(productId))
+                .toList();
+        List<Product> related = ((countryCode != null && !countryCode.isBlank())
+                ? filterToCountry(sameCategory, countryCode)
+                : filterToB2cVisible(sameCategory))
                 .stream().limit(4).toList();
 
         List<ProductResponse> responses = toResponseBatch(related, lang, false);
@@ -784,7 +799,10 @@ public class ProductService {
             if (aggregated.size() >= 8) break;
         }
 
-        List<Product> popular = filterToCountry(new java.util.ArrayList<>(aggregated.values()), countryCode);
+        List<Product> candidates = new java.util.ArrayList<>(aggregated.values());
+        List<Product> popular = (countryCode != null && !countryCode.isBlank())
+                ? filterToCountry(candidates, countryCode)
+                : filterToB2cVisible(candidates);
         List<ProductResponse> responses = toResponseBatch(popular, lang, false);
         applyBatchCountryPricing(responses, popular, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Popular for you fetched successfully");
@@ -793,8 +811,9 @@ public class ProductService {
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProductsPublic(
             String lang, String countryCode, String currency, Double lat, Double lng, int page, int size, String sort) {
         List<Product> all = (countryCode != null && !countryCode.isBlank())
-                ? storeProductRepository.findActiveProductsByCountryCode(countryCode.toUpperCase())
-                : productRepository.findByStatus("ACTIVE");
+                ? storeProductRepository.findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
+                // No country: still exclude B2B-only products from the consumer catalog.
+                : filterToB2cVisible(productRepository.findByStatus("ACTIVE"));
 
         // NEWEST can be ordered on the entity before paging (createdAt lives on Product);
         // price sorts need the resolved display price, so they're applied to the page below.
@@ -815,6 +834,132 @@ public class ProductService {
         applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng);
         responses = applySort(responses, sort);
         return ApiResponse.success(responses, "Products fetched successfully");
+    }
+
+    // ======================================================================
+    // B2B browse (PUBLIC) — channel = B2B. Same DTO shape as the consumer
+    // catalog, but sourced from b2bEnabled store products in B2B-enabled
+    // countries and with NO buyable price (quoteOnly = true).
+    // ======================================================================
+
+    /** Selects the B2B catalog candidate products (country-scoped when a country is supplied). */
+    private List<Product> selectB2bProducts(String countryCode) {
+        return (countryCode != null && !countryCode.isBlank())
+                ? storeProductRepository.findB2bActiveProductsByCountryCode(countryCode.toUpperCase())
+                : storeProductRepository.findB2bActiveProductsInB2bCountries();
+    }
+
+    /**
+     * Resolves, for each product in the country-scoped B2B catalog, the id of the b2bEnabled
+     * StoreProduct assignment the storefront must reference when adding it to the RFQ quote cart.
+     * The B2B assignment query is ordered by store-product id, so keeping the first row per product
+     * (merge keeps the existing/earlier one) picks a single deterministic assignment per product.
+     */
+    private java.util.Map<UUID, UUID> b2bStoreProductIdsByProduct(String countryCode) {
+        List<StoreProduct> assignments = (countryCode != null && !countryCode.isBlank())
+                ? storeProductRepository.findB2bActiveAssignmentsByCountryCode(countryCode.toUpperCase())
+                : storeProductRepository.findB2bActiveAssignmentsInB2bCountries();
+        java.util.Map<UUID, UUID> byProduct = new java.util.HashMap<>();
+        for (StoreProduct sp : assignments) {
+            byProduct.merge(sp.getProduct().getId(), sp.getId(), (existing, ignored) -> existing);
+        }
+        return byProduct;
+    }
+
+    /**
+     * Marks a B2B batch as quote-only: suppresses every price/delivery/store field so the
+     * storefront shows "Request a Quote" and can never derive a buyable price, while exposing the
+     * backing b2bEnabled store-product id (storeProductId) needed to add the product to the RFQ
+     * quote cart. Ratings are still populated (useful on B2B cards).
+     */
+    private void applyB2bQuoteOnly(List<ProductResponse> responses, List<Product> products,
+            java.util.Map<UUID, UUID> storeProductIdsByProduct) {
+        for (ProductResponse r : responses) {
+            r.setQuoteOnly(true);
+            r.setStoreId(null);
+            r.setStorePrice(null);
+            r.setOriginalPrice(null);
+            r.setCurrency(null);
+            r.setStoreOptions(null);
+            r.setExpressDelivery(null);
+            r.setFreeDelivery(null);
+            r.setDeliveryFee(null);
+            r.setStoreProductId(storeProductIdsByProduct.get(r.getId()));
+        }
+        applyRatingsBatch(responses, products);
+    }
+
+    /** B2B list — mirrors {@link #getAllProductsPublic} params; channel = B2B (quoteOnly). */
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllB2bProductsPublic(
+            String lang, String countryCode, String currency, Double lat, Double lng, int page, int size, String sort) {
+        List<Product> all = selectB2bProducts(countryCode);
+
+        if (sort != null && "NEWEST".equalsIgnoreCase(sort)) {
+            all = all.stream()
+                    .sorted(java.util.Comparator.comparing(Product::getCreatedAt,
+                            java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+                    .toList();
+        }
+
+        int pageSize = Math.max(1, size);
+        long skip = (long) Math.max(0, page) * pageSize;
+        List<Product> products = all.stream().skip(skip).limit(pageSize).toList();
+
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
+        applyB2bQuoteOnly(responses, products, b2bStoreProductIdsByProduct(countryCode));
+        // Price sorts are meaningless with no price; keep source order for POPULAR/PRICE_*,
+        // honour NEWEST (already applied above).
+        return ApiResponse.success(responses, "B2B products fetched successfully");
+    }
+
+    /** B2B search — mirrors {@link #searchProducts} params; channel = B2B (quoteOnly). */
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchB2bProducts(
+            ProductFilterRequest filter, String lang, String countryCode, String currency, Double lat, Double lng) {
+        // Price bounds are irrelevant on the B2B channel (no buyable price) — ignore them.
+        filter.setMinPrice(null);
+        filter.setMaxPrice(null);
+
+        List<Product> matched = productRepository.findAll(ProductSpecification.from(filter)).stream()
+                .filter(p -> "ACTIVE".equals(p.getStatus()))
+                .toList();
+
+        Set<UUID> b2bIds = selectB2bProducts(countryCode).stream()
+                .map(Product::getId).collect(Collectors.toSet());
+        List<Product> products = matched.stream()
+                .filter(p -> b2bIds.contains(p.getId()))
+                .toList();
+
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
+        applyB2bQuoteOnly(responses, products, b2bStoreProductIdsByProduct(countryCode));
+        return ApiResponse.success(responses, "B2B products fetched successfully");
+    }
+
+    /** B2B product detail by slug — quoteOnly, only when the product is B2B-available. */
+    public ResponseEntity<ApiResponse<ProductResponse>> getProductBySlugB2bPublic(
+            String slug, String lang, String countryCode, String currency, Double lat, Double lng) {
+        UUID productId = translationRepository.findActiveBySlugAnyLang(slug).stream()
+                .findFirst()
+                .map(t -> t.getProduct().getId())
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Product not found for slug: " + slug));
+
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+        if (!"ACTIVE".equals(product.getStatus())) {
+            throw new ProductNotFoundException(productId);
+        }
+        // Must be part of the B2B catalog (b2bEnabled in a B2B-enabled country).
+        boolean inB2bCatalog = selectB2bProducts(countryCode).stream()
+                .anyMatch(p -> p.getId().equals(productId));
+        if (!inB2bCatalog) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Product not available for B2B: " + slug);
+        }
+
+        ProductResponse response = toResponse(product, lang, false);
+        List<ProductResponse> single = new java.util.ArrayList<>(List.of(response));
+        applyB2bQuoteOnly(single, List.of(product), b2bStoreProductIdsByProduct(countryCode));
+        return ApiResponse.success(response, "B2B product fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<List<ProductResponse>>> searchProducts(
@@ -838,11 +983,14 @@ public class ProductService {
         // If country filter is active, intersect with country-available products
         if (countryCode != null && !countryCode.isBlank()) {
             List<UUID> countryProductIds = storeProductRepository
-                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                     .stream().map(Product::getId).toList();
             products = products.stream()
                     .filter(p -> countryProductIds.contains(p.getId()))
                     .toList();
+        } else {
+            // No country: still exclude B2B-only products from the consumer catalog.
+            products = filterToB2cVisible(products);
         }
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
@@ -895,7 +1043,7 @@ public class ProductService {
 
         if (countryCode != null && !countryCode.isBlank()) {
             Set<UUID> countryProductIds = new HashSet<>(storeProductRepository
-                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                     .stream().map(Product::getId).toList());
             products = products.stream()
                     .filter(p -> countryProductIds.contains(p.getId()))
@@ -949,10 +1097,14 @@ public class ProductService {
 
         // Maintain order from search results
         Map<UUID, Product> productMap = products.stream().collect(Collectors.toMap(Product::getId, p -> p));
-        List<Product> orderedProducts = filterToCountry(productIds.stream()
+        List<Product> ordered = productIds.stream()
                 .map(productMap::get)
                 .filter(java.util.Objects::nonNull)
-                .toList(), countryCode);
+                .toList();
+        // Consumer channel: exclude B2B-only products (country-scoped, or globally when no country).
+        List<Product> orderedProducts = (countryCode != null && !countryCode.isBlank())
+                ? filterToCountry(ordered, countryCode)
+                : filterToB2cVisible(ordered);
 
         List<ProductResponse> responses = toResponseBatch(orderedProducts, lang, false);
         
@@ -983,13 +1135,14 @@ public class ProductService {
         if (countryCode != null && !countryCode.isBlank()) {
             // Only products in the selected country that also match the category
             List<UUID> countryProductIds = storeProductRepository
-                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                     .stream().map(Product::getId).toList();
             products = productRepository.findByStatusAndCategoryId("ACTIVE", categoryId).stream()
                     .filter(p -> countryProductIds.contains(p.getId()))
                     .toList();
         } else {
-            products = productRepository.findByStatusAndCategoryId("ACTIVE", categoryId);
+            // No country: still exclude B2B-only products from the consumer catalog.
+            products = filterToB2cVisible(productRepository.findByStatusAndCategoryId("ACTIVE", categoryId));
         }
 
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
@@ -1002,9 +1155,11 @@ public class ProductService {
         List<Product> products = productRepository.findByStatusAndIsSuperDeal("ACTIVE", true);
         if (countryCode != null && !countryCode.isBlank()) {
             List<UUID> countryProductIds = storeProductRepository
-                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                     .stream().map(Product::getId).toList();
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
+        } else {
+            products = filterToB2cVisible(products);
         }
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
@@ -1016,9 +1171,11 @@ public class ProductService {
         List<Product> products = productRepository.findByStatusAndIsLimitedStock("ACTIVE", true);
         if (countryCode != null && !countryCode.isBlank()) {
             List<UUID> countryProductIds = storeProductRepository
-                    .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                    .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                     .stream().map(Product::getId).toList();
             products = products.stream().filter(p -> countryProductIds.contains(p.getId())).toList();
+        } else {
+            products = filterToB2cVisible(products);
         }
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
@@ -1034,9 +1191,9 @@ public class ProductService {
         if (productIds.isEmpty()) {
             return ApiResponse.success(List.of(), "No quick delivery products available in your area");
         }
-        List<Product> products = productRepository.findAllById(productIds).stream()
+        List<Product> products = filterToB2cVisible(productRepository.findAllById(productIds).stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus()))
-                .toList();
+                .toList());
         List<ProductResponse> responses = toResponseBatch(products, lang, false);
         applyBatchCountryPricing(responses, products, countryCode, currency, null, null);
         return ApiResponse.success(responses, "Quick delivery products fetched successfully");
@@ -1697,13 +1854,25 @@ public class ProductService {
     /**
      * Drops products not stocked by any store in {@code countryCode}. No-op when no
      * country is supplied. Used so country-scoped lists never surface "browse only" items.
+     * Consumer path only: uses the B2C-scoped query so B2B-only assignments are excluded.
      */
     private List<Product> filterToCountry(List<Product> products, String countryCode) {
         if (countryCode == null || countryCode.isBlank() || products.isEmpty()) return products;
         Set<UUID> countryIds = storeProductRepository
-                .findActiveProductsByCountryCode(countryCode.toUpperCase())
+                .findB2cActiveProductsByCountryCode(countryCode.toUpperCase())
                 .stream().map(Product::getId).collect(Collectors.toSet());
         return products.stream().filter(p -> countryIds.contains(p.getId())).toList();
+    }
+
+    /**
+     * Restricts a candidate list to products that are consumer-visible (b2cEnabled) in at
+     * least one active store, for the GLOBAL (no country) consumer path. Keeps B2B-only
+     * products out of the consumer catalog even when no country is selected.
+     */
+    private List<Product> filterToB2cVisible(List<Product> products) {
+        if (products.isEmpty()) return products;
+        Set<UUID> b2cIds = new HashSet<>(storeProductRepository.findB2cActiveProductIds());
+        return products.stream().filter(p -> b2cIds.contains(p.getId())).toList();
     }
 
     /**
@@ -1764,7 +1933,7 @@ public class ProductService {
             return;
         }
 
-        List<Object[]> allStores = storeProductRepository.findCheapestStoreByProductAndCountry(productId, code);
+        List<Object[]> allStores = storeProductRepository.findCheapestB2cStoreByProductAndCountry(productId, code);
         boolean available = !allStores.isEmpty();
         response.setAvailableInSelectedCountry(available);
 
@@ -1804,7 +1973,7 @@ public class ProductService {
     }
 
     private void setGlobalPrice(ProductResponse response, UUID productId, String displayCurrency) {
-        List<Object[]> globalPrice = storeProductRepository.findCheapestStoreGlobally(productId);
+        List<Object[]> globalPrice = storeProductRepository.findCheapestB2cStoreGlobally(productId);
         if (!globalPrice.isEmpty()) {
             Object[] row = globalPrice.get(0);
             BigDecimal rawPrice = (BigDecimal) row[0];
@@ -1874,7 +2043,7 @@ public class ProductService {
                 countryStoreCurrency = country.getCurrency();
                 if (targetCurrency == null) targetCurrency = countryStoreCurrency;
 
-                List<Object[]> rows = storeProductRepository.findAllStoresPerProductBatch(allProductIds, code);
+                List<Object[]> rows = storeProductRepository.findAllB2cStoresPerProductBatch(allProductIds, code);
                 for (Object[] row : rows) {
                     UUID pid = (UUID) row[0];
                     storesByProduct.computeIfAbsent(pid, k -> new java.util.ArrayList<>()).add(row);
@@ -1892,7 +2061,7 @@ public class ProductService {
 
         Map<UUID, Object[]> globalPrices = new java.util.HashMap<>();
         if (!missingPriceIds.isEmpty()) {
-            List<Object[]> gRows = storeProductRepository.findCheapestPricesGloballyBatch(missingPriceIds);
+            List<Object[]> gRows = storeProductRepository.findCheapestB2cPricesGloballyBatch(missingPriceIds);
             for (Object[] grow : gRows) {
                 // Keep the FIRST row per product (query is ORDER BY'd) so price ties across
                 // currencies resolve deterministically — search and the filter range agree.

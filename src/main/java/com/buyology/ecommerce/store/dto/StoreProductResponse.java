@@ -20,6 +20,8 @@ public class StoreProductResponse {
     private String discountType;
     private BigDecimal discountValue;
     private Boolean isActive;
+    private Boolean b2cEnabled;
+    private Boolean b2bEnabled;
     private Instant createdAt;
     private Instant updatedAt;
     private List<StoreVariantResponse> variants;
@@ -74,6 +76,10 @@ public class StoreProductResponse {
     public void setDiscountValue(BigDecimal discountValue) { this.discountValue = discountValue; }
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+    public Boolean getB2cEnabled() { return b2cEnabled; }
+    public void setB2cEnabled(Boolean b2cEnabled) { this.b2cEnabled = b2cEnabled; }
+    public Boolean getB2bEnabled() { return b2bEnabled; }
+    public void setB2bEnabled(Boolean b2bEnabled) { this.b2bEnabled = b2bEnabled; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
