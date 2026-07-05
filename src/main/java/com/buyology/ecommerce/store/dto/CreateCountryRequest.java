@@ -19,6 +19,9 @@ public class CreateCountryRequest {
 
     private Boolean isActive = true;
 
+    // B2B region toggle (super-admin controlled). Default false ⇒ B2C-only region.
+    private Boolean b2bEnabled = false;
+
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
 
@@ -30,4 +33,7 @@ public class CreateCountryRequest {
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+
+    public Boolean getB2bEnabled() { return b2bEnabled; }
+    public void setB2bEnabled(Boolean b2bEnabled) { this.b2bEnabled = b2bEnabled; }
 }

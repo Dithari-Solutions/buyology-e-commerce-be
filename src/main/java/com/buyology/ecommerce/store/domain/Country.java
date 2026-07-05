@@ -31,6 +31,11 @@ public class Country {
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 
+    // Tri-state region control alongside isActive: is_active drives the consumer region-gate,
+    // b2b_enabled exposes the B2B catalog/section for this region. Defaults false (B2C-only).
+    @Column(name = "b2b_enabled", nullable = false)
+    private Boolean b2bEnabled = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -56,6 +61,7 @@ public class Country {
         this.createdAt = now;
         this.updatedAt = now;
         if (this.isActive == null) this.isActive = true;
+        if (this.b2bEnabled == null) this.b2bEnabled = false;
     }
 
     @PreUpdate
@@ -103,6 +109,14 @@ public class Country {
 
     public void setIsActive(Boolean isActive) {
         this.isActive = isActive;
+    }
+
+    public Boolean getB2bEnabled() {
+        return b2bEnabled;
+    }
+
+    public void setB2bEnabled(Boolean b2bEnabled) {
+        this.b2bEnabled = b2bEnabled;
     }
 
     public Instant getCreatedAt() {

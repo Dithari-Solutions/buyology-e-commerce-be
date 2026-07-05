@@ -2,6 +2,7 @@ package com.buyology.ecommerce.store.service;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.store.domain.Country;
+import com.buyology.ecommerce.store.dto.B2bActiveCountryResponse;
 import com.buyology.ecommerce.store.dto.CountryResponse;
 import com.buyology.ecommerce.store.dto.CreateCountryRequest;
 import com.buyology.ecommerce.store.dto.UpdateCountryRequest;
@@ -38,6 +39,9 @@ public class CountryService {
         if (request.getIsActive() != null) {
             country.setIsActive(request.getIsActive());
         }
+        if (request.getB2bEnabled() != null) {
+            country.setB2bEnabled(request.getB2bEnabled());
+        }
 
         Country saved = countryRepository.save(country);
         return ApiResponse.created(toResponse(saved), "Country created successfully");
@@ -55,6 +59,13 @@ public class CountryService {
                 .map(this::toResponse)
                 .toList();
         return ApiResponse.success(countries, "Active countries fetched successfully");
+    }
+
+    public ResponseEntity<ApiResponse<List<B2bActiveCountryResponse>>> getB2bActiveCountries() {
+        List<B2bActiveCountryResponse> countries = countryRepository.findAllByB2bEnabled(true).stream()
+                .map(this::toB2bActiveResponse)
+                .toList();
+        return ApiResponse.success(countries, "B2B-active countries fetched successfully");
     }
 
     public ResponseEntity<ApiResponse<CountryResponse>> getCountryById(UUID id) {
@@ -83,6 +94,7 @@ public class CountryService {
         if (request.getName() != null) country.setName(request.getName());
         if (request.getCurrency() != null) country.setCurrency(request.getCurrency().toUpperCase());
         if (request.getIsActive() != null) country.setIsActive(request.getIsActive());
+        if (request.getB2bEnabled() != null) country.setB2bEnabled(request.getB2bEnabled());
 
         Country saved = countryRepository.save(country);
         return ApiResponse.success(toResponse(saved), "Country updated successfully");
@@ -102,6 +114,11 @@ public class CountryService {
     private CountryResponse toResponse(Country c) {
         return new CountryResponse(
                 c.getId(), c.getCode(), c.getName(), c.getCurrency(),
-                c.getIsActive(), c.getCreatedAt(), c.getUpdatedAt());
+                c.getIsActive(), c.getB2bEnabled(), c.getCreatedAt(), c.getUpdatedAt());
+    }
+
+    private B2bActiveCountryResponse toB2bActiveResponse(Country c) {
+        return new B2bActiveCountryResponse(
+                c.getId(), c.getCode(), c.getName(), c.getCurrency(), c.getB2bEnabled());
     }
 }

@@ -174,4 +174,69 @@ public class ProductController {
             @RequestParam(required = false) Double lng) {
         return productService.searchProducts(filter, lang, countryCode, currency, lat, lng);
     }
+
+    // ======================================================================
+    // B2B browse (PUBLIC). Same params as the consumer endpoints, but the
+    // catalog is sourced from B2B-enabled store products in B2B-enabled
+    // countries and every product is returned quoteOnly=true (no buyable
+    // price) so the storefront shows "Request a Quote".
+    // ======================================================================
+
+    @Operation(summary = "Get B2B products (public)",
+            description = "Bulk/quote catalog: products offered for B2B in B2B-enabled countries. " +
+                    "No buyable price is exposed — each product is marked quoteOnly=true.")
+    @GetMapping("/b2b")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getB2bProducts(
+            @RequestParam String lang,
+            @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "60") int size,
+            @Parameter(description = "Sort: NEWEST (price sorts are ignored on the B2B channel)")
+            @RequestParam(required = false) String sort) {
+        return productService.getAllB2bProductsPublic(lang, countryCode, currency, lat, lng, page, size, sort);
+    }
+
+    @Operation(summary = "Search B2B products (public)",
+            description = "Same filters as /search, scoped to the B2B catalog. Products are quoteOnly=true.")
+    @GetMapping("/b2b/search")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> searchB2bProducts(
+            @ModelAttribute ProductFilterRequest filter,
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productService.searchB2bProducts(filter, lang, countryCode, currency, lat, lng);
+    }
+
+    @Operation(summary = "Get B2B filter options (public)",
+            description = "Filter options for the B2B catalog. The price range is suppressed (0..0) " +
+                    "because the B2B channel has no buyable price.")
+    @GetMapping("/b2b/filters")
+    public ResponseEntity<ApiResponse<ProductFiltersResponse>> getB2bFilters(
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productFilterService.getAvailableFilters(
+                countryCode, lang, currency, lat, lng, ProductService.Channel.B2B);
+    }
+
+    @Operation(summary = "Get a B2B product by slug (public)",
+            description = "B2B product detail resolved by slug. quoteOnly=true; 404 if not B2B-available.")
+    @GetMapping("/b2b/by-slug")
+    public ResponseEntity<ApiResponse<ProductResponse>> getB2bProductBySlug(
+            @RequestParam String slug,
+            @RequestParam String lang,
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return productService.getProductBySlugB2bPublic(slug, lang, countryCode, currency, lat, lng);
+    }
 }

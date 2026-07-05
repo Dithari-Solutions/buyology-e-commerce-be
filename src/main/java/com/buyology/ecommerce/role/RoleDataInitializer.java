@@ -137,6 +137,10 @@ public class RoleDataInitializer implements ApplicationRunner {
                     "Third-party supplier: manage own products and view own analytics",
                     SUPPLIER_PERMISSIONS),
             new RoleDefinition(
+                    "PROCUREMENT",
+                    "Prices B2B quote requests (RFQ) from the procurement dashboard",
+                    List.of()),
+            new RoleDefinition(
                     "SUPERADMIN",
                     "Full access to all modules and operations",
                     ALL_PERMISSIONS)

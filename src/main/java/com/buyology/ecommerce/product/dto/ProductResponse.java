@@ -111,6 +111,15 @@ public class ProductResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<StoreOptionDto> storeOptions;
 
+    /**
+     * True when this product is being browsed on the B2B channel — no buyable price is
+     * exposed (storePrice/originalPrice/storeOptions/delivery are suppressed) and the
+     * storefront must show "Request a Quote" instead of an add-to-cart price.
+     * Null/absent on the consumer (B2C) channel.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean quoteOnly;
+
     private List<MediaDto> media;
     private List<SpecGroupDto> specs;
     private List<ColorOptionDto> colors;
@@ -360,6 +369,8 @@ public class ProductResponse {
     public void setTotalReviews(Integer totalReviews) { this.totalReviews = totalReviews; }
     public List<StoreOptionDto> getStoreOptions() { return storeOptions; }
     public void setStoreOptions(List<StoreOptionDto> storeOptions) { this.storeOptions = storeOptions; }
+    public Boolean getQuoteOnly() { return quoteOnly; }
+    public void setQuoteOnly(Boolean quoteOnly) { this.quoteOnly = quoteOnly; }
     public List<MediaDto> getMedia() { return media; }
     public void setMedia(List<MediaDto> media) { this.media = media; }
     public List<SpecGroupDto> getSpecs() { return specs; }

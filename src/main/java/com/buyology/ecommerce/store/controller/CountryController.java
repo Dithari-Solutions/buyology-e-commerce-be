@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.store.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.store.dto.B2bActiveCountryResponse;
 import com.buyology.ecommerce.store.dto.CountryResponse;
 import com.buyology.ecommerce.store.dto.CreateCountryRequest;
 import com.buyology.ecommerce.store.dto.UpdateCountryRequest;
@@ -51,6 +52,12 @@ public class CountryController {
     @GetMapping("/active")
     public ResponseEntity<ApiResponse<List<CountryResponse>>> getActiveCountries() {
         return countryService.getActiveCountries();
+    }
+
+    @Operation(summary = "Get all B2B-enabled countries")
+    @GetMapping("/b2b-active")
+    public ResponseEntity<ApiResponse<List<B2bActiveCountryResponse>>> getB2bActiveCountries() {
+        return countryService.getB2bActiveCountries();
     }
 
     @Operation(summary = "Get a country by ID")
