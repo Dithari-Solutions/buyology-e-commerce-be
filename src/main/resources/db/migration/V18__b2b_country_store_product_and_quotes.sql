@@ -5,12 +5,21 @@
 -- independent channel flags (b2c_enabled default TRUE preserves current behaviour, b2b_enabled
 -- default FALSE keeps products out of the B2B catalog until explicitly opted in).
 --
--- Guarded DDL (IF NOT EXISTS) so this is safe even though Hibernate ddl-auto=update may have
--- already added the entity columns/tables at startup.
-
-ALTER TABLE countries       ADD COLUMN IF NOT EXISTS b2b_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE store_products  ADD COLUMN IF NOT EXISTS b2c_enabled BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE store_products  ADD COLUMN IF NOT EXISTS b2b_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- Guarded with to_regclass because Flyway runs BEFORE Hibernate ddl-auto: on a fresh DB
+-- (and in FlywayBaselineMigrationIT) the countries/store_products tables don't exist yet —
+-- Hibernate creates them later from the entities — so an unguarded ALTER TABLE fails with
+-- "relation ... does not exist" (ADD COLUMN IF NOT EXISTS only guards the column, not the
+-- table). On the existing prod DB these add the columns. Mirrors V17 and the other patches.
+DO $$
+BEGIN
+    IF to_regclass('public.countries') IS NOT NULL THEN
+        ALTER TABLE countries ADD COLUMN IF NOT EXISTS b2b_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+    IF to_regclass('public.store_products') IS NOT NULL THEN
+        ALTER TABLE store_products ADD COLUMN IF NOT EXISTS b2c_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+        ALTER TABLE store_products ADD COLUMN IF NOT EXISTS b2b_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS b2b_quotes (
   id UUID PRIMARY KEY,
