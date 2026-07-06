@@ -14,6 +14,10 @@ public class OrderSummaryResponse {
 
     private UUID id;
     private UUID userId;
+    /** Customer account name/email (resolved, with fallback to the recipient snapshot) for list views. */
+    private String customerFirstName;
+    private String customerLastName;
+    private String customerEmail;
     /** Store of the order's first item — lets list views deep-link to the store-scoped detail page. */
     private UUID storeId;
     private DeliveryMethod deliveryMethod;
@@ -39,6 +43,15 @@ public class OrderSummaryResponse {
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
+
+    public String getCustomerFirstName() { return customerFirstName; }
+    public void setCustomerFirstName(String customerFirstName) { this.customerFirstName = customerFirstName; }
+
+    public String getCustomerLastName() { return customerLastName; }
+    public void setCustomerLastName(String customerLastName) { this.customerLastName = customerLastName; }
+
+    public String getCustomerEmail() { return customerEmail; }
+    public void setCustomerEmail(String customerEmail) { this.customerEmail = customerEmail; }
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }

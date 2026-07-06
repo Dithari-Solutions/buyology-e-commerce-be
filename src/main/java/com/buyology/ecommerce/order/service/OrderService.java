@@ -23,6 +23,7 @@ import com.buyology.ecommerce.cart.repository.CartItemSpecSelectionRepository;
 import com.buyology.ecommerce.cart.repository.CartRepository;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.user.domain.UserProfiles;
+import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
@@ -989,15 +990,53 @@ public class OrderService {
     public Page<OrderSummaryResponse> listAllOrders(OrderStatus status, DeliveryMethod deliveryMethod,
                                                      UUID storeId, UUID supplierId, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return orderRepo.findAllWithFilters(status, deliveryMethod, storeId, supplierId, pageable)
-                .map(this::toSummaryResponse);
+        return toSummaryPage(orderRepo.findAllWithFilters(status, deliveryMethod, storeId, supplierId, pageable));
     }
 
     /** Orders containing the given supplier's items — for the supplier portal orders view. */
     public Page<OrderSummaryResponse> listOrdersForSupplier(UUID supplierId, OrderStatus status, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return orderRepo.findBySupplierId(supplierId, status, pageable)
-                .map(this::toSummaryResponse);
+        return toSummaryPage(orderRepo.findBySupplierId(supplierId, status, pageable));
+    }
+
+    /**
+     * Maps a page of orders to summaries, enriching each with the customer's name + email. Names/emails
+     * are batch-loaded for the whole page (two queries total) to avoid an N+1 across list rows.
+     */
+    private Page<OrderSummaryResponse> toSummaryPage(Page<Order> orders) {
+        List<UUID> userIds = orders.getContent().stream()
+                .map(Order::getUserId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+
+        Map<UUID, Users> usersById = userIds.isEmpty() ? Map.of()
+                : userRepo.findAllById(userIds).stream()
+                    .collect(java.util.stream.Collectors.toMap(Users::getId, u -> u, (a, b) -> a));
+
+        Map<UUID, String> emailByUserId = new java.util.HashMap<>();
+        if (!userIds.isEmpty()) {
+            for (var c : authCredentialRepository.findByUserIdIn(userIds)) {
+                String email = c.getEmail();
+                if (email != null && !email.isBlank()) emailByUserId.putIfAbsent(c.getUserId(), email);
+            }
+        }
+
+        return orders.map(o -> {
+            OrderSummaryResponse res = toSummaryResponse(o);
+            Users u = o.getUserId() != null ? usersById.get(o.getUserId()) : null;
+            // Prefer the account name; fall back to the order's recipient snapshot.
+            String firstName = u != null ? u.getFirstName() : null;
+            String lastName  = u != null ? u.getLastName()  : null;
+            if (isBlank(firstName) && isBlank(lastName)) {
+                firstName = o.getRecipientFirstName();
+                lastName  = o.getRecipientLastName();
+            }
+            res.setCustomerFirstName(firstName);
+            res.setCustomerLastName(lastName);
+            if (o.getUserId() != null) res.setCustomerEmail(emailByUserId.get(o.getUserId()));
+            return res;
+        });
     }
 
     /**
@@ -1240,19 +1279,19 @@ public class OrderService {
     }
 
     /**
-     * Populates the customer's account name/email/phone on the response so the admin order-detail view
-     * can show who placed the order (the recipient snapshot on the order is delivery data, not the
-     * account). Name comes from the Users record (captured at registration); email from auth
-     * credentials; phone from the profile, falling back to the auth-credentials phone.
+     * Populates the customer's name/email/phone on the response so the admin order-detail view can show
+     * who placed the order. The account record is often incomplete — email/password signups never set
+     * Users.firstName/lastName, and a phone is only stored after SMS verification — so we fall back to
+     * the order's recipient snapshot (copied from the chosen address at checkout) and then to the
+     * customer's default saved address, both of which reliably carry a name and phone.
      */
     private void populateCustomerContact(OrderResponse res, Order order) {
         UUID userId = order.getUserId();
         if (userId == null) return;
 
-        userRepo.findById(userId).ifPresent(u -> {
-            res.setCustomerFirstName(u.getFirstName());
-            res.setCustomerLastName(u.getLastName());
-        });
+        Users user = userRepo.findById(userId).orElse(null);
+        String firstName = user != null ? user.getFirstName() : null;
+        String lastName  = user != null ? user.getLastName()  : null;
 
         var creds = authCredentialRepository.findByUserId(userId);
         res.setCustomerEmail(creds.stream()
@@ -1263,13 +1302,45 @@ public class OrderService {
                 .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getPhoneNumber)
                 .filter(p -> p != null && !p.isBlank())
                 .findFirst().orElse(null);
-
         String profilePhone = userProfileRepo.findByUserId(userId)
                 .map(UserProfiles::getPhoneNumber)
                 .filter(p -> p != null && !p.isBlank())
                 .orElse(null);
 
-        res.setCustomerPhone(profilePhone != null ? profilePhone : authPhone);
+        // Prefer account phone, then the order's recipient snapshot.
+        String phone = firstNonBlank(profilePhone, authPhone, order.getRecipientPhone());
+        // Prefer the account name, then the order's recipient snapshot.
+        if (isBlank(firstName) && isBlank(lastName)) {
+            firstName = order.getRecipientFirstName();
+            lastName  = order.getRecipientLastName();
+        }
+
+        // Last resort (pickup orders by email/password customers carry no snapshot name/phone):
+        // pull from the customer's default saved address.
+        if (user != null && ((isBlank(firstName) && isBlank(lastName)) || isBlank(phone))) {
+            UserAddress def = addressRepo.findByUserAndIsDefaultTrue(user).orElse(null);
+            if (def != null) {
+                if (isBlank(firstName) && isBlank(lastName)) {
+                    firstName = def.getFirstName();
+                    lastName  = def.getLastName();
+                }
+                if (isBlank(phone)) phone = def.getPhoneNumber();
+            }
+        }
+
+        res.setCustomerFirstName(firstName);
+        res.setCustomerLastName(lastName);
+        res.setCustomerPhone(phone);
+    }
+
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
     }
 
     private String customerName(Order order) {
