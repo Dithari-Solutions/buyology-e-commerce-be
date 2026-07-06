@@ -1236,6 +1236,24 @@ public class OrderService {
                 .findFirst().orElse(null);
     }
 
+    /**
+     * Populates the customer's account email/phone on the response so the admin order-detail view can
+     * show who placed the order (the recipient snapshot on the order is delivery data, not the account).
+     * Both come from the same auth-credentials lookup, so this costs a single query.
+     */
+    private void populateCustomerContact(OrderResponse res, Order order) {
+        if (order.getUserId() == null) return;
+        var creds = authCredentialRepository.findByUserId(order.getUserId());
+        res.setCustomerEmail(creds.stream()
+                .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getEmail)
+                .filter(e -> e != null && !e.isBlank())
+                .findFirst().orElse(null));
+        res.setCustomerPhone(creds.stream()
+                .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getPhoneNumber)
+                .filter(p -> p != null && !p.isBlank())
+                .findFirst().orElse(null));
+    }
+
     private String customerName(Order order) {
         // First name lives on the Users entity (not UserProfiles); the email greets generically
         // when absent, so we keep this dependency-free and return null.
@@ -1806,6 +1824,10 @@ public class OrderService {
 
         res.setItems(o.getItems().stream().map(this::toItemResponse).toList());
         res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingEventResponse).toList());
+
+        // Customer account contact (email/phone) for admin/order-detail views. Looked up once per
+        // single-order response — list endpoints use toSummaryResponse, so no N+1 here.
+        populateCustomerContact(res, o);
         return res;
     }
 
@@ -1857,6 +1879,10 @@ public class OrderService {
         res.setUpdatedAt(base.getUpdatedAt());
         res.setItems(base.getItems());
         res.setTrackingHistory(base.getTrackingHistory());
+
+        // Carry the customer contact resolved by toOrderResponse (no extra query).
+        res.setCustomerEmail(base.getCustomerEmail());
+        res.setCustomerPhone(base.getCustomerPhone());
 
         // Set additional admin-only fields
         if (o.getItems() != null && !o.getItems().isEmpty()) {

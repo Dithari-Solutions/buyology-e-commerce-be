@@ -12,6 +12,9 @@ public class OrderResponse {
 
     private UUID id;
     private UUID userId;
+    /** Customer account contact (from auth credentials) — distinct from the delivery recipient snapshot below. */
+    private String customerEmail;
+    private String customerPhone;
     private UUID cartId;
     private UUID paymentTransactionId;
     private UUID courierUserId;
@@ -82,6 +85,12 @@ public class OrderResponse {
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
+
+    public String getCustomerEmail() { return customerEmail; }
+    public void setCustomerEmail(String customerEmail) { this.customerEmail = customerEmail; }
+
+    public String getCustomerPhone() { return customerPhone; }
+    public void setCustomerPhone(String customerPhone) { this.customerPhone = customerPhone; }
 
     public UUID getCartId() { return cartId; }
     public void setCartId(UUID cartId) { this.cartId = cartId; }
