@@ -4,6 +4,8 @@ import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
+import com.buyology.ecommerce.product.repository.ProductMediaRepository;
+import com.buyology.ecommerce.product.domain.ProductMedia;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.domain.StoreProduct;
@@ -93,6 +95,7 @@ public class OrderService {
     private final StoreProductRepository storeProductRepo;
     private final StoreProductVariantRepository storeProductVariantRepo;
     private final ProductTranslationRepository productTranslationRepository;
+    private final ProductMediaRepository productMediaRepository;
     private final UserProfilesRepository userProfileRepo;
     private final com.buyology.ecommerce.user.repository.UserRepository userRepo;
     private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
@@ -123,6 +126,7 @@ public class OrderService {
                         StoreProductRepository storeProductRepo,
                         StoreProductVariantRepository storeProductVariantRepo,
                         ProductTranslationRepository productTranslationRepository,
+                        ProductMediaRepository productMediaRepository,
                         UserProfilesRepository userProfileRepo,
                         com.buyology.ecommerce.user.repository.UserRepository userRepo,
                         com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator,
@@ -151,6 +155,7 @@ public class OrderService {
         this.storeProductRepo = storeProductRepo;
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
+        this.productMediaRepository = productMediaRepository;
         this.userProfileRepo = userProfileRepo;
         this.userRepo = userRepo;
         this.accountStatusValidator = accountStatusValidator;
@@ -1431,6 +1436,49 @@ public class OrderService {
         return result;
     }
 
+    /**
+     * Resolves a presigned primary-image URL for each order item's product, batched in one query.
+     * Prefers the media flagged {@code isPrimary}, else the lowest {@code orderIndex}; uses the
+     * thumbnail when available. Returns a productId → URL map (products without media are omitted).
+     */
+    private Map<UUID, String> resolvePrimaryImageUrls(List<OrderItem> items) {
+        List<UUID> productIds = items.stream()
+                .map(OrderItem::getProductId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        if (productIds.isEmpty()) return java.util.Map.of();
+
+        Map<UUID, ProductMedia> bestByProduct = new java.util.HashMap<>();
+        for (ProductMedia m : productMediaRepository.findByProductIdIn(productIds)) {
+            UUID pid = m.getProduct() != null ? m.getProduct().getId() : null;
+            if (pid == null || m.getUrl() == null || m.getUrl().isBlank()) continue;
+            ProductMedia current = bestByProduct.get(pid);
+            if (current == null || isBetterPrimary(m, current)) {
+                bestByProduct.put(pid, m);
+            }
+        }
+
+        Map<UUID, String> urls = new java.util.HashMap<>();
+        bestByProduct.forEach((pid, m) -> {
+            String key = (m.getThumbnailUrl() != null && !m.getThumbnailUrl().isBlank())
+                    ? m.getThumbnailUrl() : m.getUrl();
+            String url = contaboObjectService.getPresignedUrl(key);
+            if (url != null && !url.isBlank()) urls.put(pid, url);
+        });
+        return urls;
+    }
+
+    /** True when {@code candidate} is a better "primary" pick than {@code current} (isPrimary wins, then lower orderIndex). */
+    private static boolean isBetterPrimary(ProductMedia candidate, ProductMedia current) {
+        boolean candPrimary = Boolean.TRUE.equals(candidate.getIsPrimary());
+        boolean currPrimary = Boolean.TRUE.equals(current.getIsPrimary());
+        if (candPrimary != currPrimary) return candPrimary;
+        int candIdx = candidate.getOrderIndex() == null ? Integer.MAX_VALUE : candidate.getOrderIndex();
+        int currIdx = current.getOrderIndex() == null ? Integer.MAX_VALUE : current.getOrderIndex();
+        return candIdx < currIdx;
+    }
+
     /** Best-effort per-status fulfilment email (PACKAGING / IN_COURIER / IN_TRANSIT / DELIVERED). */
     private void sendStatusEmailFor(Order order) {
         try {
@@ -1944,7 +1992,11 @@ public class OrderService {
             }
         }
 
-        res.setItems(o.getItems().stream().map(this::toItemResponse).toList());
+        // Resolve product display name + primary image per item, batched (one query each) so the
+        // order-detail view can show real products, not just SKUs.
+        Map<UUID, String> productNames = resolveEnglishProductNames(o.getItems());
+        Map<UUID, String> productImages = resolvePrimaryImageUrls(o.getItems());
+        res.setItems(o.getItems().stream().map(i -> toItemResponse(i, productNames, productImages)).toList());
         res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingEventResponse).toList());
 
         // Customer account contact (email/phone) for admin/order-detail views. Looked up once per
@@ -2016,12 +2068,22 @@ public class OrderService {
         return res;
     }
 
-    private OrderItemResponse toItemResponse(OrderItem i) {
+    private OrderItemResponse toItemResponse(OrderItem i, Map<UUID, String> productNames,
+                                             Map<UUID, String> productImages) {
         OrderItemResponse res = new OrderItemResponse();
         res.setId(i.getId());
         res.setProductId(i.getProductId());
         res.setVariantId(i.getVariantId());
         res.setStoreId(i.getStoreId());
+        if (i.getProductId() != null) {
+            res.setProductName(productNames.get(i.getProductId()));
+            res.setProductImage(productImages.get(i.getProductId()));
+        }
+        // Fall back to the SKU when the product has no translated title, so the row is never nameless.
+        if (res.getProductName() == null || res.getProductName().isBlank()) {
+            res.setProductName(i.getVariantSku() != null && !i.getVariantSku().isBlank()
+                    ? i.getVariantSku() : i.getProductSku());
+        }
         res.setProductSku(i.getProductSku());
         res.setVariantSku(i.getVariantSku());
         res.setQuantity(i.getQuantity());

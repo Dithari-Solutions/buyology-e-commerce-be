@@ -10,6 +10,10 @@ public class OrderItemResponse {
     private UUID productId;
     private UUID variantId;
     private UUID storeId;
+    /** Resolved product display name (English preferred) for order/detail views. */
+    private String productName;
+    /** Presigned URL of the product's primary image for order/detail views. */
+    private String productImage;
     private String productSku;
     private String variantSku;
     private Integer quantity;
@@ -30,6 +34,12 @@ public class OrderItemResponse {
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
+    public String getProductName() { return productName; }
+    public void setProductName(String productName) { this.productName = productName; }
+
+    public String getProductImage() { return productImage; }
+    public void setProductImage(String productImage) { this.productImage = productImage; }
 
     public String getProductSku() { return productSku; }
     public void setProductSku(String productSku) { this.productSku = productSku; }
