@@ -1022,6 +1022,15 @@ public class OrderService {
             }
         }
 
+        Map<UUID, String> profilePhoneByUserId = new java.util.HashMap<>();
+        if (!userIds.isEmpty()) {
+            for (UserProfiles p : userProfileRepo.findByUserIdIn(userIds)) {
+                UUID uid = p.getUser() != null ? p.getUser().getId() : null;
+                String phone = p.getPhoneNumber();
+                if (uid != null && phone != null && !phone.isBlank()) profilePhoneByUserId.putIfAbsent(uid, phone);
+            }
+        }
+
         return orders.map(o -> {
             OrderSummaryResponse res = toSummaryResponse(o);
             Users u = o.getUserId() != null ? usersById.get(o.getUserId()) : null;
@@ -1035,6 +1044,9 @@ public class OrderService {
             res.setCustomerFirstName(firstName);
             res.setCustomerLastName(lastName);
             if (o.getUserId() != null) res.setCustomerEmail(emailByUserId.get(o.getUserId()));
+            // Prefer the verified profile phone; fall back to the order's recipient snapshot.
+            String phone = o.getUserId() != null ? profilePhoneByUserId.get(o.getUserId()) : null;
+            res.setCustomerPhone(firstNonBlank(phone, o.getRecipientPhone()));
             return res;
         });
     }

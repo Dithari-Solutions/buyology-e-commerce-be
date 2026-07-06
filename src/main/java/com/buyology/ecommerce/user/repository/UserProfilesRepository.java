@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,6 +19,9 @@ public interface UserProfilesRepository extends JpaRepository<UserProfiles, UUID
     Optional<UserProfiles> findByUser(Users user);
 
     Optional<UserProfiles> findByUserId(UUID userId);
+
+    /** Batch variant of {@link #findByUserId} — for enriching paged order lists without an N+1. */
+    List<UserProfiles> findByUserIdIn(Collection<UUID> userIds);
 
     /**
      * Atomically debit {@code cost} tokens iff the balance is sufficient. Returns the

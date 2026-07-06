@@ -26,8 +26,10 @@ import com.buyology.ecommerce.favorite.domain.Favorite;
 import com.buyology.ecommerce.favorite.dto.FavoriteItemResponse;
 import com.buyology.ecommerce.favorite.dto.FavoriteListResponse;
 import com.buyology.ecommerce.favorite.repository.FavoriteRepository;
+import com.buyology.ecommerce.user.domain.UserAddress;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.domain.Users;
+import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
 import org.springframework.data.domain.Page;
@@ -38,7 +40,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -48,6 +53,7 @@ public class AdminUserService {
     private final UserRepository userRepository;
     private final UserProfilesRepository profilesRepository;
     private final AuthCredentialRepository authCredentialRepository;
+    private final UserAddressRepository userAddressRepository;
     private final FavoriteRepository favoriteRepository;
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
@@ -58,6 +64,7 @@ public class AdminUserService {
     public AdminUserService(UserRepository userRepository,
                             UserProfilesRepository profilesRepository,
                             AuthCredentialRepository authCredentialRepository,
+                            UserAddressRepository userAddressRepository,
                             FavoriteRepository favoriteRepository,
                             CartRepository cartRepository,
                             CartItemRepository cartItemRepository,
@@ -67,6 +74,7 @@ public class AdminUserService {
         this.userRepository = userRepository;
         this.profilesRepository = profilesRepository;
         this.authCredentialRepository = authCredentialRepository;
+        this.userAddressRepository = userAddressRepository;
         this.favoriteRepository = favoriteRepository;
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
@@ -152,9 +160,7 @@ public class AdminUserService {
                 ? userRepository.findAll(pageable)
                 : userRepository.searchUsers(search.trim(), pageable);
 
-        List<AdminUserSummaryResponse> summaries = usersPage.getContent().stream()
-                .map(this::toSummary)
-                .collect(Collectors.toList());
+        List<AdminUserSummaryResponse> summaries = toSummaries(usersPage.getContent());
 
         AdminUserListResponse response = new AdminUserListResponse(
                 page, size,
@@ -204,6 +210,23 @@ public class AdminUserService {
                 .orElse(null);
         CartResponse cartResponse = activeCart != null ? buildCartResponse(activeCart) : null;
 
+        // Account name/phone are often empty (email/password signups never capture a name; a phone is
+        // only stored after SMS verification). Fall back to the customer's saved address, which carries
+        // both — so admins always see who the customer is.
+        String firstName = user.getFirstName();
+        String lastName = user.getLastName();
+        String phone = profile != null ? profile.getPhoneNumber() : null;
+        if ((isBlank(firstName) && isBlank(lastName)) || isBlank(phone)) {
+            UserAddress addr = bestAddress(user);
+            if (addr != null) {
+                if (isBlank(firstName) && isBlank(lastName)) {
+                    firstName = addr.getFirstName();
+                    lastName = addr.getLastName();
+                }
+                if (isBlank(phone)) phone = addr.getPhoneNumber();
+            }
+        }
+
         AdminUserDetailResponse detail = new AdminUserDetailResponse();
         detail.setUserId(user.getId());
         detail.setAuthCredentialId(authCredentialId);
@@ -211,10 +234,10 @@ public class AdminUserService {
         detail.setUserType(user.getUserType() != null ? user.getUserType().name() : null);
         detail.setStatus(user.getStatus());
         detail.setJoinedAt(user.getCreatedAt());
-        detail.setFirstName(user.getFirstName());
-        detail.setLastName(user.getLastName());
+        detail.setFirstName(firstName);
+        detail.setLastName(lastName);
+        detail.setPhoneNumber(phone);
         if (profile != null) {
-            detail.setPhoneNumber(profile.getPhoneNumber());
             detail.setDateOfBirth(profile.getDateOfBirth());
             detail.setAvatarUrl(profile.getAvatarUrl());
         }
@@ -228,30 +251,75 @@ public class AdminUserService {
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
-    private AdminUserSummaryResponse toSummary(Users user) {
-        String email = authCredentialRepository.findByUserId(user.getId()).stream()
-                .map(AuthCredentials::getEmail)
-                .filter(e -> e != null && !e.isBlank())
-                .findFirst()
-                .orElse(null);
+    /**
+     * Maps a page of users to summaries, batch-loading email + representative credential id and a
+     * fallback name from each user's saved address. Email/password signups never capture a name on the
+     * Users row, but the address they entered at checkout carries one — so the admin list can still show
+     * who the customer is. Batched (three queries total) to avoid an N+1 across list rows.
+     */
+    private List<AdminUserSummaryResponse> toSummaries(List<Users> users) {
+        List<UUID> userIds = users.stream()
+                .map(Users::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
 
-        // Pick the first credential ID as the representative authCredentialId
-        UUID authCredentialId = authCredentialRepository.findByUserId(user.getId()).stream()
-                .map(AuthCredentials::getId)
-                .findFirst()
-                .orElse(null);
+        Map<UUID, String> emailByUserId = new HashMap<>();
+        Map<UUID, UUID> credIdByUserId = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            for (AuthCredentials c : authCredentialRepository.findByUserIdIn(userIds)) {
+                credIdByUserId.putIfAbsent(c.getUserId(), c.getId());
+                String e = c.getEmail();
+                if (e != null && !e.isBlank()) emailByUserId.putIfAbsent(c.getUserId(), e);
+            }
+        }
 
-        return new AdminUserSummaryResponse(
-                user.getId(),
-                authCredentialId,
-                email,
-                user.getFirstName(),
-                user.getLastName(),
-                user.getUserType() != null ? user.getUserType().name() : null,
-                user.getStatus(),
-                user.getCreatedAt()
-        );
+        // Best saved address per user (default preferred) — for the name fallback.
+        Map<UUID, UserAddress> addressByUserId = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            for (UserAddress a : userAddressRepository.findByUserIds(userIds)) {
+                UUID uid = a.getUser() != null ? a.getUser().getId() : null;
+                if (uid == null) continue;
+                UserAddress existing = addressByUserId.get(uid);
+                if (existing == null || (a.isDefault() && !existing.isDefault())) {
+                    addressByUserId.put(uid, a);
+                }
+            }
+        }
+
+        List<AdminUserSummaryResponse> summaries = new ArrayList<>();
+        for (Users user : users) {
+            UUID uid = user.getId();
+            String firstName = user.getFirstName();
+            String lastName = user.getLastName();
+            if (isBlank(firstName) && isBlank(lastName)) {
+                UserAddress addr = addressByUserId.get(uid);
+                if (addr != null) {
+                    firstName = addr.getFirstName();
+                    lastName = addr.getLastName();
+                }
+            }
+            summaries.add(new AdminUserSummaryResponse(
+                    uid,
+                    credIdByUserId.get(uid),
+                    emailByUserId.get(uid),
+                    firstName,
+                    lastName,
+                    user.getUserType() != null ? user.getUserType().name() : null,
+                    user.getStatus(),
+                    user.getCreatedAt()
+            ));
+        }
+        return summaries;
     }
+
+    /** Best saved address for a single user (default preferred, else any) — for name/phone fallback. */
+    private UserAddress bestAddress(Users user) {
+        return userAddressRepository.findByUserAndIsDefaultTrue(user)
+                .orElseGet(() -> userAddressRepository.findAllByUser(user).stream().findFirst().orElse(null));
+    }
+
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 
     private CartResponse buildCartResponse(Cart cart) {
         CartResponse response = new CartResponse();
