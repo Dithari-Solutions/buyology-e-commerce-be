@@ -2,8 +2,9 @@ package com.buyology.ecommerce.order.domain.enums;
 
 /**
  * Unified order status. New flow (admin-managed, no courier backend):
- *   PENDING_PAYMENT → PAID → PACKAGING → IN_COURIER → IN_TRANSIT → DELIVERED
- *                                                                ↘ CANCELLED / FAILED
+ *   Delivery: PENDING_PAYMENT → PAID → PACKAGING → IN_COURIER → IN_TRANSIT → DELIVERED
+ *   Pickup:   PENDING_PAYMENT → PAID → PACKAGING → READY_FOR_PICKUP → DELIVERED
+ *                                                                    ↘ CANCELLED / FAILED
  *
  * Legacy values (PROCESSING / COURIER_ASSIGNED / PICKED_UP / SHIPPED) are
  * preserved for historical orders created before the courier-backend was
@@ -19,6 +20,9 @@ public enum OrderStatus {
 
     /** Admin is preparing/packaging the order. */
     PACKAGING,
+
+    /** Store-pickup order is packed and waiting at the store for the customer to collect. */
+    READY_FOR_PICKUP,
 
     /** Order has been handed over to a courier (admin uploads pickup photo here). */
     IN_COURIER,

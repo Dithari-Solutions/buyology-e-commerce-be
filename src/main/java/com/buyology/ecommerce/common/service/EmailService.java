@@ -646,6 +646,15 @@ public class EmailService {
     @Async
     public void sendOrderStatusEmail(String toEmail, String recipientName, String orderNumber,
                                      String statusName, String orderUrl) {
+        sendOrderStatusEmail(toEmail, recipientName, orderNumber, statusName, orderUrl, null);
+    }
+
+    /**
+     * Per-status fulfilment email. {@code pickupLocation} (store name/address) is only used for the
+     * READY_FOR_PICKUP status, so the customer knows where to collect their order.
+     */
+    public void sendOrderStatusEmail(String toEmail, String recipientName, String orderNumber,
+                                     String statusName, String orderUrl, String pickupLocation) {
         try {
             String title, message, badge, color;
             switch (statusName == null ? "" : statusName) {
@@ -653,6 +662,15 @@ public class EmailService {
                     badge = "Packing"; color = "#7c5cff";
                     title = "We're packing your order";
                     message = "your items are being carefully prepared for dispatch.";
+                }
+                case "READY_FOR_PICKUP" -> {
+                    badge = "Ready for pickup"; color = "#ea580c";
+                    title = "Your order is ready to collect";
+                    message = (pickupLocation != null && !pickupLocation.isBlank())
+                            ? "your order is packed and ready for collection at " + escapeHtml(pickupLocation)
+                                + ". Please bring your order number when you come to pick it up."
+                            : "your order is packed and ready for collection at the store. "
+                                + "Please bring your order number when you come to pick it up.";
                 }
                 case "IN_COURIER" -> {
                     badge = "With courier"; color = "#2563eb";

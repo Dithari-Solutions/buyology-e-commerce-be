@@ -93,6 +93,7 @@ public class OrderService {
     private final StoreProductVariantRepository storeProductVariantRepo;
     private final ProductTranslationRepository productTranslationRepository;
     private final UserProfilesRepository userProfileRepo;
+    private final com.buyology.ecommerce.user.repository.UserRepository userRepo;
     private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
     private final ObjectMapper objectMapper;
@@ -122,6 +123,7 @@ public class OrderService {
                         StoreProductVariantRepository storeProductVariantRepo,
                         ProductTranslationRepository productTranslationRepository,
                         UserProfilesRepository userProfileRepo,
+                        com.buyology.ecommerce.user.repository.UserRepository userRepo,
                         com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator,
                         CurrencyExchangeService currencyExchangeService,
                         ObjectMapper objectMapper,
@@ -149,6 +151,7 @@ public class OrderService {
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
         this.userProfileRepo = userProfileRepo;
+        this.userRepo = userRepo;
         this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
         this.objectMapper = objectMapper;
@@ -1006,7 +1009,7 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        validateTransition(order.getStatus(), req.getStatus());
+        validateTransition(order.getStatus(), req.getStatus(), order.getDeliveryMethod());
 
         // Assign courier when moving to COURIER_ASSIGNED (legacy flow)
         if (req.getStatus() == OrderStatus.COURIER_ASSIGNED && req.getCourierUserId() != null) {
@@ -1061,7 +1064,7 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        validateTransition(order.getStatus(), req.getStatus());
+        validateTransition(order.getStatus(), req.getStatus(), order.getDeliveryMethod());
 
         // Require tracking code when shipping
         if (req.getStatus() == OrderStatus.SHIPPED
@@ -1147,7 +1150,7 @@ public class OrderService {
             throw new IllegalStateException(
                     "This order can no longer be cancelled — it is already on its way to you.");
         }
-        validateTransition(order.getStatus(), OrderStatus.CANCELLED);
+        validateTransition(order.getStatus(), OrderStatus.CANCELLED, order.getDeliveryMethod());
 
         order.setCancellationReason(reason);
         applyMilestoneTimestamp(order, OrderStatus.CANCELLED);
@@ -1166,7 +1169,7 @@ public class OrderService {
     @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
     private boolean isCustomerCancellable(OrderStatus status) {
         return switch (status) {
-            case PENDING_PAYMENT, PAID, PACKAGING, IN_COURIER,
+            case PENDING_PAYMENT, PAID, PACKAGING, READY_FOR_PICKUP, IN_COURIER,
                  PROCESSING, COURIER_ASSIGNED, PICKED_UP -> true;
             default -> false; // IN_TRANSIT, SHIPPED, DELIVERED, CANCELLED, FAILED
         };
@@ -1237,21 +1240,36 @@ public class OrderService {
     }
 
     /**
-     * Populates the customer's account email/phone on the response so the admin order-detail view can
-     * show who placed the order (the recipient snapshot on the order is delivery data, not the account).
-     * Both come from the same auth-credentials lookup, so this costs a single query.
+     * Populates the customer's account name/email/phone on the response so the admin order-detail view
+     * can show who placed the order (the recipient snapshot on the order is delivery data, not the
+     * account). Name comes from the Users record (captured at registration); email from auth
+     * credentials; phone from the profile, falling back to the auth-credentials phone.
      */
     private void populateCustomerContact(OrderResponse res, Order order) {
-        if (order.getUserId() == null) return;
-        var creds = authCredentialRepository.findByUserId(order.getUserId());
+        UUID userId = order.getUserId();
+        if (userId == null) return;
+
+        userRepo.findById(userId).ifPresent(u -> {
+            res.setCustomerFirstName(u.getFirstName());
+            res.setCustomerLastName(u.getLastName());
+        });
+
+        var creds = authCredentialRepository.findByUserId(userId);
         res.setCustomerEmail(creds.stream()
                 .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getEmail)
                 .filter(e -> e != null && !e.isBlank())
                 .findFirst().orElse(null));
-        res.setCustomerPhone(creds.stream()
+        String authPhone = creds.stream()
                 .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getPhoneNumber)
                 .filter(p -> p != null && !p.isBlank())
-                .findFirst().orElse(null));
+                .findFirst().orElse(null);
+
+        String profilePhone = userProfileRepo.findByUserId(userId)
+                .map(UserProfiles::getPhoneNumber)
+                .filter(p -> p != null && !p.isBlank())
+                .orElse(null);
+
+        res.setCustomerPhone(profilePhone != null ? profilePhone : authPhone);
     }
 
     private String customerName(Order order) {
@@ -1337,8 +1355,15 @@ public class OrderService {
             if (email == null) return;
             String displayNo = "#" + order.getId().toString().substring(0, 8).toUpperCase();
             String orderUrl = STOREFRONT_URL + "/en/orders/" + order.getId();
+            // For ready-for-pickup, include the store name/address so the customer knows where to collect.
+            String pickupLocation = null;
+            if (order.getStatus() == OrderStatus.READY_FOR_PICKUP) {
+                pickupLocation = java.util.stream.Stream.of(order.getPickupStoreName(), order.getPickupStoreAddress())
+                        .filter(s -> s != null && !s.isBlank())
+                        .reduce((a, b) -> a + " — " + b).orElse(null);
+            }
             emailService.sendOrderStatusEmail(
-                    email, order.getRecipientFirstName(), displayNo, order.getStatus().name(), orderUrl);
+                    email, order.getRecipientFirstName(), displayNo, order.getStatus().name(), orderUrl, pickupLocation);
         } catch (Exception e) {
             log.warn("[ORDER] order-status email failed for {}: {}", order.getId(), e.getMessage());
         }
@@ -1408,7 +1433,7 @@ public class OrderService {
                     "Couriers may only set status to PICKED_UP, IN_TRANSIT, DELIVERED, or FAILED");
         }
 
-        validateTransition(order.getStatus(), target);
+        validateTransition(order.getStatus(), target, order.getDeliveryMethod());
 
         applyMilestoneTimestamp(order, target);
         order.setStatus(target);
@@ -1551,8 +1576,17 @@ public class OrderService {
     private void notifyCustomerStatus(Order order) {
         try {
             if (order.getUserId() == null) return;
-            pushService.sendToUser(order.getUserId(), "Order update",
-                    "Your order is now " + order.getStatus().name().replace('_', ' ').toLowerCase() + ".",
+            String title = "Order update";
+            String body;
+            if (order.getStatus() == OrderStatus.READY_FOR_PICKUP) {
+                title = "Ready for pickup";
+                body = (order.getPickupStoreName() != null && !order.getPickupStoreName().isBlank())
+                        ? "Your order is ready to collect at " + order.getPickupStoreName() + "."
+                        : "Your order is packed and ready to collect at the store.";
+            } else {
+                body = "Your order is now " + order.getStatus().name().replace('_', ' ').toLowerCase() + ".";
+            }
+            pushService.sendToUser(order.getUserId(), title, body,
                     "ORDER_STATUS",
                     java.util.Map.of("orderId", order.getId().toString(), "type", "ORDER_STATUS"));
         } catch (Exception e) {
@@ -1587,7 +1621,7 @@ public class OrderService {
         if (newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.FAILED) {
             throw new IllegalArgumentException("Suppliers cannot cancel or fail orders");
         }
-        validateTransition(order.getStatus(), newStatus);
+        validateTransition(order.getStatus(), newStatus, order.getDeliveryMethod());
         applyMilestoneTimestamp(order, newStatus);
         order.setStatus(newStatus);
         appendTrackingEvent(order, newStatus, notes, null, null, null, supplier.getId(), "SUPPLIER");
@@ -1703,12 +1737,17 @@ public class OrderService {
      * Throws IllegalStateException for illegal transitions (→ HTTP 409 via GlobalExceptionHandler).
      */
     @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
-    private void validateTransition(OrderStatus current, OrderStatus next) {
+    private void validateTransition(OrderStatus current, OrderStatus next, DeliveryMethod method) {
+        boolean isPickup = method == DeliveryMethod.PICKUP;
         boolean allowed = switch (current) {
             // ── New admin-managed flow ────────────────────────────────────────
             case PENDING_PAYMENT  -> next == OrderStatus.PAID || next == OrderStatus.CANCELLED;
             case PAID             -> next == OrderStatus.PACKAGING || next == OrderStatus.CANCELLED;
-            case PACKAGING        -> next == OrderStatus.IN_COURIER || next == OrderStatus.CANCELLED;
+            // Pickup orders branch to READY_FOR_PICKUP; delivery orders go to a courier.
+            case PACKAGING        -> isPickup
+                                       ? next == OrderStatus.READY_FOR_PICKUP || next == OrderStatus.CANCELLED
+                                       : next == OrderStatus.IN_COURIER || next == OrderStatus.CANCELLED;
+            case READY_FOR_PICKUP -> next == OrderStatus.DELIVERED || next == OrderStatus.CANCELLED || next == OrderStatus.FAILED;
             case IN_COURIER       -> next == OrderStatus.IN_TRANSIT || next == OrderStatus.CANCELLED || next == OrderStatus.FAILED;
             case IN_TRANSIT       -> next == OrderStatus.DELIVERED || next == OrderStatus.FAILED || next == OrderStatus.CANCELLED;
             // ── Legacy flow (historical orders only) ──────────────────────────
@@ -1881,6 +1920,8 @@ public class OrderService {
         res.setTrackingHistory(base.getTrackingHistory());
 
         // Carry the customer contact resolved by toOrderResponse (no extra query).
+        res.setCustomerFirstName(base.getCustomerFirstName());
+        res.setCustomerLastName(base.getCustomerLastName());
         res.setCustomerEmail(base.getCustomerEmail());
         res.setCustomerPhone(base.getCustomerPhone());
 
