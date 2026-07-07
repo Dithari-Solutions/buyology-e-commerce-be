@@ -618,6 +618,67 @@ public class EmailService {
         }
     }
 
+    // ── B2B product-sourcing requests ──────────────────────────────────────────
+
+    /** Member confirmation: their product-sourcing request was received. */
+    @Async
+    public void sendB2bProductRequestReceivedEmail(String toEmail, String memberName, String requestRef,
+                                                   String productName, int quantity) {
+        try {
+            String html = loadTemplate("static/b2b-product-request-received.html")
+                    .replace("{{MEMBER_NAME}}", safeName(memberName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{QUANTITY}}", String.valueOf(quantity));
+            send(toEmail, "We received your product request", html);
+            log.info("B2B product-request received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send B2B product-request received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Internal notification to procurement: a member submitted a product-sourcing request. */
+    @Async
+    public void sendB2bProductRequestNotificationEmail(String procurementEmail, String memberName,
+                                                       String requestRef, String productName,
+                                                       int quantity, String message, String reviewUrl) {
+        try {
+            String html = loadTemplate("static/b2b-product-request-notification.html")
+                    .replace("{{MEMBER_NAME}}", escapeHtml(nullToEmpty(memberName)))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{QUANTITY}}", String.valueOf(quantity))
+                    .replace("{{MESSAGE}}", escapeHtml(nullToEmpty(message)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(procurementEmail, "New B2B product request: " + nullToEmpty(productName), html);
+            log.info("B2B product-request notification sent to {}", procurementEmail);
+        } catch (Exception e) {
+            log.warn("Could not send B2B product-request notification to {}: {}", procurementEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Member notification for a product-request update: a status transition (with a stage
+     * label + optional note) OR a free-form "send update" message (stageLabel = "Update",
+     * the message passed as note). Silently swallows failures.
+     */
+    @Async
+    public void sendB2bProductRequestStatusEmail(String toEmail, String memberName, String requestRef,
+                                                 String productName, String stageLabel, String note) {
+        try {
+            String html = loadTemplate("static/b2b-product-request-status-update.html")
+                    .replace("{{MEMBER_NAME}}", safeName(memberName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{STAGE_LABEL}}", escapeHtml(nullToEmpty(stageLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your product request: " + nullToEmpty(productName), html);
+            log.info("B2B product-request status email ({}) sent to {}", stageLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send B2B product-request status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Order confirmation & status updates ────────────────────────────────────
 
     /** A single line on the order-confirmation email. */
