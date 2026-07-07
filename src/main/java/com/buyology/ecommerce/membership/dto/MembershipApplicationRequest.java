@@ -46,6 +46,15 @@ public class MembershipApplicationRequest {
     // Business Needs (multi-select)
     private List<String> businessNeeds;
 
+    // Account credentials — the applicant sets a password during sign-up. The
+    // account is created/activated only after an admin approves the application,
+    // at which point this password becomes the member's login credential.
+    @NotBlank @Size(min = 8, max = 128)
+    private String password;
+
+    @NotBlank
+    private String confirmedPassword;
+
     @AssertTrue(message = "You must accept the terms and conditions")
     private boolean termsAccepted;
 
@@ -75,6 +84,10 @@ public class MembershipApplicationRequest {
     public void setContactMobile(String contactMobile) { this.contactMobile = contactMobile; }
     public List<String> getBusinessNeeds() { return businessNeeds; }
     public void setBusinessNeeds(List<String> businessNeeds) { this.businessNeeds = businessNeeds; }
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+    public String getConfirmedPassword() { return confirmedPassword; }
+    public void setConfirmedPassword(String confirmedPassword) { this.confirmedPassword = confirmedPassword; }
     public boolean isTermsAccepted() { return termsAccepted; }
     public void setTermsAccepted(boolean termsAccepted) { this.termsAccepted = termsAccepted; }
 }

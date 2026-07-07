@@ -3,6 +3,10 @@ package com.buyology.ecommerce.membership.service;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
+import com.buyology.ecommerce.common.utils.PasswordPolicy;
+import com.buyology.ecommerce.common.utils.PasswordUtils;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.membership.domain.B2bCountry;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
 import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
@@ -24,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.time.Year;
@@ -52,6 +57,7 @@ public class B2bMembershipService {
     private final AuthCredentialRepository authCredentialRepository;
     private final CreditUsageRepository creditUsageRepository;
     private final ContactVerificationService verificationService;
+    private final ContaboObjectService contaboObjectService;
 
     @Value("${app.web-base-url:https://buyology.online}")
     private String webBaseUrl;
@@ -66,7 +72,8 @@ public class B2bMembershipService {
                                  UserRepository userRepository,
                                  AuthCredentialRepository authCredentialRepository,
                                  CreditUsageRepository creditUsageRepository,
-                                 ContactVerificationService verificationService) {
+                                 ContactVerificationService verificationService,
+                                 ContaboObjectService contaboObjectService) {
         this.appRepo = appRepo;
         this.membershipRepo = membershipRepo;
         this.walletRepo = walletRepo;
@@ -78,31 +85,44 @@ public class B2bMembershipService {
         this.authCredentialRepository = authCredentialRepository;
         this.creditUsageRepository = creditUsageRepository;
         this.verificationService = verificationService;
+        this.contaboObjectService = contaboObjectService;
     }
 
     // ── Customer endpoints ───────────────────────────────────────────────────
 
     @Transactional
-    public MembershipApplicationResponse submitApplication(MembershipApplicationRequest req, UUID userId) {
+    public MembershipApplicationResponse submitApplication(MembershipApplicationRequest req, MultipartFile tradeLicense) {
         String email = req.getContactEmail() == null ? null : req.getContactEmail().trim().toLowerCase();
         String mobile = req.getContactMobile() == null ? null : req.getContactMobile().trim();
+
+        // The trade-license document is mandatory. validateDocument() allowlists
+        // PDF/JPG/PNG/WebP, caps size at 10 MB, scans for embedded scripts, and
+        // verifies magic bytes so a renamed script/executable cannot pass as a doc.
+        if (tradeLicense == null || tradeLicense.isEmpty()) {
+            throw new IllegalArgumentException("A trade license document is required");
+        }
+        FileValidationUtils.validateDocument(tradeLicense);
+
+        // The applicant chose a password during sign-up. Enforce the policy here and
+        // confirm it matches before we do any work; the hash is what the account is
+        // eventually activated with.
+        PasswordPolicy.validate(req.getPassword());
+        if (req.getConfirmedPassword() == null || !req.getConfirmedPassword().equals(req.getPassword())) {
+            throw new IllegalArgumentException("Passwords do not match");
+        }
 
         // Both the contact email (SendGrid OTP) and mobile (Twilio Verify) must be
         // verified via /api/verify/* before the membership application can be submitted.
         verificationService.requireVerified(Channel.EMAIL, email, "email address");
         verificationService.requireVerified(Channel.PHONE, mobile, "phone number");
 
-        if (userId != null && membershipRepo.existsByUserId(userId)) {
-            throw new IllegalStateException("This account already has an active B2B membership");
-        }
-        if (userId != null) {
-            Optional<B2bMembershipApplication> existing = appRepo.findByUserId(userId);
-            if (existing.isPresent()
-                    && existing.get().getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
-                throw new IllegalStateException(
-                        "A B2B membership application already exists for this account (status: "
-                                + existing.get().getStatus() + ")");
-            }
+        // This is a public (no-login) sign-up. If an account already exists for this
+        // email, the applicant must sign in and apply from their account instead —
+        // this prevents a pending application from later overwriting a real password.
+        if (email != null && !email.isBlank()
+                && authCredentialRepository.findByEmailAndProvider(email, "LOCAL").isPresent()) {
+            throw new IllegalStateException(
+                    "An account already exists for this email. Please sign in and apply from your account.");
         }
         if (email != null && !email.isBlank()
                 && appRepo.existsByContactEmailAndStatusNot(email, B2bMembershipApplication.ApplicationStatus.REJECTED)) {
@@ -110,7 +130,9 @@ public class B2bMembershipService {
         }
 
         B2bMembershipApplication app = new B2bMembershipApplication();
-        app.setUserId(userId);
+        // No login: the account is created only after admin approval.
+        app.setUserId(null);
+        app.setPasswordHash(PasswordUtils.hashPassword(req.getPassword()));
         app.setCompanyName(req.getCompanyName());
         app.setTradeLicenseNumber(req.getTradeLicenseNumber());
         app.setIndustryType(req.getIndustryType());
@@ -139,6 +161,14 @@ public class B2bMembershipService {
         if (req.getBusinessNeeds() != null) {
             app.setBusinessNeeds(String.join(",", req.getBusinessNeeds()));
         }
+        app = appRepo.save(app);
+
+        // Store the trade-license document on Contabo S3 under a per-application key.
+        // The returned object key (not a public URL) is persisted; admins fetch it via
+        // a presigned URL from the dashboard.
+        String key = "documents/b2b-licenses/" + app.getId() + "/"
+                + FileValidationUtils.sanitizeFilename(tradeLicense.getOriginalFilename());
+        app.setTradeLicenseFileUrl(contaboObjectService.uploadFile(key, tradeLicense));
         app = appRepo.save(app);
 
         // Burn the verification proofs so they can't be reused for another application.
@@ -385,11 +415,27 @@ public class B2bMembershipService {
             localCreds.setProvider("LOCAL");
             localCreds.setIsActive(true);
             localCreds.setPhoneVerified(false);
+            // Stamp the password the applicant chose at sign-up so the account is
+            // immediately usable on approval — no separate "set your password" step.
+            if (app.getPasswordHash() != null && !app.getPasswordHash().isBlank()) {
+                localCreds.setPasswordHash(app.getPasswordHash());
+            }
             authCredentialRepository.save(localCreds);
-        } else if ((localCreds.getEmail() == null || localCreds.getEmail().isBlank()) && email != null) {
-            // Backfill missing email so /validate-token can show the account.
-            localCreds.setEmail(email);
-            authCredentialRepository.save(localCreds);
+        } else {
+            boolean dirty = false;
+            if ((localCreds.getEmail() == null || localCreds.getEmail().isBlank()) && email != null) {
+                // Backfill missing email so /validate-token and sign-in can resolve the account.
+                localCreds.setEmail(email);
+                dirty = true;
+            }
+            // Only apply the sign-up password if the credential doesn't already have one —
+            // never overwrite an existing password.
+            if ((localCreds.getPasswordHash() == null || localCreds.getPasswordHash().isBlank())
+                    && app.getPasswordHash() != null && !app.getPasswordHash().isBlank()) {
+                localCreds.setPasswordHash(app.getPasswordHash());
+                dirty = true;
+            }
+            if (dirty) authCredentialRepository.save(localCreds);
         }
 
         B2bMembership membership;
@@ -413,6 +459,27 @@ public class B2bMembershipService {
                 app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED",
                 app.getCountryCode());
 
+        // New flow: the applicant already set their password during sign-up, so the
+        // account is ready to use the moment it's approved. Email them to say they can
+        // now sign in — no setup token / "set your password" link is needed.
+        if (app.getPasswordHash() != null && !app.getPasswordHash().isBlank()) {
+            try {
+                emailService.sendB2bMembershipActivatedEmail(
+                        app.getContactEmail(),
+                        app.getContactFullName(),
+                        app.getCompanyName(),
+                        membership.getMembershipId(),
+                        wallet.getCreditLimit() != null ? wallet.getCreditLimit().toPlainString() : "5000",
+                        wallet.getCurrency(),
+                        webBaseUrl + "/auth");
+            } catch (Exception e) {
+                log.warn("Approval (activated) email failed: {}", e.getMessage());
+            }
+            return;
+        }
+
+        // Legacy path (e.g. admin-created member with no captured password): fall back
+        // to the emailed set-password link.
         // Invalidate any prior unused setup tokens for this membership so the
         // approval email always contains the only valid link (re-approval flow).
         var oldTokens = setupTokenRepo.findByMembershipIdAndUsedFalse(membership.getId());

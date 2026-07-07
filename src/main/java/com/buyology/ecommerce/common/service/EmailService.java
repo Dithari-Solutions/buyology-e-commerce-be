@@ -209,6 +209,30 @@ public class EmailService {
         }
     }
 
+    /**
+     * Approval email for the sign-up flow where the applicant already set their
+     * password. The account is active and ready — this email points them at the
+     * login page rather than a "set your password" setup link.
+     */
+    @Async
+    public void sendB2bMembershipActivatedEmail(String toEmail, String memberName, String companyName,
+                                                String membershipId, String creditAmount, String currency,
+                                                String loginLink) {
+        try {
+            String template = loadTemplate("static/b2b-membership-activated.html");
+            String html = template
+                    .replace("{{MEMBER_NAME}}", memberName == null ? "" : memberName)
+                    .replace("{{COMPANY_NAME}}", companyName == null ? "" : companyName)
+                    .replace("{{MEMBERSHIP_ID}}", membershipId == null ? "" : membershipId)
+                    .replace("{{CREDIT_AMOUNT}}", creditAmount == null ? "" : creditAmount)
+                    .replace("{{CURRENCY}}", currency == null ? "" : currency)
+                    .replace("{{LOGIN_LINK}}", loginLink == null ? "" : loginLink);
+            send(toEmail, "Your Buyology B2B Premium membership is approved!", html);
+        } catch (Exception e) {
+            log.warn("Could not send B2B activated email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     @Async
     public void sendB2bMembershipRejectedEmail(String toEmail, String memberName, String companyName, String reason) {
         try {

@@ -74,6 +74,12 @@ public class B2bMembershipApplication {
     @Column(name = "vat_certificate_file_url", length = 500)
     private String vatCertificateFileUrl;
 
+    // BCrypt hash of the password the applicant chose during sign-up. Copied onto
+    // the LOCAL auth credential when an admin approves the application (see
+    // B2bMembershipService.activateMembership). Never returned in any response.
+    @Column(name = "password_hash", length = 100)
+    private String passwordHash;
+
     @Column(name = "terms_accepted", nullable = false)
     private boolean termsAccepted = false;
 
@@ -155,6 +161,8 @@ public class B2bMembershipApplication {
     public void setTradeLicenseFileUrl(String tradeLicenseFileUrl) { this.tradeLicenseFileUrl = tradeLicenseFileUrl; }
     public String getVatCertificateFileUrl() { return vatCertificateFileUrl; }
     public void setVatCertificateFileUrl(String vatCertificateFileUrl) { this.vatCertificateFileUrl = vatCertificateFileUrl; }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public boolean isTermsAccepted() { return termsAccepted; }
     public void setTermsAccepted(boolean termsAccepted) { this.termsAccepted = termsAccepted; }
     public ApplicationStatus getStatus() { return status; }

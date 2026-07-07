@@ -139,6 +139,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/supplier/auth/**").permitAll()
                         // B2B membership password-setup endpoints are public (token-gated)
                         .requestMatchers("/api/membership/auth/**").permitAll()
+                        // B2B membership application is submitted from the public sign-up flow
+                        // (no login). The applicant sets their password here; the account is
+                        // only activated once an admin approves. Contact email + phone are still
+                        // OTP-verified via the public /api/verify/** endpoints before submit.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/membership/apply").permitAll()
                         // Admin API requires authentication; method-level @PreAuthorize handles role checks
                         .requestMatchers("/api/admin/**").authenticated()
                         // Public storefront contact data (active stores + locations + hours)

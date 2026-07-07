@@ -7,9 +7,11 @@ import com.buyology.ecommerce.membership.service.B2bMembershipLifecycleService;
 import com.buyology.ecommerce.membership.service.B2bMembershipService;
 import com.buyology.ecommerce.membership.service.WalletService;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -30,14 +32,17 @@ public class B2bMembershipController {
         this.lifecycleService = lifecycleService;
     }
 
-    @PostMapping("/apply")
+    /**
+     * Public B2B membership application, submitted from the sign-up flow (no login).
+     * The applicant sets a password and uploads a trade-license document (required);
+     * the account is created and activated only once an admin approves. The form is
+     * sent as multipart/form-data: an "application" JSON part + a "tradeLicense" file.
+     */
+    @PostMapping(value = "/apply", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> apply(
-            @Valid @RequestBody MembershipApplicationRequest req,
-            @RequestParam(required = false) UUID userId) {
-        // Tie the application to the authenticated caller. The principal IS users.id;
-        // ignore any client-supplied userId so applications can't be filed for someone else.
-        UUID self = SecurityUtils.currentUserId();
-        return ApiResponse.created(membershipService.submitApplication(req, self),
+            @Valid @RequestPart("application") MembershipApplicationRequest req,
+            @RequestPart("tradeLicense") MultipartFile tradeLicense) {
+        return ApiResponse.created(membershipService.submitApplication(req, tradeLicense),
                 "Application submitted successfully. We'll review it shortly.");
     }
 
