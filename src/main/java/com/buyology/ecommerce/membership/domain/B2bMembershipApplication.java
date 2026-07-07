@@ -32,8 +32,10 @@ public class B2bMembershipApplication {
     @Column(name = "industry_type", nullable = false, length = 100)
     private String industryType;
 
-    @Column(name = "number_of_employees", nullable = false)
-    private int numberOfEmployees;
+    // Company-size bucket, e.g. "51-200" or "10001+". Stored as text (not a count)
+    // so the exact range the applicant selected is preserved for admin review.
+    @Column(name = "number_of_employees", nullable = false, length = 20)
+    private String numberOfEmployees;
 
     @Column(name = "country", nullable = false, length = 100)
     private String country;
@@ -135,8 +137,8 @@ public class B2bMembershipApplication {
     public void setTradeLicenseNumber(String tradeLicenseNumber) { this.tradeLicenseNumber = tradeLicenseNumber; }
     public String getIndustryType() { return industryType; }
     public void setIndustryType(String industryType) { this.industryType = industryType; }
-    public int getNumberOfEmployees() { return numberOfEmployees; }
-    public void setNumberOfEmployees(int numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
+    public String getNumberOfEmployees() { return numberOfEmployees; }
+    public void setNumberOfEmployees(String numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
     public String getCountryCode() { return countryCode; }

@@ -15,8 +15,13 @@ public class MembershipApplicationRequest {
     @NotBlank @Size(max = 100)
     private String industryType;
 
-    @Min(1)
-    private int numberOfEmployees;
+    // Company-size bucket selected from a fixed dropdown. Server-side allowlist
+    // (the endpoint is public) so only the known buckets are accepted.
+    @NotBlank
+    @Pattern(
+            regexp = "^(1-10|11-50|51-200|201-500|501-1000|1001-5000|5001-10000|10001\\+)$",
+            message = "Please select a valid company size")
+    private String numberOfEmployees;
 
     @NotBlank @Size(max = 100)
     private String country;
@@ -64,8 +69,8 @@ public class MembershipApplicationRequest {
     public void setTradeLicenseNumber(String tradeLicenseNumber) { this.tradeLicenseNumber = tradeLicenseNumber; }
     public String getIndustryType() { return industryType; }
     public void setIndustryType(String industryType) { this.industryType = industryType; }
-    public int getNumberOfEmployees() { return numberOfEmployees; }
-    public void setNumberOfEmployees(int numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
+    public String getNumberOfEmployees() { return numberOfEmployees; }
+    public void setNumberOfEmployees(String numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
     public String getCountryCode() { return countryCode; }

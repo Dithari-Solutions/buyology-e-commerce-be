@@ -12,7 +12,7 @@ public class MembershipApplicationResponse {
     private String companyName;
     private String tradeLicenseNumber;
     private String industryType;
-    private int numberOfEmployees;
+    private String numberOfEmployees;
     private String country;
     private String city;
     private String website;
@@ -45,8 +45,8 @@ public class MembershipApplicationResponse {
     public void setTradeLicenseNumber(String tradeLicenseNumber) { this.tradeLicenseNumber = tradeLicenseNumber; }
     public String getIndustryType() { return industryType; }
     public void setIndustryType(String industryType) { this.industryType = industryType; }
-    public int getNumberOfEmployees() { return numberOfEmployees; }
-    public void setNumberOfEmployees(int numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
+    public String getNumberOfEmployees() { return numberOfEmployees; }
+    public void setNumberOfEmployees(String numberOfEmployees) { this.numberOfEmployees = numberOfEmployees; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
     public String getCity() { return city; }
