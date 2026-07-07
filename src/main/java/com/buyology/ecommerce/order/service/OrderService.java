@@ -212,9 +212,28 @@ public class OrderService {
         Optional<Order> existingOrder = orderRepo.findFirstByCartIdAndStatusIn(
                 cart.getId(), List.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID));
         if (existingOrder.isPresent()) {
-            log.info("[ORDER] createOrder: reusing existing {} order {} for cart {} (idempotent)",
-                    existingOrder.get().getStatus(), existingOrder.get().getId(), cart.getId());
-            return toOrderResponse(existingOrder.get());
+            Order prior = existingOrder.get();
+            BigDecimal priorSubtotal = prior.getSubtotal() == null ? BigDecimal.ZERO : prior.getSubtotal();
+            BigDecimal currentSubtotal = cart.getTotalPrice() == null ? BigDecimal.ZERO : cart.getTotalPrice();
+            // Reuse the prior order ONLY when it still reflects the cart:
+            //   • PAID → the user already paid for this cart; never duplicate it or re-charge.
+            //   • PENDING_PAYMENT with the SAME subtotal → a genuine double-tap / relaunch of the
+            //     same checkout; reuse it to avoid creating a duplicate order.
+            // If the cart's subtotal CHANGED since this order was created, the prior order (and
+            // its totalAmount) is STALE — reusing it charged the OLD amount at the gateway
+            // regardless of the current cart (the fixed-amount production bug seen on web + app).
+            // Cancel the stale order and fall through to build a fresh one for the current total.
+            if (prior.getStatus() == OrderStatus.PAID
+                    || priorSubtotal.compareTo(currentSubtotal) == 0) {
+                log.info("[ORDER] createOrder: reusing existing {} order {} for cart {} (idempotent)",
+                        prior.getStatus(), prior.getId(), cart.getId());
+                return toOrderResponse(prior);
+            }
+            log.warn("[ORDER] createOrder: cart {} changed since PENDING_PAYMENT order {} "
+                            + "(subtotal {} -> {}); cancelling the stale order and creating a fresh one",
+                    cart.getId(), prior.getId(), priorSubtotal, currentSubtotal);
+            prior.setStatus(OrderStatus.CANCELLED);
+            orderRepo.save(prior);
         }
 
         List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
