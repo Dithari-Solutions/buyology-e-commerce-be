@@ -11,6 +11,7 @@ import com.buyology.ecommerce.b2b.quote.repository.B2bQuoteRepository;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
+import com.buyology.ecommerce.notification.service.PushNotificationService;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
@@ -22,6 +23,7 @@ import com.buyology.ecommerce.payment.service.PaymentService;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductTranslation;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
+import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreProduct;
@@ -40,7 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -60,6 +64,9 @@ public class B2bQuoteService {
     /** RFQ rule: every B2B product line must be at least this quantity. */
     public static final int B2B_MIN_QTY_PER_LINE = 5;
 
+    /** In-app notification recipients for quote events: everyone who can price/action quotes. */
+    private static final Set<String> QUOTE_ADMIN_ROLES = Set.of("PROCUREMENT", "SUPERADMIN");
+
     private final B2bQuoteRepository quoteRepo;
     private final B2bQuoteItemRepository itemRepo;
     private final B2bMembershipRepository membershipRepo;
@@ -71,6 +78,8 @@ public class B2bQuoteService {
     private final UserAddressRepository addressRepo;
     private final PaymentService paymentService;
     private final EmailService emailService;
+    private final PushNotificationService pushNotificationService;
+    private final UserRoleRepository userRoleRepository;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String procurementEmail;
@@ -88,7 +97,9 @@ public class B2bQuoteService {
                            OrderRepository orderRepo,
                            UserAddressRepository addressRepo,
                            PaymentService paymentService,
-                           EmailService emailService) {
+                           EmailService emailService,
+                           PushNotificationService pushNotificationService,
+                           UserRoleRepository userRoleRepository) {
         this.quoteRepo = quoteRepo;
         this.itemRepo = itemRepo;
         this.membershipRepo = membershipRepo;
@@ -100,6 +111,8 @@ public class B2bQuoteService {
         this.addressRepo = addressRepo;
         this.paymentService = paymentService;
         this.emailService = emailService;
+        this.pushNotificationService = pushNotificationService;
+        this.userRoleRepository = userRoleRepository;
     }
 
     // =========================================================================
@@ -262,7 +275,7 @@ public class B2bQuoteService {
         }
         cart = quoteRepo.save(cart);
 
-        // Notify procurement (best-effort — never fails the submit).
+        // Notify procurement by email (best-effort — never fails the submit).
         try {
             emailService.sendB2bQuoteSubmittedNotification(
                     procurementEmail,
@@ -273,6 +286,25 @@ public class B2bQuoteService {
         } catch (Exception e) {
             log.warn("[B2B-QUOTE] procurement notification failed for quote {}: {}", cart.getId(), e.getMessage());
         }
+
+        // Confirm receipt to the member by email (best-effort).
+        try {
+            emailService.sendB2bQuoteReceivedEmail(
+                    resolveMemberEmail(cart.getUserId(), cart.getCredentialId()),
+                    resolveMemberName(cart.getUserId()),
+                    cart.getId().toString(),
+                    lines.size(),
+                    webBaseUrl + "/b2b/quotes/" + cart.getId());
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] quote-received email failed for quote {}: {}", cart.getId(), e.getMessage());
+        }
+
+        // In-app notification for every PROCUREMENT/SUPERADMIN user (best-effort).
+        notifyQuoteAdmins("B2B_QUOTE_SUBMITTED", "New B2B quote to price",
+                (membership.getCompanyName() != null ? membership.getCompanyName() : "A B2B member")
+                        + " submitted a quote request (" + lines.size() + " line"
+                        + (lines.size() == 1 ? "" : "s") + ").",
+                cart.getId());
 
         return toResponse(reload(cart.getId()));
     }
@@ -317,7 +349,31 @@ public class B2bQuoteService {
 
         quote.setStatus(B2bQuoteStatus.ACCEPTED);
         quote.setAcceptedAt(Instant.now());
-        return toResponse(quoteRepo.save(quote));
+        quote = quoteRepo.save(quote);
+
+        // Confirm acceptance to the member by email (best-effort — never fails the accept).
+        BigDecimal total = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId()).stream()
+                .map(B2bQuoteItem::quotedLineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        try {
+            emailService.sendB2bQuoteAcceptedEmail(
+                    resolveMemberEmail(quote.getUserId(), quote.getCredentialId()),
+                    resolveMemberName(quote.getUserId()),
+                    quote.getId().toString(),
+                    total.toPlainString(),
+                    quote.getCurrency(),
+                    webBaseUrl + "/b2b/quotes/" + quote.getId());
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] quote-accepted email failed for quote {}: {}", quote.getId(), e.getMessage());
+        }
+
+        // Notify admins that a quote was accepted (best-effort).
+        notifyQuoteAdmins("B2B_QUOTE_ACCEPTED", "B2B quote accepted",
+                "A member accepted quote " + quote.getId() + " (" + quote.getCurrency() + " "
+                        + total.toPlainString() + "). It can now be checked out.",
+                quote.getId());
+
+        return toResponse(quote);
     }
 
     /** Member cancels a DRAFT / SUBMITTED / QUOTED quote (→ CANCELLED). */
@@ -515,6 +571,11 @@ public class B2bQuoteService {
         return toResponse(quote);
     }
 
+    /** Sidebar badge — count of quotes awaiting a price (SUBMITTED). */
+    public long countSubmitted() {
+        return quoteRepo.countByStatus(B2bQuoteStatus.SUBMITTED);
+    }
+
     /** Procurement prices every line (SUBMITTED → QUOTED) and emails the member. */
     @Transactional
     public B2bQuoteResponse price(UUID adminCredentialId, UUID quoteId, PriceQuoteRequest req) {
@@ -691,6 +752,30 @@ public class B2bQuoteService {
         return authCredentialRepository.findById(candidate)
                 .map(AuthCredentials::getUserId)
                 .orElse(candidate);
+    }
+
+    /**
+     * Write an in-app notification (a {@link com.buyology.ecommerce.notification.domain.NotificationHistory}
+     * row + push) for every PROCUREMENT/SUPERADMIN user so it surfaces in the dashboard bell's
+     * per-user {@code /api/v1/notifications} feed. Wholly best-effort — a notification failure must
+     * never break the member's quote action.
+     */
+    private void notifyQuoteAdmins(String type, String title, String body, UUID quoteId) {
+        try {
+            List<UUID> adminUserIds = userRoleRepository.findUserIdsByRoleNameIn(QUOTE_ADMIN_ROLES);
+            Map<String, String> data = Map.of("type", type, "quoteId", quoteId.toString());
+            for (UUID adminUserId : adminUserIds) {
+                try {
+                    pushNotificationService.sendToUser(adminUserId, title, body, type, data);
+                } catch (Exception e) {
+                    log.warn("[B2B-QUOTE] admin notification ({}) failed for user {} quote {}: {}",
+                            type, adminUserId, quoteId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] resolving admin notification recipients failed for quote {}: {}",
+                    quoteId, e.getMessage());
+        }
     }
 
     private String resolveMemberEmail(UUID userId, UUID credentialId) {

@@ -618,6 +618,47 @@ public class EmailService {
         }
     }
 
+    /** Member confirmation: we've received their quote request and it's queued for pricing. */
+    @Async
+    public void sendB2bQuoteReceivedEmail(String toEmail, String memberName, String quoteRef,
+                                          int lineCount, String quoteUrl) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>Thanks — we've received your B2B quote request <strong>" + nullToEmpty(quoteRef)
+                    + "</strong>" + (lineCount > 0 ? " (" + lineCount + " line" + (lineCount == 1 ? "" : "s") + ")" : "")
+                    + ".</p>"
+                    + "<p>Our procurement team will price it shortly and email you as soon as your quote is ready to review"
+                    + (quoteUrl != null && !quoteUrl.isBlank()
+                        ? ". You can track it here: <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
+            send(toEmail, "We received your Buyology B2B quote request",
+                    accountEmailHtml("Quote request received", body));
+            log.info("B2B quote-received email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B quote-received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Member confirmation: they accepted the priced quote — it's ready to check out. */
+    @Async
+    public void sendB2bQuoteAcceptedEmail(String toEmail, String memberName, String quoteRef,
+                                          String total, String currency, String quoteUrl) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>You've accepted your quote <strong>" + nullToEmpty(quoteRef) + "</strong>"
+                    + (total != null && !total.isBlank()
+                        ? " for a total of <strong>" + nullToEmpty(currency) + " " + nullToEmpty(total) + "</strong>" : "")
+                    + ".</p>"
+                    + "<p>You can now proceed to checkout to place your order"
+                    + (quoteUrl != null && !quoteUrl.isBlank()
+                        ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
+            send(toEmail, "Your Buyology B2B quote is accepted — ready to check out",
+                    accountEmailHtml("Quote accepted", body));
+            log.info("B2B quote-accepted email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B quote-accepted email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── B2B product-sourcing requests ──────────────────────────────────────────
 
     /** Member confirmation: their product-sourcing request was received. */

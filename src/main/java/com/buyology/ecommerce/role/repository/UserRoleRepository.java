@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -30,4 +31,8 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UserRoleId> 
     /** User IDs that hold the given role name (e.g. "SUPERADMIN"). */
     @Query("SELECT ur.id.userId FROM UserRole ur JOIN ur.role r WHERE r.name = :roleName")
     List<UUID> findUserIdsByRoleName(@Param("roleName") String roleName);
+
+    /** Distinct user IDs holding any of the given role names (e.g. PROCUREMENT + SUPERADMIN). */
+    @Query("SELECT DISTINCT ur.id.userId FROM UserRole ur JOIN ur.role r WHERE r.name IN :roleNames")
+    List<UUID> findUserIdsByRoleNameIn(@Param("roleNames") Set<String> roleNames);
 }

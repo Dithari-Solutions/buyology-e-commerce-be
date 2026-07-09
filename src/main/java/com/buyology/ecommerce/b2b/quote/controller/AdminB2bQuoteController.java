@@ -36,10 +36,23 @@ public class AdminB2bQuoteController {
         return ApiResponse.success(quoteService.listForProcurement(status), "Quotes fetched");
     }
 
+    /**
+     * Sidebar badge — number of quotes awaiting a price (SUBMITTED). Declared as the literal
+     * {@code /count} path (which Spring matches ahead of {@code /{id}}) so "count" is never
+     * captured as a quote id path variable.
+     */
+    @GetMapping("/count")
+    public ResponseEntity<ApiResponse<NewCountResponse>> newCount() {
+        return ApiResponse.success(new NewCountResponse(quoteService.countSubmitted()), "New quote count fetched");
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<B2bQuoteResponse>> get(@PathVariable UUID id) {
         return ApiResponse.success(quoteService.getForProcurement(id), "Quote fetched");
     }
+
+    /** Shared contract: {@code GET /api/admin/b2b/quotes/count → ApiResponse<{ newCount }>}. */
+    public record NewCountResponse(long newCount) {}
 
     @PostMapping("/{id}/price")
     public ResponseEntity<ApiResponse<B2bQuoteResponse>> price(

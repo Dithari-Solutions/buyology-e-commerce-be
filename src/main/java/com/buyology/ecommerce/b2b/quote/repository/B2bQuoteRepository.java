@@ -20,4 +20,7 @@ public interface B2bQuoteRepository extends JpaRepository<B2bQuote, UUID> {
 
     /** Procurement queue — filtered by status, newest first. */
     List<B2bQuote> findByStatusOrderByCreatedAtDesc(B2bQuoteStatus status);
+
+    /** Sidebar badge — how many quotes are awaiting a price (SUBMITTED). */
+    long countByStatus(B2bQuoteStatus status);
 }
