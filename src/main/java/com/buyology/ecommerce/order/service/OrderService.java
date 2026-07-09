@@ -59,6 +59,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -1103,8 +1105,13 @@ public class OrderService {
                 null, null, null, adminUserId, "ADMIN");
 
         Order saved = orderRepo.save(order);
-        broadcastStatusUpdate(saved, null);
-        notifyCustomerStatus(saved);
+        // Fire notifications ONLY after the status change is durably committed — otherwise a
+        // constraint failure at flush/commit rolls the status back while the customer has
+        // already been emailed/pushed (the exact "email sent but status didn't update" bug).
+        runAfterCommit(() -> {
+            broadcastStatusUpdate(saved, null);
+            notifyCustomerStatus(saved);
+        });
 
         // Admin cancelled → auto-refund + customer emails (same as a customer cancellation).
         if (saved.getStatus() == OrderStatus.CANCELLED) {
@@ -1159,7 +1166,7 @@ public class OrderService {
                 null, null, req.getLocationDescription(), adminUserId, "ADMIN");
 
         Order saved = orderRepo.save(order);
-        broadcastStatusUpdate(saved, null);
+        runAfterCommit(() -> broadcastStatusUpdate(saved, null));
         return toOrderResponse(saved);
     }
 
@@ -1723,6 +1730,35 @@ public class OrderService {
     }
 
     /** Notify the customer that their order's status changed (in-app feed + push + email). */
+    /**
+     * Runs a side-effect only AFTER the current transaction commits — so customer
+     * notifications (email/push) and WebSocket broadcasts never fire for a status
+     * change that later rolls back. Previously these ran inline BEFORE commit: the
+     * email lookup ({@link #customerEmail}) issues a JPA query that force-flushes the
+     * pending status UPDATE + tracking INSERT mid-transaction, so a constraint failure
+     * at flush/commit rolled the status back while the customer had already been
+     * emailed/pushed and the admin saw a bare 409. Deferring keeps the persistence
+     * step clean and makes the notification exactly mirror the committed state. Falls
+     * back to immediate execution when no transaction is active (e.g. called from a
+     * non-transactional context).
+     */
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        action.run();
+                    } catch (Exception e) {
+                        log.warn("[ORDER] after-commit side-effect failed: {}", e.getMessage());
+                    }
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
     private void notifyCustomerStatus(Order order) {
         try {
             if (order.getUserId() == null) return;
@@ -1776,8 +1812,10 @@ public class OrderService {
         order.setStatus(newStatus);
         appendTrackingEvent(order, newStatus, notes, null, null, null, supplier.getId(), "SUPPLIER");
         Order saved = orderRepo.save(order);
-        broadcastStatusUpdate(saved, null);
-        notifyCustomerStatus(saved);
+        runAfterCommit(() -> {
+            broadcastStatusUpdate(saved, null);
+            notifyCustomerStatus(saved);
+        });
         return toOrderResponse(saved);
     }
 
