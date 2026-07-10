@@ -22,56 +22,80 @@ public class QuiqupSamples {
         this.objectMapper = objectMapper;
     }
 
+    // Quiqup /orders schema: coords are [lng, lat]; kind = service type; origin=pickup,
+    // destination=dropoff, items=parcels. On-demand preset uses the 4hr service.
     private static final String ON_DEMAND = """
         {
+          "kind": "partner_4hr",
+          "notes": "Buyology sandbox test — on-demand",
+          "payment_mode": "pre_paid",
+          "payment_amount": 0,
           "partner_order_id": "TEST-OD-0001",
-          "description": "Sandbox test parcel",
-          "payment_type": "cash_on_delivery",
-          "cash_on_delivery_amount": 0,
-          "pickup": {
+          "origin": {
             "contact_name": "Buyology Store",
             "contact_phone": "+971500000001",
-            "address": "Downtown Dubai, Emaar Square, Building 1",
-            "city": "Dubai",
-            "country": "UAE",
-            "lat": 25.1972,
-            "lng": 55.2744,
-            "notes": "Collect from front desk"
+            "notes": "Collect from front desk",
+            "address": {
+              "address1": "Emaar Square Building 1",
+              "address2": "Downtown Dubai",
+              "coords": [55.2744, 25.1972],
+              "country": "UAE",
+              "town": "Dubai"
+            }
           },
-          "dropoff": {
+          "destination": {
             "contact_name": "Test Customer",
             "contact_phone": "+971500000002",
-            "address": "Dubai Marina, Marina Gate 1, Apt 1203",
-            "city": "Dubai",
-            "country": "UAE",
-            "lat": 25.0805,
-            "lng": 55.1403,
-            "notes": "Call on arrival"
+            "share_tracking": true,
+            "notes": "Call on arrival",
+            "address": {
+              "address1": "Marina Gate 1",
+              "address2": "Apartment 1203, Dubai Marina",
+              "coords": [55.1403, 25.0805],
+              "country": "UAE",
+              "town": "Dubai"
+            }
           },
-          "packages": [
-            { "description": "1 x Test item", "quantity": 1, "weight": 1.5, "size": "small" }
+          "items": [
+            { "name": "Parcel 1", "quantity": 1 }
           ]
         }""";
 
+    // Ecommerce preset — same schema, next-day service.
     private static final String ECOMMERCE = """
         {
+          "kind": "partner_next_day",
+          "notes": "Buyology sandbox test — ecommerce",
+          "payment_mode": "pre_paid",
+          "payment_amount": 0,
           "partner_order_id": "TEST-EC-0001",
-          "reference": "TEST-EC-0001",
-          "service_type": "next_day",
-          "payment_type": "prepaid",
-          "cash_on_delivery_amount": 0,
-          "recipient": {
-            "name": "Test Customer",
-            "phone": "+971500000002",
-            "email": "test.customer@example.com",
-            "address": "Dubai Marina, Marina Gate 1, Apt 1203",
-            "city": "Dubai",
-            "country": "UAE",
-            "lat": 25.0805,
-            "lng": 55.1403
+          "origin": {
+            "contact_name": "Buyology Store",
+            "contact_phone": "+971500000001",
+            "notes": "Collect from front desk",
+            "address": {
+              "address1": "Emaar Square Building 1",
+              "address2": "Downtown Dubai",
+              "coords": [55.2744, 25.1972],
+              "country": "UAE",
+              "town": "Dubai"
+            }
+          },
+          "destination": {
+            "contact_name": "Test Customer",
+            "contact_phone": "+971500000002",
+            "share_tracking": true,
+            "notes": "Leave with concierge",
+            "address": {
+              "address1": "Marina Gate 1",
+              "address2": "Apartment 1203, Dubai Marina",
+              "coords": [55.1403, 25.0805],
+              "country": "UAE",
+              "town": "Dubai"
+            }
           },
           "items": [
-            { "sku": "TEST-SKU-1", "description": "Test item", "quantity": 1, "price": 100 }
+            { "name": "Parcel 1", "quantity": 1 }
           ]
         }""";
 
