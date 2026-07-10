@@ -9,6 +9,8 @@ import com.buyology.ecommerce.quiqup.service.QuiqupClient;
 import com.buyology.ecommerce.quiqup.service.QuiqupSamples;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,9 +23,9 @@ import java.util.Map;
 /**
  * Admin endpoints for the Quiqup <b>staging</b> test module. SUPERADMIN only.
  *
- * <p>Every action that reaches Quiqup is gated on {@code quiqup.enabled} so the module
- * ships inert. Nothing here reads or writes a real order — it is entirely decoupled from
- * the order lifecycle. The dashboard "Quiqup Testing" page drives these endpoints.
+ * <p>Wraps Quiqup's unified {@code /orders} API. Every action that reaches Quiqup is gated
+ * on {@code quiqup.enabled} so the module ships inert. Nothing here reads or writes a real
+ * order — it is entirely decoupled from the order lifecycle.
  */
 @RestController
 @RequestMapping("/api/admin/quiqup")
@@ -47,6 +49,8 @@ public class AdminQuiqupController {
 
     public record RawRequest(String method, String path, JsonNode body) {}
 
+    public record CancelRequest(String id) {}
+
     public record QuiqupEventView(String id, String at, String eventType, JsonNode payload,
                                   JsonNode headers, Boolean hmacValid, String sourceIp) {}
 
@@ -64,13 +68,11 @@ public class AdminQuiqupController {
         cfg.put("webhookSecretConfigured", props.getWebhookSecret() != null && !props.getWebhookSecret().isBlank());
         cfg.put("webhookPath", "/api/quiqup/webhook");
         Map<String, String> paths = new LinkedHashMap<>();
-        paths.put("ondemandCreate", props.getPaths().getOndemandCreate());
-        paths.put("ondemandGet", props.getPaths().getOndemandGet());
-        paths.put("ondemandCancel", props.getPaths().getOndemandCancel());
-        paths.put("ondemandQuote", props.getPaths().getOndemandQuote());
-        paths.put("ecommerceCreate", props.getPaths().getEcommerceCreate());
-        paths.put("ecommerceGet", props.getPaths().getEcommerceGet());
-        paths.put("ecommerceCancel", props.getPaths().getEcommerceCancel());
+        paths.put("create", props.getPaths().getCreate());
+        paths.put("get", props.getPaths().getGet());
+        paths.put("readyForCollection", props.getPaths().getReadyForCollection());
+        paths.put("cancel", props.getPaths().getCancel());
+        paths.put("label", props.getPaths().getLabel());
         cfg.put("paths", paths);
         return ApiResponse.success(cfg, "Quiqup config");
     }
@@ -86,52 +88,49 @@ public class AdminQuiqupController {
         return ApiResponse.success(client.verify(), "Quiqup auth verified");
     }
 
-    // ── on-demand (point-to-point) ──────────────────────────────────────────────
+    // ── orders (unified /orders API) ─────────────────────────────────────────────
 
-    @PostMapping("/ondemand/create")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ondemandCreate(@RequestBody JsonNode body) {
+    /** Create an order. POST /orders */
+    @PostMapping("/orders")
+    public ResponseEntity<ApiResponse<QuiqupApiResult>> create(@RequestBody JsonNode body) {
         if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("POST", props.getPaths().getOndemandCreate(), body), "Created");
+        return ApiResponse.success(client.request("POST", props.getPaths().getCreate(), body), "Created");
     }
 
-    @GetMapping("/ondemand/{id}")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ondemandGet(@PathVariable String id) {
+    /** Retrieve an order. GET /orders/{id} */
+    @GetMapping("/orders/{id}")
+    public ResponseEntity<ApiResponse<QuiqupApiResult>> get(@PathVariable String id) {
         if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("GET", QuiqupClient.fillPath(props.getPaths().getOndemandGet(), id), null), "Fetched");
+        return ApiResponse.success(client.request("GET", QuiqupClient.fillPath(props.getPaths().getGet(), id), null), "Fetched");
     }
 
-    @PostMapping("/ondemand/{id}/cancel")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ondemandCancel(@PathVariable String id,
-                                                                       @RequestBody(required = false) JsonNode body) {
+    /** Mark an order ready for collection (triggers pickup). PUT /orders/{id}/ready_for_collection */
+    @PutMapping("/orders/{id}/ready")
+    public ResponseEntity<ApiResponse<QuiqupApiResult>> ready(@PathVariable String id) {
         if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("POST", QuiqupClient.fillPath(props.getPaths().getOndemandCancel(), id), body), "Cancelled");
+        return ApiResponse.success(
+                client.request("PUT", QuiqupClient.fillPath(props.getPaths().getReadyForCollection(), id), null),
+                "Marked ready for collection");
     }
 
-    @PostMapping("/ondemand/quote")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ondemandQuote(@RequestBody JsonNode body) {
+    /** Download the AWB document metadata. GET /order_label/{id} */
+    @GetMapping("/orders/{id}/label")
+    public ResponseEntity<ApiResponse<QuiqupApiResult>> label(@PathVariable String id) {
         if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("POST", props.getPaths().getOndemandQuote(), body), "Quoted");
+        return ApiResponse.success(client.request("GET", QuiqupClient.fillPath(props.getPaths().getLabel(), id), null), "Label");
     }
 
-    // ── ecommerce (scheduled) ───────────────────────────────────────────────────
-
-    @PostMapping("/ecommerce/create")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ecommerceCreate(@RequestBody JsonNode body) {
+    /** Cancel an order via the batch endpoint. PUT /orders/batch/set_cancelled  (id in body). */
+    @PostMapping("/orders/cancel")
+    public ResponseEntity<ApiResponse<QuiqupApiResult>> cancel(@RequestBody CancelRequest req) {
         if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("POST", props.getPaths().getEcommerceCreate(), body), "Created");
-    }
-
-    @GetMapping("/ecommerce/{id}")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ecommerceGet(@PathVariable String id) {
-        if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("GET", QuiqupClient.fillPath(props.getPaths().getEcommerceGet(), id), null), "Fetched");
-    }
-
-    @PostMapping("/ecommerce/{id}/cancel")
-    public ResponseEntity<ApiResponse<QuiqupApiResult>> ecommerceCancel(@PathVariable String id,
-                                                                        @RequestBody(required = false) JsonNode body) {
-        if (disabled()) return disabledResult();
-        return ApiResponse.success(client.request("POST", QuiqupClient.fillPath(props.getPaths().getEcommerceCancel(), id), body), "Cancelled");
+        if (req == null || req.id() == null || req.id().isBlank()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "`id` is required");
+        }
+        ObjectNode body = objectMapper.createObjectNode();
+        ArrayNode ids = body.putArray("order_ids");
+        ids.add(req.id());
+        return ApiResponse.success(client.request("PUT", props.getPaths().getCancel(), body), "Cancelled");
     }
 
     // ── raw request tester ──────────────────────────────────────────────────────

@@ -74,32 +74,35 @@ public class QuiqupProperties {
     }
 
     /**
-     * Endpoint path templates. Overridable via config so they can be corrected against
-     * Quiqup's sandbox/Postman pack without a code change. {@code {id}} is filled at call time.
+     * Quiqup order endpoint templates (unified /orders API — confirmed against the live
+     * staging docs). Overridable via config; {@code {id}} is filled at call time.
      */
     public static class Paths {
-        private String ondemandCreate = "/partner/on_demand/orders";
-        private String ondemandGet = "/partner/on_demand/orders/{id}";
-        private String ondemandCancel = "/partner/on_demand/orders/{id}/cancel";
-        private String ondemandQuote = "/partner/on_demand/quotes";
-        private String ecommerceCreate = "/partner/ecommerce/orders";
-        private String ecommerceGet = "/partner/ecommerce/orders/{id}";
-        private String ecommerceCancel = "/partner/ecommerce/orders/{id}/cancel";
+        private String create = "/orders";                                       // POST
+        private String get = "/orders/{id}";                                     // GET
+        private String list = "/orders";                                         // GET
+        private String update = "/orders/{id}";                                  // PUT (pending orders)
+        private String readyForCollection = "/orders/{id}/ready_for_collection"; // PUT — triggers pickup
+        private String cancel = "/orders/batch/set_cancelled";                   // PUT — id(s) in body
+        private String label = "/order_label/{id}";                              // GET — AWB document
+        private String addParcel = "/orders/{id}/parcels";                       // POST
 
-        public String getOndemandCreate() { return ondemandCreate; }
-        public void setOndemandCreate(String v) { this.ondemandCreate = v; }
-        public String getOndemandGet() { return ondemandGet; }
-        public void setOndemandGet(String v) { this.ondemandGet = v; }
-        public String getOndemandCancel() { return ondemandCancel; }
-        public void setOndemandCancel(String v) { this.ondemandCancel = v; }
-        public String getOndemandQuote() { return ondemandQuote; }
-        public void setOndemandQuote(String v) { this.ondemandQuote = v; }
-        public String getEcommerceCreate() { return ecommerceCreate; }
-        public void setEcommerceCreate(String v) { this.ecommerceCreate = v; }
-        public String getEcommerceGet() { return ecommerceGet; }
-        public void setEcommerceGet(String v) { this.ecommerceGet = v; }
-        public String getEcommerceCancel() { return ecommerceCancel; }
-        public void setEcommerceCancel(String v) { this.ecommerceCancel = v; }
+        public String getCreate() { return create; }
+        public void setCreate(String v) { this.create = v; }
+        public String getGet() { return get; }
+        public void setGet(String v) { this.get = v; }
+        public String getList() { return list; }
+        public void setList(String v) { this.list = v; }
+        public String getUpdate() { return update; }
+        public void setUpdate(String v) { this.update = v; }
+        public String getReadyForCollection() { return readyForCollection; }
+        public void setReadyForCollection(String v) { this.readyForCollection = v; }
+        public String getCancel() { return cancel; }
+        public void setCancel(String v) { this.cancel = v; }
+        public String getLabel() { return label; }
+        public void setLabel(String v) { this.label = v; }
+        public String getAddParcel() { return addParcel; }
+        public void setAddParcel(String v) { this.addParcel = v; }
     }
 
     public boolean isEnabled() { return enabled; }
