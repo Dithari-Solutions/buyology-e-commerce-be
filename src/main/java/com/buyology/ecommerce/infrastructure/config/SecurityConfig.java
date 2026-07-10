@@ -129,6 +129,9 @@ public class SecurityConfig {
                         // Redirect-confirm fallback — HMAC-authenticated, must work even
                         // after the shopper's JWT expires during the 3-D Secure step
                         .requestMatchers("/api/payments/confirm-redirect").permitAll()
+                        // Quiqup delivery webhook (STAGING test module) — Quiqup POSTs callbacks
+                        // here without a JWT. Only logs events; never mutates a real order.
+                        .requestMatchers("/api/quiqup/webhook").permitAll()
                         // All other payment endpoints require authentication; ownership /
                         // role checks are enforced at the method/service layer.
                         .requestMatchers("/api/payments/**").authenticated()

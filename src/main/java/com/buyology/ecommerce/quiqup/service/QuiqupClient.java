@@ -1,0 +1,183 @@
+package com.buyology.ecommerce.quiqup.service;
+
+import com.buyology.ecommerce.quiqup.config.QuiqupProperties;
+import com.buyology.ecommerce.quiqup.dto.QuiqupApiResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Thin authenticated HTTP client for the Quiqup <b>staging</b> API.
+ *
+ * <p>Self-contained (builds its own {@link WebClient} from {@link QuiqupProperties#getBaseUrl()},
+ * like the courier client) so it depends on no shared bean. Captures the status + body of any
+ * response — 2xx or not — so the admin UI can see exactly what Quiqup returned. Never touches
+ * the order domain.
+ */
+@Component
+public class QuiqupClient {
+
+    private static final Logger log = LoggerFactory.getLogger(QuiqupClient.class);
+
+    private final QuiqupProperties props;
+    private final ObjectMapper objectMapper;
+    private final WebClient webClient;
+
+    // Cached OAuth token (oauth mode only)
+    private volatile String cachedToken;
+    private volatile Instant tokenExpiry = Instant.EPOCH;
+
+    public QuiqupClient(QuiqupProperties props, ObjectMapper objectMapper) {
+        this.props = props;
+        this.objectMapper = objectMapper;
+        this.webClient = WebClient.builder().baseUrl(props.getBaseUrl()).build();
+    }
+
+    /** Fill {@code {id}} placeholders in a path template. */
+    public static String fillPath(String template, String id) {
+        return template.replace("{id}", id == null ? "" : id);
+    }
+
+    /**
+     * Make an authenticated request to Quiqup. {@code path} may be a full URL or a path
+     * relative to the configured base URL. Returns the status + body instead of throwing
+     * on non-2xx, so the caller/UI sees the real Quiqup response.
+     */
+    public QuiqupApiResult request(String method, String path, JsonNode body) {
+        log.info("[QUIQUP] {} {}", method, path);
+        try {
+            HttpMethod httpMethod = HttpMethod.valueOf(method.toUpperCase());
+            Map<String, String> authHeaders = authHeaders(); // may throw if creds missing
+
+            WebClient.RequestBodySpec spec = webClient.method(httpMethod).uri(path);
+            authHeaders.forEach(spec::header);
+            spec.header("Accept", MediaType.APPLICATION_JSON_VALUE);
+
+            WebClient.RequestHeadersSpec<?> finalSpec = spec;
+            if (body != null && !body.isNull() && httpMethod != HttpMethod.GET) {
+                finalSpec = spec.contentType(MediaType.APPLICATION_JSON).bodyValue(body);
+            }
+
+            QuiqupApiResult result = finalSpec.exchangeToMono(resp ->
+                    resp.bodyToMono(String.class).defaultIfEmpty("")
+                            .map(raw -> new QuiqupApiResult(
+                                    resp.statusCode().value(),
+                                    resp.statusCode().is2xxSuccessful(),
+                                    parse(raw))))
+                    .timeout(Duration.ofMillis(props.getTimeoutMs()))
+                    .block();
+            if (result != null) {
+                log.info("[QUIQUP] → {} ok={}", result.status(), result.ok());
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("[QUIQUP] call failed {} {} — {}", method, path, e.getMessage());
+            return new QuiqupApiResult(502, false,
+                    "Quiqup call failed (" + props.getBaseUrl() + path + "): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Confirm auth is usable. API-key mode just checks the key is present; OAuth mode
+     * performs a real token exchange against staging.
+     */
+    public Map<String, Object> verify() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("authMode", props.getAuthMode());
+        if ("oauth".equalsIgnoreCase(props.getAuthMode())) {
+            try {
+                String token = fetchOAuthToken(true);
+                out.put("ok", token != null);
+                out.put("tokenPreview", mask(token));
+                out.put("expiresAt", tokenExpiry.toString());
+            } catch (Exception e) {
+                out.put("ok", false);
+                out.put("error", e.getMessage());
+            }
+        } else {
+            String key = props.getApiKey();
+            out.put("ok", key != null && !key.isBlank());
+            out.put("tokenPreview", mask(key));
+            out.put("header", props.getApiKeyHeader());
+        }
+        return out;
+    }
+
+    // ── auth ────────────────────────────────────────────────────────────────
+
+    private Map<String, String> authHeaders() {
+        if ("oauth".equalsIgnoreCase(props.getAuthMode())) {
+            return Map.of("Authorization", "Bearer " + fetchOAuthToken(false));
+        }
+        String key = props.getApiKey();
+        if (key == null || key.isBlank()) {
+            throw new IllegalStateException("Quiqup API key is not configured (set QUIQUP_API_KEY).");
+        }
+        String prefix = props.getApiKeyPrefix();
+        String value = (prefix == null || prefix.isBlank()) ? key : prefix + " " + key;
+        return Map.of(props.getApiKeyHeader(), value);
+    }
+
+    private synchronized String fetchOAuthToken(boolean force) {
+        if (!force && cachedToken != null && tokenExpiry.minusSeconds(30).isAfter(Instant.now())) {
+            return cachedToken;
+        }
+        QuiqupProperties.Oauth o = props.getOauth();
+        if (o.getClientId() == null || o.getClientSecret() == null) {
+            throw new IllegalStateException("Quiqup OAuth client_id/client_secret not configured.");
+        }
+        BodyInserters.FormInserter<String> form = BodyInserters
+                .fromFormData("grant_type", o.getGrantType())
+                .with("client_id", o.getClientId())
+                .with("client_secret", o.getClientSecret());
+        if ("password".equalsIgnoreCase(o.getGrantType())) {
+            form = form.with("username", o.getUsername()).with("password", o.getPassword());
+        }
+        if (o.getScope() != null && !o.getScope().isBlank()) {
+            form = form.with("scope", o.getScope());
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resp = webClient.post().uri(o.getTokenPath())
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .timeout(Duration.ofMillis(props.getTimeoutMs()))
+                .block();
+        if (resp == null || resp.get("access_token") == null) {
+            throw new IllegalStateException("Quiqup token response missing access_token");
+        }
+        cachedToken = String.valueOf(resp.get("access_token"));
+        long expiresIn = resp.get("expires_in") != null ? Long.parseLong(String.valueOf(resp.get("expires_in"))) : 3600;
+        tokenExpiry = Instant.now().plusSeconds(expiresIn);
+        return cachedToken;
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private Object parse(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            return raw; // non-JSON (e.g. HTML error page) — return as-is for debugging
+        }
+    }
+
+    private static String mask(String secret) {
+        if (secret == null || secret.isBlank()) return null;
+        if (secret.length() <= 12) return "***";
+        return secret.substring(0, 6) + "…" + secret.substring(secret.length() - 4);
+    }
+}
