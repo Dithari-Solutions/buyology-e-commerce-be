@@ -24,7 +24,7 @@ public class QuiqupProperties {
     private boolean enabled = false;
 
     /** Quiqup API base URL. Defaults to staging. */
-    private String baseUrl = "https://api-staging.quiqup.com";
+    private String baseUrl = "https://api.staging.quiqup.com";
 
     /** Auth mode: "apikey" (static key header) or "oauth" (client-credentials/password token). */
     private String authMode = "apikey";

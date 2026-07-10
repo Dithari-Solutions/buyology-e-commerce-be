@@ -90,7 +90,7 @@ services:
 
       # ── Quiqup delivery (STAGING test module; inert unless QUIQUP_ENABLED=true) ──
       QUIQUP_ENABLED: ${QUIQUP_ENABLED:-false}
-      QUIQUP_BASE_URL: ${QUIQUP_BASE_URL:-https://api-staging.quiqup.com}
+      QUIQUP_BASE_URL: ${QUIQUP_BASE_URL:-https://api.staging.quiqup.com}
       QUIQUP_AUTH_MODE: ${QUIQUP_AUTH_MODE:-apikey}
       QUIQUP_API_KEY: ${QUIQUP_API_KEY:-}
       QUIQUP_API_KEY_HEADER: ${QUIQUP_API_KEY_HEADER:-Authorization}
