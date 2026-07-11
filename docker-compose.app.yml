@@ -97,6 +97,11 @@ services:
       QUIQUP_API_KEY_PREFIX: ${QUIQUP_API_KEY_PREFIX:-Bearer}
       QUIQUP_ACCOUNT_ID: ${QUIQUP_ACCOUNT_ID:-}
       QUIQUP_WEBHOOK_SECRET: ${QUIQUP_WEBHOOK_SECRET:-}
+      # ── ERPNext (Frappe) integration (TESTING; read-only, inert unless ERPNEXT_ENABLED=true) ──
+      ERPNEXT_ENABLED: ${ERPNEXT_ENABLED:-false}
+      ERPNEXT_BASE_URL: ${ERPNEXT_BASE_URL:-}
+      ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-}
+      ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-}
 
       # ── Twilio (phone OTP) ──
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
