@@ -541,6 +541,17 @@ public class B2bMembershipService {
 
     // ── Mappers ───────────────────────────────────────────────────────────────
 
+    /** Presign a stored Contabo object key so the dashboard can open it. Returns null if absent/unresolvable. */
+    private String presignDocument(String key) {
+        if (key == null || key.isBlank()) return null;
+        try {
+            return contaboObjectService.getPresignedUrl(key);
+        } catch (Exception e) {
+            log.warn("Could not generate presigned URL for B2B document key {}: {}", key, e.getMessage());
+            return null;
+        }
+    }
+
     private MembershipApplicationResponse toAppResponse(B2bMembershipApplication a) {
         MembershipApplicationResponse r = new MembershipApplicationResponse();
         r.setId(a.getId());
@@ -557,8 +568,11 @@ public class B2bMembershipService {
         r.setContactEmail(a.getContactEmail());
         r.setContactMobile(a.getContactMobile());
         r.setTermsAccepted(a.isTermsAccepted());
-        r.setTradeLicenseFileUrl(a.getTradeLicenseFileUrl());
-        r.setVatCertificateFileUrl(a.getVatCertificateFileUrl());
+        // Stored values are private Contabo object keys — presign them so the
+        // dashboard can actually open the uploaded documents (mirrors the
+        // supplier-application flow's AdminSupplierService#getDocumentUrl).
+        r.setTradeLicenseFileUrl(presignDocument(a.getTradeLicenseFileUrl()));
+        r.setVatCertificateFileUrl(presignDocument(a.getVatCertificateFileUrl()));
         r.setStatus(a.getStatus());
         r.setRejectionReason(a.getRejectionReason());
         r.setRejectedBy(a.getRejectedBy());
