@@ -6,10 +6,12 @@ import com.buyology.ecommerce.membership.service.B2bMembershipLifecycleService;
 import com.buyology.ecommerce.membership.service.B2bMembershipService;
 import com.buyology.ecommerce.membership.service.WalletService;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -43,6 +45,22 @@ public class AdminB2bMembershipController {
             @PathVariable UUID id,
             @Valid @RequestBody ApplicationActionRequest req) {
         return ApiResponse.success(membershipService.processAction(id, req), "Action applied");
+    }
+
+    /**
+     * Convert an existing (B2C) user into a B2B member. Collects the company details
+     * and a trade-license document and creates a PENDING application pre-attached to
+     * the user, which then goes through the normal review queue. Sent as
+     * multipart/form-data: a "data" JSON part + a "tradeLicense" file part.
+     */
+    @PostMapping(value = "/convert-user/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<MembershipApplicationResponse>> convertUser(
+            @PathVariable UUID userId,
+            @Valid @RequestPart("data") AdminConvertToB2bRequest req,
+            @RequestPart("tradeLicense") MultipartFile tradeLicense) {
+        return ApiResponse.created(
+                membershipService.convertUserToB2b(userId, req, tradeLicense),
+                "B2B application created for user");
     }
 
     // ── Memberships ───────────────────────────────────────────────────────────

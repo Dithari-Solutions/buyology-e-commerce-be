@@ -277,6 +277,121 @@ public class B2bMembershipService {
     }
 
     /**
+     * Admin-initiated conversion of an existing (B2C) user into a B2B member.
+     *
+     * <p>Unlike the public sign-up ({@link #submitApplication}), the application is
+     * pre-attached to the existing {@code userId} and captures <b>no</b> password —
+     * the user keeps their current login untouched. It is created as {@code PENDING}
+     * and then flows through the normal admin review queue; approval activates the
+     * membership on the same user via {@link #processAction} → {@link #activateMembership}.</p>
+     */
+    @Transactional
+    public MembershipApplicationResponse convertUserToB2b(UUID userId,
+                                                          AdminConvertToB2bRequest req,
+                                                          MultipartFile tradeLicense) {
+        Users user = userRepository.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
+
+        // Only real customer accounts can be converted — admins are staff accounts.
+        if (user.getUserType() == Users.UserType.ADMIN) {
+            throw new IllegalStateException("Admin accounts cannot be converted to a B2B membership");
+        }
+        // Already a member, or an application already in flight for this user?
+        if (membershipRepo.existsByUserId(userId)) {
+            throw new IllegalStateException("This user already has a B2B membership");
+        }
+        appRepo.findByUserId(userId).ifPresent(existing -> {
+            if (existing.getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
+                throw new IllegalStateException(
+                        "A B2B application already exists for this user (status: " + existing.getStatus()
+                        + "). Review it from the Applications page.");
+            }
+        });
+
+        // The trade-license document is mandatory (same validation as the public flow).
+        if (tradeLicense == null || tradeLicense.isEmpty()) {
+            throw new IllegalArgumentException("A trade license document is required");
+        }
+        FileValidationUtils.validateDocument(tradeLicense);
+
+        // Canonical contact email: prefer the value the admin supplied (pre-filled from
+        // the user's profile), falling back to any email on the user's credentials.
+        String email = req.getContactEmail() == null ? null : req.getContactEmail().trim().toLowerCase();
+        if (email == null || email.isBlank()) {
+            email = authCredentialRepository.findByUserId(userId).stream()
+                    .map(AuthCredentials::getEmail)
+                    .filter(e -> e != null && !e.isBlank())
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        // Enforce the same one-application-per-email invariant as the public flow so an
+        // admin conversion can't duplicate a separate in-flight application (e.g. a public
+        // sign-up that isn't yet linked to this user's id).
+        if (email != null && !email.isBlank()
+                && appRepo.existsByContactEmailAndStatusNot(email, B2bMembershipApplication.ApplicationStatus.REJECTED)) {
+            throw new IllegalStateException("A B2B membership application already exists for this email");
+        }
+
+        B2bMembershipApplication app = new B2bMembershipApplication();
+        // Pre-attach to the existing user — the key difference vs a public sign-up.
+        // No passwordHash: the user keeps their current login (email/OAuth) intact.
+        app.setUserId(userId);
+        app.setCompanyName(req.getCompanyName());
+        app.setTradeLicenseNumber(req.getTradeLicenseNumber());
+        app.setIndustryType(req.getIndustryType());
+        app.setNumberOfEmployees(req.getNumberOfEmployees());
+        app.setCountry(req.getCountry());
+
+        // Resolve B2B country / currency by ISO code (admin-managed via /admin/b2b/countries)
+        if (req.getCountryCode() != null && !req.getCountryCode().isBlank()) {
+            String cc = req.getCountryCode().trim().toUpperCase();
+            B2bCountry country = countryRepo.findByCountryCode(cc)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "B2B membership is not available in this country yet"));
+            if (!country.isEnabled()) {
+                throw new IllegalStateException("B2B membership is not available in this country yet");
+            }
+            app.setCountryCode(country.getCountryCode());
+            app.setCurrencyCode(country.getCurrencyCode());
+        }
+        app.setCity(req.getCity());
+        app.setWebsite(req.getWebsite());
+        app.setContactFullName(req.getContactFullName());
+        app.setContactDesignation(req.getContactDesignation());
+        app.setContactEmail(email);
+        app.setContactMobile(req.getContactMobile() == null ? null : req.getContactMobile().trim());
+        // The admin performs the conversion on the member's behalf.
+        app.setTermsAccepted(true);
+        if (req.getBusinessNeeds() != null) {
+            app.setBusinessNeeds(String.join(",", req.getBusinessNeeds()));
+        }
+        // Goes to the review queue like any other application.
+        app.setStatus(B2bMembershipApplication.ApplicationStatus.PENDING);
+        app = appRepo.save(app);
+
+        // Store the trade-license document on Contabo S3 under a per-application key
+        // (identical layout to the public apply flow).
+        String key = "documents/b2b-licenses/" + app.getId() + "/"
+                + FileValidationUtils.sanitizeFilename(tradeLicense.getOriginalFilename());
+        app.setTradeLicenseFileUrl(contaboObjectService.uploadFile(key, tradeLicense));
+        app = appRepo.save(app);
+
+        // Internal notification to ops (best-effort).
+        try {
+            emailService.sendB2bInquiryNotification(
+                    "firdovsirz@gmail.com",
+                    app.getCompanyName(), app.getContactFullName(),
+                    app.getContactEmail(), app.getContactMobile(),
+                    0, "B2B conversion submitted by admin - Status: PENDING");
+        } catch (Exception e) {
+            log.warn("Admin notification failed: {}", e.getMessage());
+        }
+
+        return toAppResponse(app);
+    }
+
+    /**
      * Full detail view for the admin member-detail page.
      */
     public B2bMembershipDetailResponse getMembershipDetail(UUID membershipId) {
@@ -459,10 +574,16 @@ public class B2bMembershipService {
                 app.getCurrencyCode() != null ? app.getCurrencyCode() : "AED",
                 app.getCountryCode());
 
-        // New flow: the applicant already set their password during sign-up, so the
-        // account is ready to use the moment it's approved. Email them to say they can
-        // now sign in — no setup token / "set your password" link is needed.
-        if (app.getPasswordHash() != null && !app.getPasswordHash().isBlank()) {
+        // Decide which activation email to send based on whether the member can already
+        // sign in with a password — not on whether *this application* captured one.
+        //   • Public sign-up: the LOCAL credential was just stamped with the applicant's
+        //     chosen password (above), so this is true → "you can now sign in" email.
+        //   • Admin conversion of an existing B2C user: they already had a password, so
+        //     this is also true → we must NOT send a "set your password" link.
+        //   • Genuinely password-less accounts (e.g. OAuth-only) fall through to the
+        //     setup-token flow so they can establish one.
+        boolean canSignInWithPassword = hasLocalPassword(userId);
+        if (canSignInWithPassword) {
             try {
                 emailService.sendB2bMembershipActivatedEmail(
                         app.getContactEmail(),
