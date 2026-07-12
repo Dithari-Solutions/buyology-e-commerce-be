@@ -4,16 +4,18 @@ import jakarta.validation.constraints.*;
 import java.util.List;
 
 /**
- * Admin-initiated conversion of an existing (B2C) user into a B2B member.
+ * Business details for turning an existing user into a B2B member. Used by both the
+ * admin "convert user" flow ({@code POST /api/admin/membership/convert-user/{userId}})
+ * and the authenticated self-service "apply from my account" flow
+ * ({@code POST /api/membership/apply-self}).
  *
- * <p>Mirrors {@link MembershipApplicationRequest} minus the account credentials:
- * the user already has an account, so no password is captured and their existing
- * login (email/OAuth) is left untouched. The contact email/name/mobile are
- * pre-filled from the existing profile on the dashboard. The resulting
- * application is created as {@code PENDING} and flows through the normal admin
- * review queue exactly like a public sign-up.</p>
+ * <p>Mirrors {@link MembershipApplicationRequest} minus the account credentials: the
+ * user already has an account, so no password is captured and their existing login
+ * (email/OAuth) is left untouched. The contact email/name/mobile are pre-filled from
+ * the existing profile. The resulting application is created as {@code PENDING} and
+ * flows through the normal admin review queue exactly like a public sign-up.</p>
  */
-public class AdminConvertToB2bRequest {
+public class B2bConversionRequest {
 
     // Company Details
     @NotBlank @Size(max = 200)
@@ -45,7 +47,7 @@ public class AdminConvertToB2bRequest {
     @Size(max = 300)
     private String website;
 
-    // Contact Person — pre-filled from the user's existing profile on the dashboard.
+    // Contact Person — pre-filled from the user's existing profile.
     @NotBlank @Size(max = 200)
     private String contactFullName;
 

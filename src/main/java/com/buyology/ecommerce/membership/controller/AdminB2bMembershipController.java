@@ -56,7 +56,7 @@ public class AdminB2bMembershipController {
     @PostMapping(value = "/convert-user/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> convertUser(
             @PathVariable UUID userId,
-            @Valid @RequestPart("data") AdminConvertToB2bRequest req,
+            @Valid @RequestPart("data") B2bConversionRequest req,
             @RequestPart("tradeLicense") MultipartFile tradeLicense) {
         return ApiResponse.created(
                 membershipService.convertUserToB2b(userId, req, tradeLicense),

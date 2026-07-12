@@ -287,7 +287,7 @@ public class B2bMembershipService {
      */
     @Transactional
     public MembershipApplicationResponse convertUserToB2b(UUID userId,
-                                                          AdminConvertToB2bRequest req,
+                                                          B2bConversionRequest req,
                                                           MultipartFile tradeLicense) {
         Users user = userRepository.findById(userId)
                 .orElseThrow(() -> new NoSuchElementException("User not found: " + userId));
@@ -296,17 +296,18 @@ public class B2bMembershipService {
         if (user.getUserType() == Users.UserType.ADMIN) {
             throw new IllegalStateException("Admin accounts cannot be converted to a B2B membership");
         }
-        // Already a member, or an application already in flight for this user?
         if (membershipRepo.existsByUserId(userId)) {
             throw new IllegalStateException("This user already has a B2B membership");
         }
-        appRepo.findByUserId(userId).ifPresent(existing -> {
-            if (existing.getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
-                throw new IllegalStateException(
-                        "A B2B application already exists for this user (status: " + existing.getStatus()
-                        + "). Review it from the Applications page.");
-            }
-        });
+        // Reuse a prior REJECTED application row for this user instead of inserting a
+        // second one — findByUserId expects a single row, and since these flows attach
+        // userId immediately (unlike the public flow), a duplicate would break it. Any
+        // non-rejected status means an application is already in flight.
+        B2bMembershipApplication app = appRepo.findByUserId(userId).orElse(null);
+        if (app != null && app.getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
+            throw new IllegalStateException(
+                    "A B2B application already exists for this user (status: " + app.getStatus() + ").");
+        }
 
         // The trade-license document is mandatory (same validation as the public flow).
         if (tradeLicense == null || tradeLicense.isEmpty()) {
@@ -314,8 +315,8 @@ public class B2bMembershipService {
         }
         FileValidationUtils.validateDocument(tradeLicense);
 
-        // Canonical contact email: prefer the value the admin supplied (pre-filled from
-        // the user's profile), falling back to any email on the user's credentials.
+        // Canonical contact email: prefer the value supplied (pre-filled from the user's
+        // profile), falling back to any email on the user's credentials.
         String email = req.getContactEmail() == null ? null : req.getContactEmail().trim().toLowerCase();
         if (email == null || email.isBlank()) {
             email = authCredentialRepository.findByUserId(userId).stream()
@@ -325,15 +326,18 @@ public class B2bMembershipService {
                     .orElse(null);
         }
 
-        // Enforce the same one-application-per-email invariant as the public flow so an
-        // admin conversion can't duplicate a separate in-flight application (e.g. a public
-        // sign-up that isn't yet linked to this user's id).
+        // Enforce the same one-application-per-email invariant as the public flow so a
+        // conversion can't duplicate a separate in-flight application (e.g. a public
+        // sign-up that isn't yet linked to this user's id). The user's own REJECTED row
+        // (reused below) is excluded because it is REJECTED.
         if (email != null && !email.isBlank()
                 && appRepo.existsByContactEmailAndStatusNot(email, B2bMembershipApplication.ApplicationStatus.REJECTED)) {
             throw new IllegalStateException("A B2B membership application already exists for this email");
         }
 
-        B2bMembershipApplication app = new B2bMembershipApplication();
+        if (app == null) {
+            app = new B2bMembershipApplication();
+        }
         // Pre-attach to the existing user — the key difference vs a public sign-up.
         // No passwordHash: the user keeps their current login (email/OAuth) intact.
         app.setUserId(userId);
@@ -361,12 +365,17 @@ public class B2bMembershipService {
         app.setContactDesignation(req.getContactDesignation());
         app.setContactEmail(email);
         app.setContactMobile(req.getContactMobile() == null ? null : req.getContactMobile().trim());
-        // The admin performs the conversion on the member's behalf.
+        // Terms are accepted on the member's behalf (admin flow) or by the user
+        // themselves (self-service flow gates submission on a terms checkbox).
         app.setTermsAccepted(true);
-        if (req.getBusinessNeeds() != null) {
-            app.setBusinessNeeds(String.join(",", req.getBusinessNeeds()));
-        }
-        // Goes to the review queue like any other application.
+        app.setBusinessNeeds(req.getBusinessNeeds() != null && !req.getBusinessNeeds().isEmpty()
+                ? String.join(",", req.getBusinessNeeds())
+                : null);
+        // Re-applying reuses a prior REJECTED row — clear its rejection metadata and
+        // send it back through the review queue like any other application.
+        app.setRejectionReason(null);
+        app.setRejectedBy(null);
+        app.setRejectedAt(null);
         app.setStatus(B2bMembershipApplication.ApplicationStatus.PENDING);
         app = appRepo.save(app);
 
