@@ -720,6 +720,85 @@ public class EmailService {
         }
     }
 
+    // ── Device repair requests ─────────────────────────────────────────────────
+
+    /** Customer confirmation: their repair request was received. */
+    @Async
+    public void sendRepairReceivedEmail(String toEmail, String customerName, String requestRef, String productName) {
+        try {
+            String html = loadTemplate("static/repair-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)));
+            send(toEmail, "We received your repair request", html);
+            log.info("Repair received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Internal notification to the repair team: a customer submitted a repair request. */
+    @Async
+    public void sendRepairTeamNotificationEmail(String teamEmail, String customerName, String requestRef,
+                                                String productName, String brand, String model,
+                                                String description, String reviewUrl) {
+        try {
+            String html = loadTemplate("static/repair-request-notification.html")
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(nullToEmpty(customerName)))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{BRAND}}", escapeHtml(nullToEmpty(brand)))
+                    .replace("{{MODEL}}", escapeHtml(nullToEmpty(model)))
+                    .replace("{{DESCRIPTION}}", escapeHtml(nullToEmpty(description)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(teamEmail, "New repair request: " + nullToEmpty(productName), html);
+            log.info("Repair team notification sent to {}", teamEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair team notification to {}: {}", teamEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Customer notification for a repair-status change (with a stage label + optional note).
+     * Silently swallows failures.
+     */
+    @Async
+    public void sendRepairStatusEmail(String toEmail, String customerName, String requestRef,
+                                      String productName, String stageLabel, String note) {
+        try {
+            String html = loadTemplate("static/repair-status-update.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{STAGE_LABEL}}", escapeHtml(nullToEmpty(stageLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your repair: " + nullToEmpty(productName), html);
+            log.info("Repair status email ({}) sent to {}", stageLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Customer notification: the repair team quoted a fixing price awaiting their approval. */
+    @Async
+    public void sendRepairPriceEmail(String toEmail, String customerName, String requestRef,
+                                     String productName, String currency, BigDecimal price,
+                                     String estimatedTime, String note) {
+        try {
+            String html = loadTemplate("static/repair-price-estimate.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{PRICE}}", escapeHtml(money(currency, price)))
+                    .replace("{{ESTIMATED_TIME}}", escapeHtml(nullToEmpty(estimatedTime)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Your repair estimate is ready: " + nullToEmpty(productName), html);
+            log.info("Repair price email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair price email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Order confirmation & status updates ────────────────────────────────────
 
     /** A single line on the order-confirmation email. */

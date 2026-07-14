@@ -141,6 +141,10 @@ public class RoleDataInitializer implements ApplicationRunner {
                     "Prices B2B quote requests (RFQ) from the procurement dashboard",
                     List.of()),
             new RoleDefinition(
+                    "REPAIR",
+                    "Manages customer device-repair requests from the repair dashboard",
+                    List.of()),
+            new RoleDefinition(
                     "SUPERADMIN",
                     "Full access to all modules and operations",
                     ALL_PERMISSIONS)

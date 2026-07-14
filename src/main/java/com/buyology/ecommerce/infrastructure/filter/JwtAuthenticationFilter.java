@@ -110,7 +110,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         || "ADMIN".equalsIgnoreCase(r)
                         || "SUPERADMIN".equalsIgnoreCase(r)
                         || "CUSTOMER_SUPPORT".equalsIgnoreCase(r)
-                        || "PROCUREMENT".equalsIgnoreCase(r));
+                        || "PROCUREMENT".equalsIgnoreCase(r)
+                        || "REPAIR".equalsIgnoreCase(r));
         if (isAdminUserType || isPrivilegedRole) {
             String audience = tokenService.getAudience(token);
             if (!"dashboard".equals(audience)) {
