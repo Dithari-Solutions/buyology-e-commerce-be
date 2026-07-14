@@ -5,9 +5,14 @@ import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
+import com.buyology.ecommerce.payment.dto.CourierFeeChargeRequest;
+import com.buyology.ecommerce.payment.dto.PaymentInitiatedResponse;
+import com.buyology.ecommerce.payment.event.RepairCourierFeePaidEvent;
+import com.buyology.ecommerce.payment.service.PaymentService;
 import com.buyology.ecommerce.repair.domain.RepairDeliveryMethod;
 import com.buyology.ecommerce.repair.domain.RepairRequest;
 import com.buyology.ecommerce.repair.domain.RepairStatus;
+import com.buyology.ecommerce.repair.dto.RepairDeliveryResponse;
 import com.buyology.ecommerce.repair.dto.RepairRequestResponse;
 import com.buyology.ecommerce.repair.dto.StoreLocationOptionResponse;
 import com.buyology.ecommerce.repair.repository.RepairRequestRepository;
@@ -22,6 +27,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
@@ -63,6 +70,7 @@ public class RepairService {
     private final ContaboObjectService contaboObjectService;
     private final CurrencyExchangeService currencyExchangeService;
     private final EmailService emailService;
+    private final PaymentService paymentService;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String repairTeamEmail;
@@ -77,7 +85,8 @@ public class RepairService {
                          StoreLocationRepository storeLocationRepository,
                          ContaboObjectService contaboObjectService,
                          CurrencyExchangeService currencyExchangeService,
-                         EmailService emailService) {
+                         EmailService emailService,
+                         PaymentService paymentService) {
         this.repairRepo = repairRepo;
         this.authCredentialRepository = authCredentialRepository;
         this.userRepository = userRepository;
@@ -86,6 +95,7 @@ public class RepairService {
         this.contaboObjectService = contaboObjectService;
         this.currencyExchangeService = currencyExchangeService;
         this.emailService = emailService;
+        this.paymentService = paymentService;
     }
 
     // =========================================================================
@@ -168,13 +178,15 @@ public class RepairService {
     }
 
     /**
-     * Choose how the device reaches the store (only valid while SUBMITTED). COURIER_PICKUP
-     * records the 20 AED fee (converted to the customer's currency); STORE_DROPOFF requires a
-     * store branch and is free. Moves to AWAITING_DEVICE and re-notifies the team.
+     * Choose how the device reaches the store (only valid while SUBMITTED). STORE_DROPOFF requires
+     * a store branch and is free — the request advances to AWAITING_DEVICE immediately.
+     * COURIER_PICKUP records the 20 AED fee and returns a Paymob checkout session: the request
+     * stays SUBMITTED (courier method recorded, unpaid) until the fee is paid, when the
+     * {@link RepairCourierFeePaidEvent} webhook advances it to AWAITING_DEVICE.
      */
     @Transactional
-    public RepairRequestResponse chooseDelivery(UUID userId, UUID id, RepairDeliveryMethod method,
-                                                UUID storeLocationId, String currency) {
+    public RepairDeliveryResponse chooseDelivery(UUID userId, UUID id, RepairDeliveryMethod method,
+                                                 UUID storeLocationId, String currency, String redirectionUrl) {
         RepairRequest request = requireOwner(loadOrThrow(id), userId);
         if (request.getStatus() != RepairStatus.SUBMITTED) {
             throw new IllegalStateException("Delivery can only be chosen while the request is awaiting your choice.");
@@ -189,13 +201,20 @@ public class RepairService {
             request.setStoreLocationId(branch.getId());
             request.setCourierFeeAmount(null);
             request.setCourierFeeCurrency(null);
-        } else {
-            applyCourierFee(request, currency);
+            request.setCourierFeePaid(false);
+            request.setStatus(RepairStatus.AWAITING_DEVICE);
+            request.setAdminUnread(true);
+            request = repairRepo.save(request);
+            return new RepairDeliveryResponse(toResponse(request), null);
         }
-        request.setStatus(RepairStatus.AWAITING_DEVICE);
-        request.setAdminUnread(true);
+
+        // Courier pickup — the customer pays the fee first; the request stays SUBMITTED (unpaid).
+        request.setStoreLocationId(null);
+        applyCourierFee(request, currency);
+        request.setCourierFeePaid(false);
         request = repairRepo.save(request);
-        return toResponse(request);
+        PaymentInitiatedResponse payment = initiateRepairCourierFee(request, redirectionUrl);
+        return new RepairDeliveryResponse(toResponse(request), payment);
     }
 
     /**
@@ -227,11 +246,14 @@ public class RepairService {
     }
 
     /**
-     * After a decline, choose how the device is returned (only valid while DECLINED).
-     * COURIER_RETURN records the 20 AED fee; STORE_PICKUP is free.
+     * After a decline, choose how the device is returned (only valid while DECLINED). STORE_PICKUP
+     * is free and arranges the return immediately. COURIER_RETURN records the 20 AED fee and
+     * returns a Paymob checkout session; the return is only arranged once the fee is paid (via the
+     * {@link RepairCourierFeePaidEvent} webhook).
      */
     @Transactional
-    public RepairRequestResponse chooseReturn(UUID userId, UUID id, RepairDeliveryMethod method, String currency) {
+    public RepairDeliveryResponse chooseReturn(UUID userId, UUID id, RepairDeliveryMethod method,
+                                               String currency, String redirectionUrl) {
         RepairRequest request = requireOwner(loadOrThrow(id), userId);
         if (request.getStatus() != RepairStatus.DECLINED) {
             throw new IllegalStateException("A return can only be arranged after declining an estimate.");
@@ -240,15 +262,78 @@ public class RepairService {
             throw new IllegalArgumentException("Return delivery must be COURIER_RETURN or STORE_PICKUP.");
         }
         request.setReturnDeliveryMethod(method);
-        if (method == RepairDeliveryMethod.COURIER_RETURN) {
-            applyCourierFee(request, currency);
-        } else {
+        if (method == RepairDeliveryMethod.STORE_PICKUP) {
             request.setCourierFeeAmount(null);
             request.setCourierFeeCurrency(null);
+            request.setCourierFeePaid(false);
+            request.setAdminUnread(true);
+            request = repairRepo.save(request);
+            return new RepairDeliveryResponse(toResponse(request), null);
         }
-        request.setAdminUnread(true);
+
+        // Courier return — the customer pays the fee first; the return is arranged when it clears.
+        applyCourierFee(request, currency);
+        request.setCourierFeePaid(false);
         request = repairRepo.save(request);
-        return toResponse(request);
+        PaymentInitiatedResponse payment = initiateRepairCourierFee(request, redirectionUrl);
+        return new RepairDeliveryResponse(toResponse(request), payment);
+    }
+
+    /**
+     * Start a Paymob card charge for this repair's 20 AED courier fee (settlement in AED). On
+     * success the {@link RepairCourierFeePaidEvent} webhook calls {@link #onRepairCourierFeePaid}.
+     */
+    private PaymentInitiatedResponse initiateRepairCourierFee(RepairRequest request, String redirectionUrl) {
+        String name = resolveCustomerName(request.getUserId());
+        CourierFeeChargeRequest charge = new CourierFeeChargeRequest(
+                null,                        // refundRequestId — this is a repair fee
+                request.getId(),             // repairId
+                request.getCredentialId(),   // payer (auth_credentials.id / sub)
+                COURIER_FEE_AED,
+                FEE_BASE_CURRENCY,
+                contactEmailFor(request),
+                request.getContactPhone(),
+                (name == null || name.isBlank()) ? null : name,
+                redirectionUrl);
+        return paymentService.initiateCourierFeePayment(charge);
+    }
+
+    /**
+     * Advances a repair once its courier fee clears (Paymob webhook, AFTER_COMMIT). Confirms the
+     * inbound pickup (SUBMITTED → AWAITING_DEVICE) or the post-decline return. Idempotent.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional
+    public void onRepairCourierFeePaid(RepairCourierFeePaidEvent event) {
+        RepairRequest request = repairRepo.findById(event.repairId()).orElse(null);
+        if (request == null) {
+            log.warn("[REPAIR] RepairCourierFeePaidEvent for unknown repair {}", event.repairId());
+            return;
+        }
+        if (request.isCourierFeePaid()) {
+            log.info("[REPAIR] RepairCourierFeePaidEvent for repair {} ignored (already paid)", request.getId());
+            return;
+        }
+        if (request.getStatus() == RepairStatus.SUBMITTED
+                && request.getInboundDeliveryMethod() == RepairDeliveryMethod.COURIER_PICKUP) {
+            request.setCourierFeePaid(true);
+            request.setStatus(RepairStatus.AWAITING_DEVICE);
+            request.setAdminUnread(true);
+            repairRepo.save(request);
+            emailStatus(request, "Your courier pickup is arranged — we'll collect your device shortly.");
+            log.info("[REPAIR] Courier pickup fee paid — repair {} advanced to AWAITING_DEVICE", request.getId());
+        } else if (request.getStatus() == RepairStatus.DECLINED
+                && request.getReturnDeliveryMethod() == RepairDeliveryMethod.COURIER_RETURN) {
+            request.setCourierFeePaid(true);
+            request.setAdminUnread(true);
+            repairRepo.save(request);
+            emailStatus(request, "Your courier return is arranged — we'll deliver your device back to you.");
+            log.info("[REPAIR] Courier return fee paid — repair {} return arranged", request.getId());
+        } else {
+            log.info("[REPAIR] RepairCourierFeePaidEvent for repair {} ignored (status {}, inbound {}, return {})",
+                    request.getId(), request.getStatus(), request.getInboundDeliveryMethod(),
+                    request.getReturnDeliveryMethod());
+        }
     }
 
     /** Active store branches in a country (alpha-3 code) for the drop-off / pickup picker. */

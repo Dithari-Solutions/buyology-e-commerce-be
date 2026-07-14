@@ -36,6 +36,7 @@ public class RepairRequestResponse {
 
     private BigDecimal courierFeeAmount;
     private String courierFeeCurrency;
+    private boolean courierFeePaid;
 
     private BigDecimal estimatedPrice;
     private String estimatedPriceCurrency;
@@ -77,6 +78,7 @@ public class RepairRequestResponse {
         dto.returnDeliveryMethod = r.getReturnDeliveryMethod();
         dto.courierFeeAmount = r.getCourierFeeAmount();
         dto.courierFeeCurrency = r.getCourierFeeCurrency();
+        dto.courierFeePaid = r.isCourierFeePaid();
         dto.estimatedPrice = r.getEstimatedPrice();
         dto.estimatedPriceCurrency = r.getEstimatedPriceCurrency();
         dto.estimatedTime = r.getEstimatedTime();
@@ -125,6 +127,8 @@ public class RepairRequestResponse {
     public void setCourierFeeAmount(BigDecimal courierFeeAmount) { this.courierFeeAmount = courierFeeAmount; }
     public String getCourierFeeCurrency() { return courierFeeCurrency; }
     public void setCourierFeeCurrency(String courierFeeCurrency) { this.courierFeeCurrency = courierFeeCurrency; }
+    public boolean isCourierFeePaid() { return courierFeePaid; }
+    public void setCourierFeePaid(boolean courierFeePaid) { this.courierFeePaid = courierFeePaid; }
     public BigDecimal getEstimatedPrice() { return estimatedPrice; }
     public void setEstimatedPrice(BigDecimal estimatedPrice) { this.estimatedPrice = estimatedPrice; }
     public String getEstimatedPriceCurrency() { return estimatedPriceCurrency; }

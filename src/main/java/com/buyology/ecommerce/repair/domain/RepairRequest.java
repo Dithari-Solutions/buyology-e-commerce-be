@@ -92,6 +92,10 @@ public class RepairRequest {
     @Column(name = "courier_fee_currency", length = 3)
     private String courierFeeCurrency;
 
+    /** Whether the fee for the currently-selected courier leg has been paid via Paymob. */
+    @Column(name = "courier_fee_paid", nullable = false)
+    private boolean courierFeePaid = false;
+
     // ── Pricing ───────────────────────────────────────────────────────────────
 
     @Column(name = "estimated_price", precision = 12, scale = 2)
@@ -212,6 +216,9 @@ public class RepairRequest {
 
     public String getCourierFeeCurrency() { return courierFeeCurrency; }
     public void setCourierFeeCurrency(String courierFeeCurrency) { this.courierFeeCurrency = courierFeeCurrency; }
+
+    public boolean isCourierFeePaid() { return courierFeePaid; }
+    public void setCourierFeePaid(boolean courierFeePaid) { this.courierFeePaid = courierFeePaid; }
 
     public BigDecimal getEstimatedPrice() { return estimatedPrice; }
     public void setEstimatedPrice(BigDecimal estimatedPrice) { this.estimatedPrice = estimatedPrice; }

@@ -20,10 +20,15 @@ public class ChooseDeliveryRequest {
 
     private String currency;
 
+    /** Where Paymob returns the browser after the courier-fee checkout (courier pickup only). */
+    private String redirectionUrl;
+
     public RepairDeliveryMethod getMethod() { return method; }
     public void setMethod(RepairDeliveryMethod method) { this.method = method; }
     public UUID getStoreLocationId() { return storeLocationId; }
     public void setStoreLocationId(UUID storeLocationId) { this.storeLocationId = storeLocationId; }
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+    public String getRedirectionUrl() { return redirectionUrl; }
+    public void setRedirectionUrl(String redirectionUrl) { this.redirectionUrl = redirectionUrl; }
 }

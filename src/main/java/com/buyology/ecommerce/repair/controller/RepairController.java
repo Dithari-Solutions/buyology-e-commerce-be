@@ -4,6 +4,7 @@ import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.repair.dto.ChooseDeliveryRequest;
 import com.buyology.ecommerce.repair.dto.ChooseReturnRequest;
 import com.buyology.ecommerce.repair.dto.PriceDecisionRequest;
+import com.buyology.ecommerce.repair.dto.RepairDeliveryResponse;
 import com.buyology.ecommerce.repair.dto.RepairRequestResponse;
 import com.buyology.ecommerce.repair.dto.StoreLocationOptionResponse;
 import com.buyology.ecommerce.repair.service.RepairService;
@@ -74,11 +75,12 @@ public class RepairController {
     }
 
     @PostMapping("/{id}/delivery")
-    public ResponseEntity<ApiResponse<RepairRequestResponse>> chooseDelivery(
+    public ResponseEntity<ApiResponse<RepairDeliveryResponse>> chooseDelivery(
             @AuthenticationPrincipal UUID userId, @PathVariable UUID id,
             @Valid @RequestBody ChooseDeliveryRequest req) {
         return ApiResponse.success(
-                repairService.chooseDelivery(userId, id, req.getMethod(), req.getStoreLocationId(), req.getCurrency()),
+                repairService.chooseDelivery(userId, id, req.getMethod(), req.getStoreLocationId(),
+                        req.getCurrency(), req.getRedirectionUrl()),
                 "Delivery method saved");
     }
 
@@ -92,11 +94,11 @@ public class RepairController {
     }
 
     @PostMapping("/{id}/return")
-    public ResponseEntity<ApiResponse<RepairRequestResponse>> chooseReturn(
+    public ResponseEntity<ApiResponse<RepairDeliveryResponse>> chooseReturn(
             @AuthenticationPrincipal UUID userId, @PathVariable UUID id,
             @Valid @RequestBody ChooseReturnRequest req) {
         return ApiResponse.success(
-                repairService.chooseReturn(userId, id, req.getMethod(), req.getCurrency()),
+                repairService.chooseReturn(userId, id, req.getMethod(), req.getCurrency(), req.getRedirectionUrl()),
                 "Return method saved");
     }
 }

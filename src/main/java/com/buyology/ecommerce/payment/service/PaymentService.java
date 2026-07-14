@@ -9,6 +9,7 @@ import com.buyology.ecommerce.payment.enums.PaymentPurpose;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.event.CourierFeePaidEvent;
+import com.buyology.ecommerce.payment.event.RepairCourierFeePaidEvent;
 import com.buyology.ecommerce.payment.repository.*;
 import com.buyology.ecommerce.currency.service.CurrencyExchangeService;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
@@ -318,13 +319,21 @@ public class PaymentService {
                         "Unknown payer for courier fee: " + req.customerId()));
         userProfileService.checkPaymentReadiness(ownerUserId);
 
-        // EXACTLY ONE courier-fee charge per refund. Re-selecting courier pickup must reuse the
+        // Exactly one of repairId / refundRequestId is set — that picks the purpose and event.
+        boolean isRepair = req.repairId() != null;
+        PaymentPurpose purpose = isRepair ? PaymentPurpose.REPAIR_COURIER_FEE : PaymentPurpose.COURIER_RETURN_FEE;
+
+        // EXACTLY ONE courier-fee charge per refund/repair. Re-selecting courier must reuse the
         // existing non-terminal charge, never create a second transaction/intention — a duplicate
         // collides on a unique payment_transactions column → 409. So we resume the same charge.
-        PaymentTransaction existing = (req.refundRequestId() == null) ? null
-                : transactionRepo.findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
-                        req.refundRequestId(), PaymentPurpose.COURIER_RETURN_FEE,
-                        List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)).orElse(null);
+        PaymentTransaction existing = isRepair
+                ? transactionRepo.findFirstByRepairIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        req.repairId(), purpose,
+                        List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)).orElse(null)
+                : (req.refundRequestId() == null ? null
+                        : transactionRepo.findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                                req.refundRequestId(), purpose,
+                                List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING)).orElse(null));
 
         PaymentProvider provider = providerRepo.findFirstByIsActiveTrue()
                 .orElseThrow(() -> new IllegalStateException("No active payment provider configured"));
@@ -337,7 +346,8 @@ public class PaymentService {
             String resumeUrl = provider.getBaseUrl()
                     + "/unifiedcheckout/?publicKey=" + provider.getPublicKey()
                     + "&clientSecret=" + existing.getPaymentKeyToken();
-            log.info("[COURIER-FEE] Resuming pending charge {} for refund {}", existing.getId(), req.refundRequestId());
+            log.info("[COURIER-FEE] Resuming pending charge {} ({})", existing.getId(),
+                    isRepair ? "repair " + req.repairId() : "refund " + req.refundRequestId());
             return buildInitiatedResponse(existing, existing.getPaymentKeyToken(), resumeUrl);
         }
 
@@ -361,9 +371,9 @@ public class PaymentService {
 
         ArrayNode items = objectMapper.createArrayNode();
         ObjectNode item = objectMapper.createObjectNode();
-        item.put("name", "Courier return pickup fee");
+        item.put("name", isRepair ? "Repair courier fee" : "Courier return pickup fee");
         item.put("amount", amountCents);
-        item.put("description", "Refund request " + req.refundRequestId());
+        item.put("description", isRepair ? "Repair request " + req.repairId() : "Refund request " + req.refundRequestId());
         item.put("quantity", 1);
         items.add(item);
 
@@ -386,8 +396,9 @@ public class PaymentService {
                 provider.getNotificationUrl(),
                 redirectionUrl);
 
-        log.info("[COURIER-FEE] Created Paymob Intention for refund {}: tx={}, intention={}",
-                req.refundRequestId(), tx.getId(), intention.intentionId());
+        log.info("[COURIER-FEE] Created Paymob Intention for {}: tx={}, intention={}",
+                isRepair ? "repair " + req.repairId() : "refund " + req.refundRequestId(),
+                tx.getId(), intention.intentionId());
 
         return finalizeTransactionWithProvider(tx.getId(), intention);
     }
@@ -398,9 +409,14 @@ public class PaymentService {
                                                                BigDecimal amount,
                                                                long amountCents,
                                                                String currency) {
+        boolean isRepair = req.repairId() != null;
         PaymentTransaction tx = new PaymentTransaction();
-        tx.setPurpose(PaymentPurpose.COURIER_RETURN_FEE);
-        tx.setRefundRequestId(req.refundRequestId());
+        tx.setPurpose(isRepair ? PaymentPurpose.REPAIR_COURIER_FEE : PaymentPurpose.COURIER_RETURN_FEE);
+        if (isRepair) {
+            tx.setRepairId(req.repairId());
+        } else {
+            tx.setRefundRequestId(req.refundRequestId());
+        }
         tx.setMethodConfig(config);
         tx.setMethodType(PaymentMethodType.CARD);
         tx.setAmount(amount);
@@ -412,8 +428,8 @@ public class PaymentService {
         tx.setCustomerPhone(req.customerPhone());
         tx.setBillingName(req.billingName());
         tx = transactionRepo.save(tx);
-        log.info("[COURIER-FEE] Committed PENDING courier-fee transaction: id={}, refundRequest={}",
-                tx.getId(), req.refundRequestId());
+        log.info("[COURIER-FEE] Committed PENDING courier-fee transaction: id={}, {}", tx.getId(),
+                isRepair ? "repair=" + req.repairId() : "refundRequest=" + req.refundRequestId());
         return tx;
     }
 
@@ -581,13 +597,21 @@ public class PaymentService {
 
             log.info("[WEBHOOK] Transaction {} updated to {}", transaction.getId(), transaction.getStatus());
 
-            boolean isCourierFee = transaction.getPurpose() == PaymentPurpose.COURIER_RETURN_FEE;
+            boolean isRefundCourierFee = transaction.getPurpose() == PaymentPurpose.COURIER_RETURN_FEE;
+            boolean isRepairCourierFee = transaction.getPurpose() == PaymentPurpose.REPAIR_COURIER_FEE;
+            boolean isCourierFee = isRefundCourierFee || isRepairCourierFee;
             if (transaction.getStatus() == PaymentStatus.SUCCESS) {
-                if (isCourierFee) {
+                if (isRefundCourierFee) {
                     log.info("[WEBHOOK] Courier return fee paid for refund {}. Publishing CourierFeePaidEvent.",
                             transaction.getRefundRequestId());
                     eventPublisher.publishEvent(new CourierFeePaidEvent(
                             transaction.getRefundRequestId(), transaction.getId(),
+                            transaction.getAmount(), transaction.getCurrency()));
+                } else if (isRepairCourierFee) {
+                    log.info("[WEBHOOK] Repair courier fee paid for repair {}. Publishing RepairCourierFeePaidEvent.",
+                            transaction.getRepairId());
+                    eventPublisher.publishEvent(new RepairCourierFeePaidEvent(
+                            transaction.getRepairId(), transaction.getId(),
                             transaction.getAmount(), transaction.getCurrency()));
                 } else {
                     log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
@@ -596,10 +620,11 @@ public class PaymentService {
             } else if (transaction.getStatus() == PaymentStatus.FAILED
                     || transaction.getStatus() == PaymentStatus.CANCELLED) {
                 if (isCourierFee) {
-                    // No order to fail — the refund request simply stays COURIER_FEE_PENDING
-                    // so the customer can retry the fee payment or switch to store drop-off.
-                    log.info("[WEBHOOK] Courier return fee charge {} for refund {}.",
-                            transaction.getStatus(), transaction.getRefundRequestId());
+                    // No order to fail — the refund/repair request simply stays fee-pending so the
+                    // customer can retry the fee payment or switch to the free option.
+                    log.info("[WEBHOOK] Courier fee charge {} for {}.", transaction.getStatus(),
+                            isRepairCourierFee ? "repair " + transaction.getRepairId()
+                                    : "refund " + transaction.getRefundRequestId());
                 } else {
                     log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
                     eventPublisher.publishEvent(new PaymentFailedEvent(

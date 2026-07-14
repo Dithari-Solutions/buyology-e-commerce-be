@@ -269,6 +269,7 @@ public class RefundRequestService {
         String billingName = customerNameFor(order);
         CourierFeeChargeRequest charge = new CourierFeeChargeRequest(
                 req.getId(),
+                null, // repairId — this is a refund fee
                 order.getAuthCredentialId(),
                 feeLocal,
                 currency,
