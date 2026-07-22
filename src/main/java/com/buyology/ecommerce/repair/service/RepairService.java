@@ -125,8 +125,15 @@ public class RepairService {
         requireText(brand, "Brand");
         requireText(model, "Model");
         requireText(description, "Problem description");
+        // At least one photo is mandatory: the team (and the AI estimate) price the repair from
+        // what the photos show, so a request without one can't be assessed. Checked here as well
+        // as in the browser because the client-side check is trivially bypassable.
+        requireAtLeastOneImage(images);
 
         String imageKeys = uploadImages(images);
+        if (imageKeys == null) {
+            throw new IllegalArgumentException("At least one photo of the problem is required.");
+        }
         String email = resolveContactEmail(resolvedUserId, credentialId);
         String phone = resolveContactPhone(resolvedUserId);
         String name = resolveCustomerName(resolvedUserId);
@@ -681,6 +688,15 @@ public class RepairService {
     private static void requireText(String value, String label) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(label + " is required.");
+        }
+    }
+
+    /** A repair can't be assessed without a photo of the fault, so at least one is mandatory. */
+    private static void requireAtLeastOneImage(List<MultipartFile> images) {
+        boolean hasUsableImage = images != null
+                && images.stream().anyMatch(image -> image != null && !image.isEmpty());
+        if (!hasUsableImage) {
+            throw new IllegalArgumentException("At least one photo of the problem is required.");
         }
     }
 
