@@ -108,6 +108,37 @@ public class RepairRequest {
     @Column(name = "estimated_time", length = 120)
     private String estimatedTime;
 
+    // ── AI preliminary estimate (advisory) ────────────────────────────────────
+    // Produced by Claude from the problem photos + description, priced for the UAE
+    // market and ALWAYS stored in AED. Never binding: the repair team still sends
+    // the real quote via estimatedPrice. Null until the async estimate lands (or
+    // permanently, if the feature is disabled / the call fails).
+
+    @Column(name = "ai_estimate_min_price", precision = 12, scale = 2)
+    private BigDecimal aiEstimateMinPrice;
+
+    @Column(name = "ai_estimate_max_price", precision = 12, scale = 2)
+    private BigDecimal aiEstimateMaxPrice;
+
+    /** Always "AED" — the market the estimate is priced for. */
+    @Column(name = "ai_estimate_currency", length = 3)
+    private String aiEstimateCurrency;
+
+    /** LOW / MEDIUM / HIGH — how much the model trusts its own read of the photos. */
+    @Column(name = "ai_estimate_confidence", length = 16)
+    private String aiEstimateConfidence;
+
+    /** One- or two-sentence diagnosis shown to the customer and the repair team. */
+    @Column(name = "ai_estimate_summary", columnDefinition = "text")
+    private String aiEstimateSummary;
+
+    /** Free-text turnaround the model expects, e.g. "3-5 business days". */
+    @Column(name = "ai_estimate_time", length = 120)
+    private String aiEstimateTime;
+
+    @Column(name = "ai_estimated_at")
+    private Instant aiEstimatedAt;
+
     // ── Admin / notes ─────────────────────────────────────────────────────────
 
     /** Last admin note / custom update text. */
@@ -225,6 +256,27 @@ public class RepairRequest {
 
     public String getEstimatedPriceCurrency() { return estimatedPriceCurrency; }
     public void setEstimatedPriceCurrency(String estimatedPriceCurrency) { this.estimatedPriceCurrency = estimatedPriceCurrency; }
+
+    public BigDecimal getAiEstimateMinPrice() { return aiEstimateMinPrice; }
+    public void setAiEstimateMinPrice(BigDecimal aiEstimateMinPrice) { this.aiEstimateMinPrice = aiEstimateMinPrice; }
+
+    public BigDecimal getAiEstimateMaxPrice() { return aiEstimateMaxPrice; }
+    public void setAiEstimateMaxPrice(BigDecimal aiEstimateMaxPrice) { this.aiEstimateMaxPrice = aiEstimateMaxPrice; }
+
+    public String getAiEstimateCurrency() { return aiEstimateCurrency; }
+    public void setAiEstimateCurrency(String aiEstimateCurrency) { this.aiEstimateCurrency = aiEstimateCurrency; }
+
+    public String getAiEstimateConfidence() { return aiEstimateConfidence; }
+    public void setAiEstimateConfidence(String aiEstimateConfidence) { this.aiEstimateConfidence = aiEstimateConfidence; }
+
+    public String getAiEstimateSummary() { return aiEstimateSummary; }
+    public void setAiEstimateSummary(String aiEstimateSummary) { this.aiEstimateSummary = aiEstimateSummary; }
+
+    public String getAiEstimateTime() { return aiEstimateTime; }
+    public void setAiEstimateTime(String aiEstimateTime) { this.aiEstimateTime = aiEstimateTime; }
+
+    public Instant getAiEstimatedAt() { return aiEstimatedAt; }
+    public void setAiEstimatedAt(Instant aiEstimatedAt) { this.aiEstimatedAt = aiEstimatedAt; }
 
     public String getEstimatedTime() { return estimatedTime; }
     public void setEstimatedTime(String estimatedTime) { this.estimatedTime = estimatedTime; }

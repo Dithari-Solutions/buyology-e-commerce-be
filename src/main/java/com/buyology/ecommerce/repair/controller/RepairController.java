@@ -55,10 +55,15 @@ public class RepairController {
                 "Repair request submitted");
     }
 
+    /**
+     * The caller's repairs. {@code currency} is optional — when given, the AED AI estimate is also
+     * returned converted into it for display (the AED figures are always present).
+     */
     @GetMapping
     public ResponseEntity<ApiResponse<List<RepairRequestResponse>>> listMine(
-            @AuthenticationPrincipal UUID userId) {
-        return ApiResponse.success(repairService.listOwn(userId), "Repair requests fetched");
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(value = "currency", required = false) String currency) {
+        return ApiResponse.success(repairService.listOwn(userId, currency), "Repair requests fetched");
     }
 
     /** Active store branches in a country (alpha-3) for the drop-off / pickup picker. */
@@ -70,8 +75,9 @@ public class RepairController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<RepairRequestResponse>> get(
-            @AuthenticationPrincipal UUID userId, @PathVariable UUID id) {
-        return ApiResponse.success(repairService.getOwn(userId, id), "Repair request fetched");
+            @AuthenticationPrincipal UUID userId, @PathVariable UUID id,
+            @RequestParam(value = "currency", required = false) String currency) {
+        return ApiResponse.success(repairService.getOwn(userId, id, currency), "Repair request fetched");
     }
 
     @PostMapping("/{id}/delivery")

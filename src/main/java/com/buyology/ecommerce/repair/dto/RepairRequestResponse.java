@@ -42,6 +42,20 @@ public class RepairRequestResponse {
     private String estimatedPriceCurrency;
     private String estimatedTime;
 
+    // ── AI preliminary estimate (advisory, never the binding quote) ──────────
+    /** Always priced in AED for the UAE market; see aiEstimateCurrency. */
+    private BigDecimal aiEstimateMinPrice;
+    private BigDecimal aiEstimateMaxPrice;
+    private String aiEstimateCurrency;
+    private String aiEstimateConfidence;
+    private String aiEstimateSummary;
+    private String aiEstimateTime;
+    private Instant aiEstimatedAt;
+    /** The same range converted into the caller's currency, when one was requested. */
+    private BigDecimal aiEstimateConvertedMinPrice;
+    private BigDecimal aiEstimateConvertedMaxPrice;
+    private String aiEstimateConvertedCurrency;
+
     private String adminNote;
     private String contactEmail;
     private String contactPhone;
@@ -82,6 +96,13 @@ public class RepairRequestResponse {
         dto.estimatedPrice = r.getEstimatedPrice();
         dto.estimatedPriceCurrency = r.getEstimatedPriceCurrency();
         dto.estimatedTime = r.getEstimatedTime();
+        dto.aiEstimateMinPrice = r.getAiEstimateMinPrice();
+        dto.aiEstimateMaxPrice = r.getAiEstimateMaxPrice();
+        dto.aiEstimateCurrency = r.getAiEstimateCurrency();
+        dto.aiEstimateConfidence = r.getAiEstimateConfidence();
+        dto.aiEstimateSummary = r.getAiEstimateSummary();
+        dto.aiEstimateTime = r.getAiEstimateTime();
+        dto.aiEstimatedAt = r.getAiEstimatedAt();
         dto.adminNote = r.getAdminNote();
         dto.contactEmail = r.getContactEmail();
         dto.contactPhone = r.getContactPhone();
@@ -135,6 +156,27 @@ public class RepairRequestResponse {
     public void setEstimatedPriceCurrency(String estimatedPriceCurrency) { this.estimatedPriceCurrency = estimatedPriceCurrency; }
     public String getEstimatedTime() { return estimatedTime; }
     public void setEstimatedTime(String estimatedTime) { this.estimatedTime = estimatedTime; }
+
+    public BigDecimal getAiEstimateMinPrice() { return aiEstimateMinPrice; }
+    public void setAiEstimateMinPrice(BigDecimal aiEstimateMinPrice) { this.aiEstimateMinPrice = aiEstimateMinPrice; }
+    public BigDecimal getAiEstimateMaxPrice() { return aiEstimateMaxPrice; }
+    public void setAiEstimateMaxPrice(BigDecimal aiEstimateMaxPrice) { this.aiEstimateMaxPrice = aiEstimateMaxPrice; }
+    public String getAiEstimateCurrency() { return aiEstimateCurrency; }
+    public void setAiEstimateCurrency(String aiEstimateCurrency) { this.aiEstimateCurrency = aiEstimateCurrency; }
+    public String getAiEstimateConfidence() { return aiEstimateConfidence; }
+    public void setAiEstimateConfidence(String aiEstimateConfidence) { this.aiEstimateConfidence = aiEstimateConfidence; }
+    public String getAiEstimateSummary() { return aiEstimateSummary; }
+    public void setAiEstimateSummary(String aiEstimateSummary) { this.aiEstimateSummary = aiEstimateSummary; }
+    public String getAiEstimateTime() { return aiEstimateTime; }
+    public void setAiEstimateTime(String aiEstimateTime) { this.aiEstimateTime = aiEstimateTime; }
+    public Instant getAiEstimatedAt() { return aiEstimatedAt; }
+    public void setAiEstimatedAt(Instant aiEstimatedAt) { this.aiEstimatedAt = aiEstimatedAt; }
+    public BigDecimal getAiEstimateConvertedMinPrice() { return aiEstimateConvertedMinPrice; }
+    public void setAiEstimateConvertedMinPrice(BigDecimal v) { this.aiEstimateConvertedMinPrice = v; }
+    public BigDecimal getAiEstimateConvertedMaxPrice() { return aiEstimateConvertedMaxPrice; }
+    public void setAiEstimateConvertedMaxPrice(BigDecimal v) { this.aiEstimateConvertedMaxPrice = v; }
+    public String getAiEstimateConvertedCurrency() { return aiEstimateConvertedCurrency; }
+    public void setAiEstimateConvertedCurrency(String v) { this.aiEstimateConvertedCurrency = v; }
     public String getAdminNote() { return adminNote; }
     public void setAdminNote(String adminNote) { this.adminNote = adminNote; }
     public String getContactEmail() { return contactEmail; }

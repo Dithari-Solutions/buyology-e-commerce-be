@@ -15,6 +15,7 @@ import com.buyology.ecommerce.repair.domain.RepairStatus;
 import com.buyology.ecommerce.repair.dto.RepairDeliveryResponse;
 import com.buyology.ecommerce.repair.dto.RepairRequestResponse;
 import com.buyology.ecommerce.repair.dto.StoreLocationOptionResponse;
+import com.buyology.ecommerce.repair.event.RepairSubmittedEvent;
 import com.buyology.ecommerce.repair.repository.RepairRequestRepository;
 import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
@@ -24,6 +25,7 @@ import com.buyology.ecommerce.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -72,6 +74,7 @@ public class RepairService {
     private final CurrencyExchangeService currencyExchangeService;
     private final EmailService emailService;
     private final PaymentService paymentService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String repairTeamEmail;
@@ -87,7 +90,8 @@ public class RepairService {
                          ContaboObjectService contaboObjectService,
                          CurrencyExchangeService currencyExchangeService,
                          EmailService emailService,
-                         PaymentService paymentService) {
+                         PaymentService paymentService,
+                         ApplicationEventPublisher eventPublisher) {
         this.repairRepo = repairRepo;
         this.authCredentialRepository = authCredentialRepository;
         this.userRepository = userRepository;
@@ -97,6 +101,7 @@ public class RepairService {
         this.currencyExchangeService = currencyExchangeService;
         this.emailService = emailService;
         this.paymentService = paymentService;
+        this.eventPublisher = eventPublisher;
     }
 
     // =========================================================================
@@ -156,26 +161,47 @@ public class RepairService {
                 saved.getBrand(), saved.getModel(), saved.getDescription(),
                 webBaseUrl + "/repair/" + saved.getId()));
 
+        // Kicks off the advisory AI price estimate. Consumed AFTER_COMMIT on another thread, so it
+        // neither delays this response nor can it fail the submission.
+        eventPublisher.publishEvent(new RepairSubmittedEvent(saved.getId()));
+
         return toResponse(request);
     }
 
     /** A customer's own repairs, newest first. */
     public List<RepairRequestResponse> listOwn(UUID userId) {
+        return listOwn(userId, null);
+    }
+
+    /**
+     * A customer's own repairs, newest first. When {@code displayCurrency} is supplied, the AED AI
+     * estimate is additionally converted into it for display.
+     */
+    public List<RepairRequestResponse> listOwn(UUID userId, String displayCurrency) {
         UUID credentialId = resolveCredentialId(userId);
         return repairRepo.findByCredentialIdOrderByCreatedAtDesc(credentialId).stream()
-                .map(this::toResponse)
+                .map(r -> toResponse(r, displayCurrency))
                 .collect(Collectors.toList());
     }
 
     /** A single owned repair. Opening it clears the customer's "new update" flag. */
     @Transactional
     public RepairRequestResponse getOwn(UUID userId, UUID id) {
+        return getOwn(userId, id, null);
+    }
+
+    /**
+     * A single owned repair, with the AI estimate converted into {@code displayCurrency} when given.
+     * Opening it clears the customer's "new update" flag.
+     */
+    @Transactional
+    public RepairRequestResponse getOwn(UUID userId, UUID id, String displayCurrency) {
         RepairRequest request = requireOwner(loadOrThrow(id), userId);
         if (request.isCustomerUnread()) {
             request.setCustomerUnread(false);
             request = repairRepo.save(request);
         }
-        return toResponse(request);
+        return toResponse(request, displayCurrency);
     }
 
     /**
@@ -519,6 +545,34 @@ public class RepairService {
             }
         }
         return RepairRequestResponse.from(request, imageUrls, branchName, branchAddress);
+    }
+
+    /**
+     * As {@link #toResponse(RepairRequest)}, plus the AI estimate converted from AED into
+     * {@code displayCurrency} via {@link CurrencyExchangeService}. The AED figures stay on the
+     * response either way — the converted pair is purely for display, and if the FX provider is
+     * unreachable we simply omit it rather than fail the read.
+     */
+    private RepairRequestResponse toResponse(RepairRequest request, String displayCurrency) {
+        RepairRequestResponse dto = toResponse(request);
+        if (displayCurrency == null || displayCurrency.isBlank()) {
+            return dto;
+        }
+        String target = displayCurrency.trim().toUpperCase();
+        if (target.equals(RepairAiEstimateService.ESTIMATE_CURRENCY)
+                || (dto.getAiEstimateMinPrice() == null && dto.getAiEstimateMaxPrice() == null)) {
+            return dto;
+        }
+        try {
+            dto.setAiEstimateConvertedMinPrice(currencyExchangeService.convert(
+                    dto.getAiEstimateMinPrice(), RepairAiEstimateService.ESTIMATE_CURRENCY, target));
+            dto.setAiEstimateConvertedMaxPrice(currencyExchangeService.convert(
+                    dto.getAiEstimateMaxPrice(), RepairAiEstimateService.ESTIMATE_CURRENCY, target));
+            dto.setAiEstimateConvertedCurrency(target);
+        } catch (Exception e) {
+            log.warn("[REPAIR-AI] Could not convert the estimate to {}; showing AED only.", target, e);
+        }
+        return dto;
     }
 
     private void emailStatus(RepairRequest request, String note) {

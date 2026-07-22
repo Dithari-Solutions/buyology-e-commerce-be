@@ -147,6 +147,35 @@ public class ContaboObjectService {
     }
 
     /**
+     * Reads an object's raw bytes. Used server-side when the bytes themselves are needed
+     * rather than a URL — e.g. base64-encoding repair photos for the Claude vision call.
+     * Returns null when the key is blank or the object cannot be read, so callers on a
+     * best-effort path don't have to catch.
+     */
+    public byte[] downloadBytes(String key) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        try {
+            return s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(properties.getBucketName())
+                    .key(key.trim())
+                    .build()).asByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Best-effort content type for an object key, derived from its extension. */
+    public static String contentTypeForKey(String key) {
+        String lower = key == null ? "" : key.toLowerCase();
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".gif")) return "image/gif";
+        return "image/jpeg";
+    }
+
+    /**
      * Presigned URL that forces a browser download (Content-Disposition: attachment)
      * with the given file name. Use for generated files like revenue exports.
      */

@@ -170,6 +170,12 @@ services:
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
       TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:-}
 
+      # ── Claude API — AI repair price estimate. Blank key = feature off (the repair
+      #    flow behaves exactly as before, just with no AI suggestion). ──
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      REPAIR_AI_ESTIMATE_ENABLED: ${REPAIR_AI_ESTIMATE_ENABLED:-true}
+
       # ── Contabo S3 — use a SEPARATE dev bucket so dev uploads never land in prod ──
       CONTABO_S3_ENDPOINT: ${CONTABO_S3_ENDPOINT}
       CONTABO_S3_ACCESS_KEY: ${CONTABO_S3_ACCESS_KEY}
