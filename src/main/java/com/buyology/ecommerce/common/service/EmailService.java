@@ -234,13 +234,15 @@ public class EmailService {
     }
 
     @Async
-    public void sendB2bMembershipRejectedEmail(String toEmail, String memberName, String companyName, String reason) {
+    public void sendB2bMembershipRejectedEmail(String toEmail, String memberName, String companyName,
+                                               String reason, String resubmitUrl) {
         try {
             String template = loadTemplate("static/b2b-membership-rejected.html");
             String html = template
                     .replace("{{MEMBER_NAME}}", memberName == null ? "" : memberName)
                     .replace("{{COMPANY_NAME}}", companyName == null ? "" : companyName)
-                    .replace("{{REASON}}", reason == null ? "" : reason);
+                    .replace("{{REASON}}", reason == null ? "" : reason)
+                    .replace("{{RESUBMIT_URL}}", resubmitUrl == null ? "" : resubmitUrl);
             send(toEmail, "Update on your Buyology B2B membership application", html);
         } catch (Exception e) {
             log.warn("Could not send B2B rejected email to {}: {}", toEmail, e.getMessage());

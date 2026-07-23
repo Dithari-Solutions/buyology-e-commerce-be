@@ -47,17 +47,19 @@ public class B2bMembershipController {
     }
 
     /**
-     * Self-service B2B application for an already-signed-in customer (upgrade from
-     * their existing account). Unlike {@link #apply}, no password is captured — the
-     * user keeps their current login — and the application is pre-attached to the
-     * authenticated user. Created as PENDING and reviewed via the normal admin queue.
-     * Sent as multipart/form-data: a "data" JSON part + a "tradeLicense" file part.
+     * Self-service B2B application for an already-signed-in customer — used both to
+     * upgrade an existing account and to re-submit a rejected application. Unlike
+     * {@link #apply}, no password is captured (the user keeps their current login) and
+     * the application is pre-attached to the authenticated user. Created as PENDING and
+     * reviewed via the normal admin queue. Sent as multipart/form-data: a "data" JSON
+     * part plus a "tradeLicense" file part, which is optional on a re-submission where
+     * the applicant keeps the document already on file.
      */
     @PostMapping(value = "/apply-self", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> applySelf(
             @Valid @RequestPart("data") B2bConversionRequest req,
-            @RequestPart("tradeLicense") MultipartFile tradeLicense) {
+            @RequestPart(value = "tradeLicense", required = false) MultipartFile tradeLicense) {
         UUID userId = SecurityUtils.currentUserId();
         return ApiResponse.created(
                 membershipService.convertUserToB2b(userId, req, tradeLicense),

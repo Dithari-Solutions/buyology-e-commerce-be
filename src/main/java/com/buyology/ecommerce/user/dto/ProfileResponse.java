@@ -46,6 +46,21 @@ public class ProfileResponse {
     /** When the account will be permanently deleted (deletion request + 30 days). Null otherwise. */
     private Instant deletionScheduledAt;
 
+    /**
+     * Status of this user's B2B membership application — PENDING, UNDER_REVIEW,
+     * APPROVED or REJECTED. Null when they have never applied.
+     */
+    private String b2bApplicationStatus;
+
+    /**
+     * True when this account was created through the B2B business sign-up and the
+     * application has not been approved yet. Such accounts can sign in and browse,
+     * but the storefront blocks every action behind an "awaiting approval" notice
+     * until an admin approves. An existing customer who applies to upgrade is NOT
+     * affected — they keep the access they already had.
+     */
+    private boolean b2bPendingApproval;
+
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
 
@@ -94,4 +109,10 @@ public class ProfileResponse {
     public void setPendingDeletion(boolean pendingDeletion) { this.pendingDeletion = pendingDeletion; }
     public Instant getDeletionScheduledAt() { return deletionScheduledAt; }
     public void setDeletionScheduledAt(Instant deletionScheduledAt) { this.deletionScheduledAt = deletionScheduledAt; }
+
+    public String getB2bApplicationStatus() { return b2bApplicationStatus; }
+    public void setB2bApplicationStatus(String b2bApplicationStatus) { this.b2bApplicationStatus = b2bApplicationStatus; }
+
+    public boolean isB2bPendingApproval() { return b2bPendingApproval; }
+    public void setB2bPendingApproval(boolean b2bPendingApproval) { this.b2bPendingApproval = b2bPendingApproval; }
 }

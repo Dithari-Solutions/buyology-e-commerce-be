@@ -129,10 +129,39 @@ public class B2bMembershipService {
             throw new IllegalStateException("A B2B membership application already exists for this email");
         }
 
+        // The account is created up front so the applicant can sign in immediately —
+        // approval is no longer a prerequisite for logging in. Until an admin approves,
+        // the account is gated to the profile page (see ProfileResponse.b2bPendingApproval)
+        // so they can track status, but cannot transact.
+        String passwordHash = PasswordUtils.hashPassword(req.getPassword());
+        Users user = new Users();
+        String[] nameParts = req.getContactFullName() == null
+                ? new String[]{"B2B", "Member"}
+                : req.getContactFullName().trim().split("\\s+", 2);
+        user.setFirstName(nameParts[0]);
+        user.setLastName(nameParts.length > 1 ? nameParts[1] : "");
+        user.setUserType(Users.UserType.CUSTOMER);
+        user.setIsGuest(false);
+        user.setStatus("ACTIVE");
+        userRepository.save(user);
+
+        AuthCredentials credentials = new AuthCredentials();
+        credentials.setUserId(user.getId());
+        credentials.setEmail(email);
+        credentials.setProvider("LOCAL");
+        credentials.setIsActive(true);
+        credentials.setPasswordHash(passwordHash);
+        // Both contact channels were OTP-verified above before we got here.
+        credentials.setPhoneNumber(mobile);
+        credentials.setPhoneVerified(true);
+        authCredentialRepository.save(credentials);
+
         B2bMembershipApplication app = new B2bMembershipApplication();
-        // No login: the account is created only after admin approval.
-        app.setUserId(null);
-        app.setPasswordHash(PasswordUtils.hashPassword(req.getPassword()));
+        app.setUserId(user.getId());
+        // Retaining the hash also marks this application as the one that CREATED the
+        // account (the upgrade paths never capture a password) — that is what
+        // distinguishes a gated B2B sign-up from an existing customer upgrading.
+        app.setPasswordHash(passwordHash);
         app.setCompanyName(req.getCompanyName());
         app.setTradeLicenseNumber(req.getTradeLicenseNumber());
         app.setIndustryType(req.getIndustryType());
@@ -309,11 +338,18 @@ public class B2bMembershipService {
                     "A B2B application already exists for this user (status: " + app.getStatus() + ").");
         }
 
-        // The trade-license document is mandatory (same validation as the public flow).
-        if (tradeLicense == null || tradeLicense.isEmpty()) {
+        // A trade-license document is mandatory, but on a re-submission the applicant may
+        // keep the one already on file rather than re-uploading it.
+        boolean newLicenseProvided = tradeLicense != null && !tradeLicense.isEmpty();
+        boolean hasLicenseOnFile = app != null
+                && app.getTradeLicenseFileUrl() != null
+                && !app.getTradeLicenseFileUrl().isBlank();
+        if (!newLicenseProvided && !hasLicenseOnFile) {
             throw new IllegalArgumentException("A trade license document is required");
         }
-        FileValidationUtils.validateDocument(tradeLicense);
+        if (newLicenseProvided) {
+            FileValidationUtils.validateDocument(tradeLicense);
+        }
 
         // Canonical contact email: prefer the value supplied (pre-filled from the user's
         // profile), falling back to any email on the user's credentials.
@@ -380,11 +416,14 @@ public class B2bMembershipService {
         app = appRepo.save(app);
 
         // Store the trade-license document on Contabo S3 under a per-application key
-        // (identical layout to the public apply flow).
-        String key = "documents/b2b-licenses/" + app.getId() + "/"
-                + FileValidationUtils.sanitizeFilename(tradeLicense.getOriginalFilename());
-        app.setTradeLicenseFileUrl(contaboObjectService.uploadFile(key, tradeLicense));
-        app = appRepo.save(app);
+        // (identical layout to the public apply flow). Skipped when the applicant is
+        // re-submitting and kept the document already on file.
+        if (newLicenseProvided) {
+            String key = "documents/b2b-licenses/" + app.getId() + "/"
+                    + FileValidationUtils.sanitizeFilename(tradeLicense.getOriginalFilename());
+            app.setTradeLicenseFileUrl(contaboObjectService.uploadFile(key, tradeLicense));
+            app = appRepo.save(app);
+        }
 
         // Internal notification to ops (best-effort).
         try {
@@ -649,7 +688,10 @@ public class B2bMembershipService {
                     app.getContactEmail(),
                     app.getContactFullName(),
                     app.getCompanyName(),
-                    app.getRejectionReason());
+                    app.getRejectionReason(),
+                    // Deep-link to Profile → B2B Membership, where the submitted details,
+                    // the reason and the "Edit & re-submit" action all live.
+                    webBaseUrl + "/profile");
         } catch (Exception e) {
             log.warn("Rejection email failed: {}", e.getMessage());
         }

@@ -5,6 +5,8 @@ import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.utils.FileValidationUtils;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
+import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
+import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
@@ -34,6 +36,7 @@ public class UserProfileService {
     private final CountryRepository countryRepo;
     private final ContaboObjectService contaboObjectService;
     private final TwilioVerifyService twilioVerifyService;
+    private final B2bMembershipApplicationRepository b2bApplicationRepo;
 
     public UserProfileService(UserRepository userRepo,
                                UserProfilesRepository profilesRepo,
@@ -41,7 +44,8 @@ public class UserProfileService {
                                AuthCredentialRepository authCredentialRepo,
                                CountryRepository countryRepo,
                                ContaboObjectService contaboObjectService,
-                               TwilioVerifyService twilioVerifyService) {
+                               TwilioVerifyService twilioVerifyService,
+                               B2bMembershipApplicationRepository b2bApplicationRepo) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
         this.addressRepo = addressRepo;
@@ -49,6 +53,7 @@ public class UserProfileService {
         this.countryRepo = countryRepo;
         this.contaboObjectService = contaboObjectService;
         this.twilioVerifyService = twilioVerifyService;
+        this.b2bApplicationRepo = b2bApplicationRepo;
     }
 
     // =========================================================================
@@ -310,6 +315,17 @@ public class UserProfileService {
             res.setPendingDeletion(true);
             res.setDeletionScheduledAt(user.getDeletedAt().plus(30, java.time.temporal.ChronoUnit.DAYS));
         }
+        b2bApplicationRepo.findByUserId(user.getId()).ifPresent(app -> {
+            res.setB2bApplicationStatus(app.getStatus().name());
+            // An application carries a password hash only when it CREATED the account
+            // (the public B2B sign-up); the upgrade paths never capture one. So a hash
+            // present + not yet approved means a B2B sign-up still awaiting approval,
+            // which the storefront gates. An existing customer upgrading is untouched.
+            boolean accountCreatedByApplication =
+                    app.getPasswordHash() != null && !app.getPasswordHash().isBlank();
+            res.setB2bPendingApproval(accountCreatedByApplication
+                    && app.getStatus() != B2bMembershipApplication.ApplicationStatus.APPROVED);
+        });
         return res;
     }
 
