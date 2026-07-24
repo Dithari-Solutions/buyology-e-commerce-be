@@ -37,6 +37,7 @@ import com.buyology.ecommerce.order.domain.OrderTrackingEvent;
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.order.dto.*;
+import com.buyology.ecommerce.order.event.OrderPaidEvent;
 import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
 import com.buyology.ecommerce.order.event.PaymentFailedEvent;
 import com.buyology.ecommerce.order.exception.OrderNotFoundException;
@@ -116,6 +117,8 @@ public class OrderService {
     private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository;
     // Lazy provider avoids a construction-time cycle (PaymentService publishes the events this service listens to).
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider;
+    /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -145,7 +148,8 @@ public class OrderService {
                         com.buyology.ecommerce.courier.profile.repository.CourierProfileRepository courierProfileRepository,
                         com.buyology.ecommerce.common.service.EmailService emailService,
                         com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository,
-                        org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider) {
+                        org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider,
+                        org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -175,6 +179,7 @@ public class OrderService {
         this.emailService = emailService;
         this.authCredentialRepository = authCredentialRepository;
         this.paymentServiceProvider = paymentServiceProvider;
+        this.eventPublisher = eventPublisher;
     }
 
     // =========================================================================
@@ -606,6 +611,11 @@ public class OrderService {
                     // Email the customer their order confirmation (climate/SDG content).
                     sendOrderConfirmationEmailFor(order);
 
+                    // Hand off to downstream integrations (ERPNext sales order + invoice).
+                    // Listeners run after this transaction commits, so a slow or failing
+                    // integration can never affect the order or the payment.
+                    eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
+
                     // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
                         clearCartItemsSafely(order.getCartId());
@@ -728,6 +738,8 @@ public class OrderService {
                     notifyNewOrder(order);
                     // Email the customer their order confirmation (climate/SDG content).
                     sendOrderConfirmationEmailFor(order);
+                    // Hand off to downstream integrations (ERPNext sales order + invoice).
+                    eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
                 }
             }
 

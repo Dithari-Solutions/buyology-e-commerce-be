@@ -226,6 +226,27 @@ public class Order {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    // ── ERPNext sync ──────────────────────────────────────────────────────────
+    // Populated by ErpOrderSyncService once the order is PAID. Purely a mirror of
+    // what lives in ERPNext — the order flow never depends on these being set, and
+    // a failed sync only records the error here (the order itself stays PAID).
+
+    /** Name (primary key) of the ERPNext Sales Order created for this order. */
+    @Column(name = "erp_sales_order", length = 140)
+    private String erpSalesOrder;
+
+    /** Name (primary key) of the ERPNext Sales Invoice created for this order. */
+    @Column(name = "erp_sales_invoice", length = 140)
+    private String erpSalesInvoice;
+
+    /** When the ERPNext push last succeeded. */
+    @Column(name = "erp_synced_at")
+    private Instant erpSyncedAt;
+
+    /** Last ERPNext sync failure message; null once a sync succeeds. */
+    @Column(name = "erp_sync_error", length = 1000)
+    private String erpSyncError;
+
     // ── Relations ─────────────────────────────────────────────────────────────
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -408,4 +429,16 @@ public class Order {
 
     public List<OrderTrackingEvent> getTrackingHistory() { return trackingHistory; }
     public void setTrackingHistory(List<OrderTrackingEvent> trackingHistory) { this.trackingHistory = trackingHistory; }
+
+    public String getErpSalesOrder() { return erpSalesOrder; }
+    public void setErpSalesOrder(String erpSalesOrder) { this.erpSalesOrder = erpSalesOrder; }
+
+    public String getErpSalesInvoice() { return erpSalesInvoice; }
+    public void setErpSalesInvoice(String erpSalesInvoice) { this.erpSalesInvoice = erpSalesInvoice; }
+
+    public Instant getErpSyncedAt() { return erpSyncedAt; }
+    public void setErpSyncedAt(Instant erpSyncedAt) { this.erpSyncedAt = erpSyncedAt; }
+
+    public String getErpSyncError() { return erpSyncError; }
+    public void setErpSyncError(String erpSyncError) { this.erpSyncError = erpSyncError; }
 }

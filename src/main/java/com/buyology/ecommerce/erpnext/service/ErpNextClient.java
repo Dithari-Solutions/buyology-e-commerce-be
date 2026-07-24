@@ -96,6 +96,142 @@ public class ErpNextClient {
         return true;
     }
 
+    // ── generic document API (used by the order → ERPNext push) ────────────────
+
+    /**
+     * Create a document: {@code POST /api/resource/{doctype}}.
+     *
+     * <p>Set {@code docstatus: 1} inside {@code body} to create it already submitted
+     * (ERPNext posts GL entries only for submitted documents).
+     *
+     * @return the {@code data} node of the response (the created document)
+     */
+    public JsonNode createDocument(String doctype, JsonNode body) {
+        requireConfigured();
+        URI uri = resourceUri(doctype, null);
+        log.info("[ERPNEXT] POST {}", uri);
+        JsonNode response = exchange("POST", uri, body);
+        return response.path("data");
+    }
+
+    /**
+     * Find the {@code name} (primary key) of the first document matching {@code filters},
+     * or null when nothing matches. {@code filters} uses Frappe's list syntax, e.g.
+     * {@code [["item_code","=","ABC"]]}.
+     */
+    public String findDocumentName(String doctype, String filtersJson) {
+        requireConfigured();
+        URI uri = UriComponentsBuilder
+                .fromUriString(props.getBaseUrl())
+                .path("/api/resource/" + doctype)
+                .queryParam("filters", filtersJson)
+                .queryParam("fields", "[\"name\"]")
+                .queryParam("limit_page_length", 1)
+                .build()
+                .encode()
+                .toUri();
+        log.info("[ERPNEXT] GET {}", uri);
+        JsonNode data = exchange("GET", uri, null).path("data");
+        if (data.isArray() && !data.isEmpty()) {
+            JsonNode name = data.get(0).get("name");
+            return name == null || name.isNull() ? null : name.asText();
+        }
+        return null;
+    }
+
+    /** True when a document with this exact name exists. */
+    public boolean documentExists(String doctype, String name) {
+        return findDocumentName(doctype, "[[\"name\",\"=\"," + quote(name) + "]]") != null;
+    }
+
+    /** Absolute URL of a document in the ERPNext desk UI, for admin deep-links. */
+    public String deskUrl(String doctype, String name) {
+        if (name == null || props.getBaseUrl() == null) return null;
+        String slug = doctype.toLowerCase().replace(' ', '-');
+        return props.getBaseUrl().replaceAll("/$", "") + "/app/" + slug + "/" + name;
+    }
+
+    // ── transport ─────────────────────────────────────────────────────────────
+
+    private URI resourceUri(String doctype, String name) {
+        UriComponentsBuilder b = UriComponentsBuilder
+                .fromUriString(props.getBaseUrl())
+                .path("/api/resource/" + doctype);
+        if (name != null) b.path("/" + name);
+        return b.build().encode().toUri();
+    }
+
+    /**
+     * Perform a request and return the parsed JSON body, raising {@link ErpNextException}
+     * with the ERPNext error text on any non-2xx response.
+     */
+    private JsonNode exchange(String method, URI uri, JsonNode body) {
+        try {
+            WebClient.RequestBodySpec spec = webClient
+                    .method(org.springframework.http.HttpMethod.valueOf(method))
+                    .uri(uri)
+                    .header("Authorization", tokenHeader())
+                    .accept(MediaType.APPLICATION_JSON);
+
+            WebClient.RequestHeadersSpec<?> finalSpec = body == null
+                    ? spec
+                    : spec.contentType(MediaType.APPLICATION_JSON).bodyValue(body);
+
+            String raw = finalSpec
+                    .exchangeToMono(resp -> resp.bodyToMono(String.class).defaultIfEmpty("")
+                            .map(payload -> {
+                                if (!resp.statusCode().is2xxSuccessful()) {
+                                    throw new ErpNextException("ERPNext returned HTTP "
+                                            + resp.statusCode().value() + ": " + errorText(payload));
+                                }
+                                return payload;
+                            }))
+                    .timeout(Duration.ofMillis(props.getTimeoutMs()))
+                    .block();
+
+            if (raw == null || raw.isBlank()) return objectMapper.createObjectNode();
+            return objectMapper.readTree(raw);
+        } catch (ErpNextException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ErpNextException("ERPNext call failed (" + uri + "): " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Pull the useful message out of a Frappe error body. Frappe returns a JSON envelope
+     * with {@code exception} / {@code _server_messages} and a full HTML traceback, which is
+     * useless in a UI — prefer the concise fields when present.
+     */
+    private String errorText(String payload) {
+        if (payload == null || payload.isBlank()) return "(empty response)";
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            for (String field : new String[]{"exception", "message", "_error_message"}) {
+                JsonNode n = root.get(field);
+                if (n != null && !n.isNull() && !n.asText().isBlank()) return snippet(n.asText());
+            }
+            JsonNode serverMessages = root.get("_server_messages");
+            if (serverMessages != null && !serverMessages.isNull()) {
+                // _server_messages is a JSON-encoded array of JSON-encoded objects.
+                JsonNode arr = objectMapper.readTree(serverMessages.asText());
+                if (arr.isArray() && !arr.isEmpty()) {
+                    JsonNode first = objectMapper.readTree(arr.get(0).asText());
+                    JsonNode msg = first.get("message");
+                    if (msg != null && !msg.isNull()) return snippet(msg.asText());
+                }
+            }
+        } catch (Exception ignored) {
+            // Not JSON (often an HTML error page) — fall through to the raw snippet.
+        }
+        return snippet(payload);
+    }
+
+    /** JSON-quote a value for inline use in a Frappe filters string. */
+    public static String quote(String value) {
+        return "\"" + (value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"")) + "\"";
+    }
+
     // ── mapping ───────────────────────────────────────────────────────────────
 
     private List<ErpProduct> parseItems(String raw) {

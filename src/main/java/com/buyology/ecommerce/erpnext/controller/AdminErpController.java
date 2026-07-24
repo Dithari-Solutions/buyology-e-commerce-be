@@ -2,9 +2,15 @@ package com.buyology.ecommerce.erpnext.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.erpnext.config.ErpNextProperties;
+import com.buyology.ecommerce.erpnext.dto.ErpOrderSyncView;
 import com.buyology.ecommerce.erpnext.dto.ErpProduct;
 import com.buyology.ecommerce.erpnext.service.ErpNextClient;
 import com.buyology.ecommerce.erpnext.service.ErpNextClient.ErpNextException;
+import com.buyology.ecommerce.erpnext.service.ErpOrderSyncService;
+import com.buyology.ecommerce.order.domain.Order;
+import com.buyology.ecommerce.order.repository.OrderRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -13,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Admin endpoints for the ERPNext integration (testing stage). SUPERADMIN only.
@@ -32,10 +39,15 @@ public class AdminErpController {
 
     private final ErpNextProperties props;
     private final ErpNextClient client;
+    private final ErpOrderSyncService orderSyncService;
+    private final OrderRepository orderRepo;
 
-    public AdminErpController(ErpNextProperties props, ErpNextClient client) {
+    public AdminErpController(ErpNextProperties props, ErpNextClient client,
+                              ErpOrderSyncService orderSyncService, OrderRepository orderRepo) {
         this.props = props;
         this.client = client;
+        this.orderSyncService = orderSyncService;
+        this.orderRepo = orderRepo;
     }
 
     /** Meta — works even when disabled so the UI can render and prompt to enable. */
@@ -46,6 +58,12 @@ public class AdminErpController {
         cfg.put("baseUrl", props.getBaseUrl());
         cfg.put("hasApiKey", props.getApiKey() != null && !props.getApiKey().isBlank());
         cfg.put("hasApiSecret", props.getApiSecret() != null && !props.getApiSecret().isBlank());
+        cfg.put("syncOrders", props.isSyncOrders());
+        cfg.put("submitDocuments", props.isSubmitDocuments());
+        cfg.put("company", props.getCompany());
+        cfg.put("autoCreateCustomer", props.isAutoCreateCustomer());
+        cfg.put("autoCreateItems", props.isAutoCreateItems());
+        cfg.put("shippingAccountHead", props.getShippingAccountHead());
         return ApiResponse.success(cfg, "ERPNext config");
     }
 
@@ -65,5 +83,59 @@ public class AdminErpController {
         } catch (ErpNextException e) {
             return ApiResponse.failure(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
+    }
+
+    // ── order → ERPNext sync ─────────────────────────────────────────────────
+
+    /**
+     * Recent orders with their ERPNext sync state, so an admin can confirm the Sales Order
+     * and Sales Invoice were created (and see why not, when a push failed).
+     */
+    @GetMapping("/orders")
+    public ResponseEntity<ApiResponse<List<ErpOrderSyncView>>> orders(
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        int clamped = Math.max(1, Math.min(limit, MAX_LIMIT));
+        List<ErpOrderSyncView> views = orderRepo
+                .findAll(PageRequest.of(0, clamped, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .map(this::toView)
+                .getContent();
+        return ApiResponse.success(views, "Recent orders with ERPNext sync state");
+    }
+
+    /**
+     * Push one order to ERPNext now. Idempotent — an order that already has a Sales Invoice
+     * is reported as already synced rather than duplicated.
+     */
+    @PostMapping("/orders/{id}/sync")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> syncOrder(@PathVariable("id") UUID id) {
+        if (!props.isEnabled()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "ERPNext module is disabled. Set ERPNEXT_ENABLED=true (and base URL, key, secret) to test.");
+        }
+        if (!props.isSyncOrders()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "Order sync is disabled. Set ERPNEXT_SYNC_ORDERS=true to push orders to ERPNext.");
+        }
+        String outcome = orderSyncService.syncOrder(id);
+        Order order = orderRepo.findById(id).orElse(null);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("outcome", outcome);
+        result.put("order", order == null ? null : toView(order));
+        return ApiResponse.success(result, outcome);
+    }
+
+    private ErpOrderSyncView toView(Order o) {
+        return new ErpOrderSyncView(
+                o.getId().toString(),
+                o.getStatus() == null ? null : o.getStatus().name(),
+                o.getTotalAmount(),
+                o.getCurrency(),
+                o.getPaidAt() == null ? null : o.getPaidAt().toString(),
+                o.getErpSalesOrder(),
+                o.getErpSalesInvoice(),
+                o.getErpSyncedAt() == null ? null : o.getErpSyncedAt().toString(),
+                o.getErpSyncError(),
+                client.deskUrl("Sales Order", o.getErpSalesOrder()),
+                client.deskUrl("Sales Invoice", o.getErpSalesInvoice()));
     }
 }
