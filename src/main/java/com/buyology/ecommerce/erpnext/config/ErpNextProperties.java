@@ -85,6 +85,14 @@ public class ErpNextProperties {
      */
     private String shippingAccountHead;
 
+    /**
+     * Warehouse stamped on each Sales Order / Sales Invoice line. ERPNext requires a warehouse
+     * for stock items (every ERP Item here is a stock item), so this must be set for the order
+     * push to work. Must be a <b>leaf</b> warehouse (not a group like "All Warehouses - X")
+     * belonging to {@link #company}, e.g. {@code "FG Warehouse - DTL"}.
+     */
+    private String defaultWarehouse;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getBaseUrl() { return baseUrl; }
@@ -116,4 +124,6 @@ public class ErpNextProperties {
     public void setTerritory(String territory) { this.territory = territory; }
     public String getShippingAccountHead() { return shippingAccountHead; }
     public void setShippingAccountHead(String shippingAccountHead) { this.shippingAccountHead = shippingAccountHead; }
+    public String getDefaultWarehouse() { return defaultWarehouse; }
+    public void setDefaultWarehouse(String defaultWarehouse) { this.defaultWarehouse = defaultWarehouse; }
 }

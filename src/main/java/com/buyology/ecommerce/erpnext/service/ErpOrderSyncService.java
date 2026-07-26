@@ -354,6 +354,14 @@ public class ErpOrderSyncService {
             body.put("currency", snap.currency);
         }
 
+        // ERPNext requires a warehouse for stock items. Set it at document level (propagates to
+        // rows) and on each row, so the Sales Order's WarehouseRequired validation passes.
+        String warehouse = props.getDefaultWarehouse();
+        boolean hasWarehouse = warehouse != null && !warehouse.isBlank();
+        if (hasWarehouse) {
+            body.put("set_warehouse", warehouse);
+        }
+
         ArrayNode items = body.putArray("items");
         for (Line line : snap.lines) {
             ObjectNode row = items.addObject();
@@ -361,6 +369,7 @@ public class ErpOrderSyncService {
             row.put("item_name", trim(line.itemName, 140));
             row.put("qty", line.qty);
             row.put("rate", line.rate);
+            if (hasWarehouse) row.put("warehouse", warehouse);
             if (deliveryDate != null) row.put("delivery_date", deliveryDate);
         }
 
