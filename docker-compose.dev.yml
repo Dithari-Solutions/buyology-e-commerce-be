@@ -183,6 +183,26 @@ services:
       CONTABO_S3_BUCKET_NAME: ${CONTABO_S3_BUCKET_NAME}
       CONTABO_S3_PUBLIC_URL: ${CONTABO_S3_PUBLIC_URL}
 
+      # ── ERPNext (Frappe) integration — SHIPS INERT. Leave ERPNEXT_ENABLED blank/false
+      #    and the whole module (product listing, order push, catalog import) is off.
+      #    To test: set ERPNEXT_ENABLED=true + ERPNEXT_BASE_URL/API_KEY/API_SECRET in
+      #    .env.dev. Frappe token auth (Authorization: token <key>:<secret>). ──
+      ERPNEXT_ENABLED: ${ERPNEXT_ENABLED:-false}
+      ERPNEXT_BASE_URL: ${ERPNEXT_BASE_URL:-}
+      ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-}
+      ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-}
+      # Order push (PAID order → ERPNext Sales Order + Sales Invoice)
+      ERPNEXT_SYNC_ORDERS: ${ERPNEXT_SYNC_ORDERS:-true}
+      ERPNEXT_SUBMIT_DOCUMENTS: ${ERPNEXT_SUBMIT_DOCUMENTS:-true}
+      ERPNEXT_COMPANY: ${ERPNEXT_COMPANY:-}
+      ERPNEXT_AUTO_CREATE_CUSTOMER: ${ERPNEXT_AUTO_CREATE_CUSTOMER:-true}
+      ERPNEXT_AUTO_CREATE_ITEMS: ${ERPNEXT_AUTO_CREATE_ITEMS:-true}
+      ERPNEXT_DEFAULT_ITEM_GROUP: ${ERPNEXT_DEFAULT_ITEM_GROUP:-Products}
+      ERPNEXT_DEFAULT_UOM: ${ERPNEXT_DEFAULT_UOM:-Nos}
+      ERPNEXT_CUSTOMER_GROUP: ${ERPNEXT_CUSTOMER_GROUP:-All Customer Groups}
+      ERPNEXT_TERRITORY: ${ERPNEXT_TERRITORY:-All Territories}
+      ERPNEXT_SHIPPING_ACCOUNT_HEAD: ${ERPNEXT_SHIPPING_ACCOUNT_HEAD:-}
+
       # ── Courier service proxy (optional on dev) ──
       COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY:-}
 
