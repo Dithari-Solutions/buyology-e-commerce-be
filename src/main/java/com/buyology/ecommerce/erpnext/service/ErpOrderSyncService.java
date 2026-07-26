@@ -2,6 +2,7 @@ package com.buyology.ecommerce.erpnext.service;
 
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.erpnext.config.ErpNextProperties;
+import com.buyology.ecommerce.erpnext.dto.ErpProduct;
 import com.buyology.ecommerce.erpnext.service.ErpNextClient.ErpNextException;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
@@ -113,17 +114,9 @@ public class ErpOrderSyncService {
                 return "Already synced (invoice " + snap.erpSalesInvoice + ")";
             }
 
-            String customer = ensureCustomer(snap);
-            for (Line line : snap.lines) {
-                ensureItem(line);
-            }
-
-            // Reuse an existing Sales Order if a previous attempt got that far but then failed.
-            String salesOrder = snap.erpSalesOrder != null && !snap.erpSalesOrder.isBlank()
-                    ? snap.erpSalesOrder
-                    : createSalesOrder(snap, customer);
-
-            String salesInvoice = createSalesInvoice(snap, customer, salesOrder);
+            String[] docs = createErpDocuments(snap);
+            String salesOrder = docs[0];
+            String salesInvoice = docs[1];
 
             txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
                 o.setErpSalesOrder(salesOrder);
@@ -148,7 +141,107 @@ public class ErpOrderSyncService {
         }
     }
 
+    /**
+     * Result of the mock-order test push. Mirrors what a real PAID order produces in ERPNext,
+     * but is not persisted against any Buyology order.
+     */
+    public record MockResult(boolean ok, String salesOrder, String salesInvoice,
+                             String salesOrderUrl, String salesInvoiceUrl,
+                             String customer, List<String> itemCodes, String currency, String message) {}
+
+    /**
+     * Push a synthetic "mock" order to ERPNext through the <b>exact same code path</b> a real
+     * PAID order uses (resolve/create Customer, resolve Items, create Sales Order + Sales
+     * Invoice, honouring the submit/company/currency config). Nothing is written to the orders
+     * table — this only proves the ERPNext write path end-to-end.
+     *
+     * <p>Line items reference <b>real</b> ERP item codes: the ones passed in, or (when none are
+     * given) the most-recently-modified Item. Rate falls back to a token 100 when the item has
+     * no standard_rate, so the test document has a non-zero total.
+     */
+    public MockResult createMockOrder(List<String> requestedItemCodes, String currencyArg) {
+        if (!props.isEnabled()) {
+            return new MockResult(false, null, null, null, null, null, null, null,
+                    "ERPNext module is disabled. Set ERPNEXT_ENABLED=true (and base URL, key, secret) first.");
+        }
+        try {
+            String currency = (currencyArg != null && !currencyArg.isBlank()) ? currencyArg.trim() : "AED";
+
+            List<ErpProduct> items;
+            if (requestedItemCodes != null && !requestedItemCodes.isEmpty()) {
+                items = client.getItemsByCode(requestedItemCodes);
+                if (items.isEmpty()) {
+                    return new MockResult(false, null, null, null, null, null, null, currency,
+                            "None of the given item codes exist in ERPNext");
+                }
+            } else {
+                items = client.listProducts(1);
+                if (items.isEmpty()) {
+                    return new MockResult(false, null, null, null, null, null, null, currency,
+                            "ERPNext has no Items to build a mock order from");
+                }
+            }
+
+            Snapshot snap = new Snapshot();
+            snap.orderId = UUID.randomUUID();
+            snap.currency = currency;
+            snap.discount = BigDecimal.ZERO;
+            snap.shippingFee = BigDecimal.ZERO;
+            snap.paidAt = Instant.now();
+            snap.email = "erp-test@buyology.online";
+            snap.customerName = "Buyology ERP Test";
+
+            List<String> codes = new ArrayList<>();
+            for (ErpProduct it : items) {
+                String code = it.itemCode() != null && !it.itemCode().isBlank() ? it.itemCode() : it.name();
+                if (code == null || code.isBlank()) continue;
+                Line line = new Line();
+                line.itemCode = code;
+                line.itemName = it.itemName() != null && !it.itemName().isBlank() ? it.itemName() : code;
+                line.qty = 1;
+                line.rate = (it.standardRate() != null && it.standardRate() > 0)
+                        ? BigDecimal.valueOf(it.standardRate())
+                        : new BigDecimal("100.00");
+                snap.lines.add(line);
+                codes.add(code);
+            }
+            if (snap.lines.isEmpty()) {
+                return new MockResult(false, null, null, null, null, null, null, currency,
+                        "No usable items for the mock order");
+            }
+
+            String[] docs = createErpDocuments(snap);
+            log.info("[ERPNEXT] mock order pushed — Sales Order {} / Sales Invoice {}", docs[0], docs[1]);
+            return new MockResult(true, docs[0], docs[1],
+                    client.deskUrl("Sales Order", docs[0]), client.deskUrl("Sales Invoice", docs[1]),
+                    snap.customerName, codes, currency, "Mock order pushed to ERPNext");
+
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? e.toString() : e.getMessage();
+            log.error("[ERPNEXT] mock order failed: {}", message);
+            return new MockResult(false, null, null, null, null, null, null, currencyArg, message);
+        }
+    }
+
     // ── ERPNext document builders ─────────────────────────────────────────────
+
+    /**
+     * Create the ERPNext Sales Order + Sales Invoice for a snapshot and return their names as
+     * {@code [salesOrder, salesInvoice]}. Shared by the real order sync and the mock test push.
+     */
+    private String[] createErpDocuments(Snapshot snap) {
+        String customer = ensureCustomer(snap);
+        for (Line line : snap.lines) {
+            ensureItem(line);
+        }
+        // Reuse an existing Sales Order if a previous attempt got that far but then failed.
+        String salesOrder = snap.erpSalesOrder != null && !snap.erpSalesOrder.isBlank()
+                ? snap.erpSalesOrder
+                : createSalesOrder(snap, customer);
+        String salesInvoice = createSalesInvoice(snap, customer, salesOrder);
+        return new String[]{salesOrder, salesInvoice};
+    }
+
 
     /**
      * Resolve (or create) the ERPNext Customer for this buyer. Looked up by email first —

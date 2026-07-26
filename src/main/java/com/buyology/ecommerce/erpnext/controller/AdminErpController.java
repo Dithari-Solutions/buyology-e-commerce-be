@@ -59,6 +59,8 @@ public class AdminErpController {
 
     public record ImportRequest(List<String> itemCodes) {}
 
+    public record MockOrderRequest(List<String> itemCodes, String currency) {}
+
     /** Meta — works even when disabled so the UI can render and prompt to enable. */
     @GetMapping("/config")
     public ResponseEntity<ApiResponse<Map<String, Object>>> config() {
@@ -139,6 +141,27 @@ public class AdminErpController {
     }
 
     // ── order → ERPNext sync ─────────────────────────────────────────────────
+
+    /**
+     * Push a synthetic mock order to ERPNext through the same code path a real PAID order uses
+     * (Customer → Sales Order → Sales Invoice). Nothing is written to the orders table — this is
+     * purely a connectivity/field-mapping test of the live ERPNext write path.
+     */
+    @PostMapping("/orders/mock")
+    public ResponseEntity<ApiResponse<ErpOrderSyncService.MockResult>> mockOrder(
+            @RequestBody(required = false) MockOrderRequest req) {
+        if (!props.isEnabled()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "ERPNext module is disabled. Set ERPNEXT_ENABLED=true (and base URL, key, secret) to test.");
+        }
+        List<String> codes = req == null ? null : req.itemCodes();
+        String currency = req == null ? null : req.currency();
+        ErpOrderSyncService.MockResult result = orderSyncService.createMockOrder(codes, currency);
+        if (!result.ok()) {
+            return ApiResponse.failure(HttpStatus.BAD_GATEWAY, result.message());
+        }
+        return ApiResponse.success(result, "Mock order pushed to ERPNext");
+    }
 
     /**
      * Recent orders with their ERPNext sync state, so an admin can confirm the Sales Order
