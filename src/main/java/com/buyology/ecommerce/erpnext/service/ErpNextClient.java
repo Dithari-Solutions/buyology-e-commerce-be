@@ -52,42 +52,104 @@ public class ErpNextClient {
      * failure so the controller can relay a meaningful message to the admin UI.
      */
     public List<ErpProduct> listProducts(int limit) {
+        return listProducts(limit, 0);
+    }
+
+    /**
+     * Paginated variant: fetch {@code limit} products starting at {@code offset}
+     * (Frappe {@code limit_start}). Used by the catalog import to page through the
+     * whole Item list.
+     */
+    public List<ErpProduct> listProducts(int limit, int offset) {
         requireConfigured();
-        String fieldsJson = writeFields();
         URI uri = UriComponentsBuilder
                 .fromUriString(props.getBaseUrl())
                 .path("/api/resource/Item")
-                .queryParam("fields", fieldsJson)
+                .queryParam("fields", writeFields())
                 .queryParam("limit_page_length", limit)
+                .queryParam("limit_start", Math.max(0, offset))
                 .queryParam("order_by", "modified desc")
                 .build()
                 .encode()
                 .toUri();
 
         log.info("[ERPNEXT] GET {}", uri);
-        try {
-            String raw = webClient.get()
-                    .uri(uri)
-                    .header("Authorization", tokenHeader())
-                    .accept(MediaType.APPLICATION_JSON)
-                    .exchangeToMono(resp -> resp.bodyToMono(String.class).defaultIfEmpty("")
-                            .map(body -> {
-                                if (!resp.statusCode().is2xxSuccessful()) {
-                                    throw new ErpNextException(
-                                            "ERPNext returned HTTP " + resp.statusCode().value() + ": " + snippet(body));
-                                }
-                                return body;
-                            }))
-                    .timeout(Duration.ofMillis(props.getTimeoutMs()))
-                    .block();
+        JsonNode root = exchange("GET", uri, null);
+        return parseItems(root);
+    }
 
-            return parseItems(raw);
-        } catch (ErpNextException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("[ERPNEXT] product list failed — {}", e.getMessage());
-            throw new ErpNextException("ERPNext call failed (" + props.getBaseUrl() + "): " + e.getMessage(), e);
+    /**
+     * Fetch the full projection for a specific set of {@code item_code}s (one request).
+     * Used by the import to resolve the items the admin selected in the preview.
+     */
+    public List<ErpProduct> getItemsByCode(java.util.Collection<String> itemCodes) {
+        requireConfigured();
+        if (itemCodes == null || itemCodes.isEmpty()) return new ArrayList<>();
+
+        StringBuilder inList = new StringBuilder("[");
+        boolean first = true;
+        for (String code : itemCodes) {
+            if (!first) inList.append(",");
+            inList.append(quote(code));
+            first = false;
         }
+        inList.append("]");
+
+        URI uri = UriComponentsBuilder
+                .fromUriString(props.getBaseUrl())
+                .path("/api/resource/Item")
+                .queryParam("filters", "[[\"item_code\",\"in\"," + inList + "]]")
+                .queryParam("fields", writeFields())
+                .queryParam("limit_page_length", 0)
+                .build()
+                .encode()
+                .toUri();
+
+        log.info("[ERPNEXT] GET {}", uri);
+        return parseItems(exchange("GET", uri, null));
+    }
+
+    /**
+     * On-hand quantity per {@code item_code}, summed across every warehouse
+     * ({@code Bin.actual_qty}). Item codes not present in any Bin are absent from the
+     * map (treat as 0). One request for the whole batch.
+     */
+    public java.util.Map<String, Double> stockByItemCode(java.util.Collection<String> itemCodes) {
+        requireConfigured();
+        java.util.Map<String, Double> out = new java.util.LinkedHashMap<>();
+        if (itemCodes == null || itemCodes.isEmpty()) return out;
+
+        StringBuilder inList = new StringBuilder("[");
+        boolean first = true;
+        for (String code : itemCodes) {
+            if (!first) inList.append(",");
+            inList.append(quote(code));
+            first = false;
+        }
+        inList.append("]");
+        String filters = "[[\"item_code\",\"in\"," + inList + "]]";
+
+        URI uri = UriComponentsBuilder
+                .fromUriString(props.getBaseUrl())
+                .path("/api/resource/Bin")
+                .queryParam("filters", filters)
+                .queryParam("fields", "[\"item_code\",\"actual_qty\"]")
+                .queryParam("limit_page_length", 0) // 0 = no limit (all matching bins)
+                .build()
+                .encode()
+                .toUri();
+
+        log.info("[ERPNEXT] GET {}", uri);
+        JsonNode data = exchange("GET", uri, null).path("data");
+        if (data.isArray()) {
+            for (JsonNode bin : data) {
+                String code = text(bin, "item_code");
+                if (code == null) continue;
+                double qty = bin.hasNonNull("actual_qty") ? bin.get("actual_qty").asDouble() : 0d;
+                out.merge(code, qty, Double::sum);
+            }
+        }
+        return out;
     }
 
     /** Confirm credentials + base URL are usable by fetching a single Item. */
@@ -234,19 +296,14 @@ public class ErpNextClient {
 
     // ── mapping ───────────────────────────────────────────────────────────────
 
-    private List<ErpProduct> parseItems(String raw) {
+    private List<ErpProduct> parseItems(JsonNode root) {
         List<ErpProduct> out = new ArrayList<>();
-        if (raw == null || raw.isBlank()) return out;
-        try {
-            JsonNode root = objectMapper.readTree(raw);
-            JsonNode data = root.path("data");
-            if (data.isArray()) {
-                for (JsonNode item : data) {
-                    out.add(mapItem(item));
-                }
+        if (root == null) return out;
+        JsonNode data = root.path("data");
+        if (data.isArray()) {
+            for (JsonNode item : data) {
+                out.add(mapItem(item));
             }
-        } catch (Exception e) {
-            throw new ErpNextException("Could not parse ERPNext response: " + e.getMessage(), e);
         }
         return out;
     }

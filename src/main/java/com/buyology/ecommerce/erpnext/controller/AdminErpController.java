@@ -2,11 +2,14 @@ package com.buyology.ecommerce.erpnext.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.erpnext.config.ErpNextProperties;
+import com.buyology.ecommerce.erpnext.dto.ErpImportPreviewRow;
+import com.buyology.ecommerce.erpnext.dto.ErpImportResult;
 import com.buyology.ecommerce.erpnext.dto.ErpOrderSyncView;
 import com.buyology.ecommerce.erpnext.dto.ErpProduct;
 import com.buyology.ecommerce.erpnext.service.ErpNextClient;
 import com.buyology.ecommerce.erpnext.service.ErpNextClient.ErpNextException;
 import com.buyology.ecommerce.erpnext.service.ErpOrderSyncService;
+import com.buyology.ecommerce.erpnext.service.ErpProductImportService;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.repository.OrderRepository;
 import org.springframework.data.domain.PageRequest;
@@ -40,15 +43,21 @@ public class AdminErpController {
     private final ErpNextProperties props;
     private final ErpNextClient client;
     private final ErpOrderSyncService orderSyncService;
+    private final ErpProductImportService productImportService;
     private final OrderRepository orderRepo;
 
     public AdminErpController(ErpNextProperties props, ErpNextClient client,
-                              ErpOrderSyncService orderSyncService, OrderRepository orderRepo) {
+                              ErpOrderSyncService orderSyncService,
+                              ErpProductImportService productImportService,
+                              OrderRepository orderRepo) {
         this.props = props;
         this.client = client;
         this.orderSyncService = orderSyncService;
+        this.productImportService = productImportService;
         this.orderRepo = orderRepo;
     }
+
+    public record ImportRequest(List<String> itemCodes) {}
 
     /** Meta — works even when disabled so the UI can render and prompt to enable. */
     @GetMapping("/config")
@@ -80,6 +89,50 @@ public class AdminErpController {
         int clamped = Math.max(1, Math.min(limit, MAX_LIMIT));
         try {
             return ApiResponse.success(client.listProducts(clamped), "Fetched " + clamped + " products from ERPNext");
+        } catch (ErpNextException e) {
+            return ApiResponse.failure(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    // ── ERPNext → catalog import ─────────────────────────────────────────────
+
+    /**
+     * Preview a page of ERP items with warehouse stock and whether each is already imported.
+     * Read-only — nothing is written to the catalog.
+     */
+    @GetMapping("/import/preview")
+    public ResponseEntity<ApiResponse<List<ErpImportPreviewRow>>> importPreview(
+            @RequestParam(name = "limit", defaultValue = "20") int limit,
+            @RequestParam(name = "offset", defaultValue = "0") int offset) {
+        if (!props.isEnabled()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "ERPNext module is disabled. Set ERPNEXT_ENABLED=true (and base URL, key, secret) to test.");
+        }
+        int clamped = Math.max(1, Math.min(limit, MAX_LIMIT));
+        try {
+            return ApiResponse.success(productImportService.preview(clamped, Math.max(0, offset)),
+                    "ERP items to import");
+        } catch (ErpNextException e) {
+            return ApiResponse.failure(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    /**
+     * Import (create-or-update) the selected ERP items into the general products list.
+     * Idempotent by SKU; does not assign products to any store.
+     */
+    @PostMapping("/import")
+    public ResponseEntity<ApiResponse<List<ErpImportResult>>> importProducts(@RequestBody ImportRequest req) {
+        if (!props.isEnabled()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "ERPNext module is disabled. Set ERPNEXT_ENABLED=true (and base URL, key, secret) to test.");
+        }
+        if (req == null || req.itemCodes() == null || req.itemCodes().isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "`itemCodes` is required");
+        }
+        try {
+            return ApiResponse.success(productImportService.importByCodes(req.itemCodes()),
+                    "Imported " + req.itemCodes().size() + " item(s) from ERPNext");
         } catch (ErpNextException e) {
             return ApiResponse.failure(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
