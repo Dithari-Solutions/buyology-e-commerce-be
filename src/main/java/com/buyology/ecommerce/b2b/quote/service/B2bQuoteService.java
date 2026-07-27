@@ -9,7 +9,11 @@ import com.buyology.ecommerce.b2b.quote.dto.*;
 import com.buyology.ecommerce.b2b.quote.repository.B2bQuoteItemRepository;
 import com.buyology.ecommerce.b2b.quote.repository.B2bQuoteRepository;
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.common.utils.FileValidationUtils;
+import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.membership.domain.B2bMembership;
+import com.buyology.ecommerce.membership.domain.B2bMembershipApplication;
+import com.buyology.ecommerce.membership.repository.B2bMembershipApplicationRepository;
 import com.buyology.ecommerce.membership.repository.B2bMembershipRepository;
 import com.buyology.ecommerce.notification.service.PushNotificationService;
 import com.buyology.ecommerce.order.domain.Order;
@@ -38,6 +42,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -80,6 +85,8 @@ public class B2bQuoteService {
     private final EmailService emailService;
     private final PushNotificationService pushNotificationService;
     private final UserRoleRepository userRoleRepository;
+    private final ContaboObjectService contaboObjectService;
+    private final B2bMembershipApplicationRepository membershipApplicationRepo;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String procurementEmail;
@@ -99,7 +106,9 @@ public class B2bQuoteService {
                            PaymentService paymentService,
                            EmailService emailService,
                            PushNotificationService pushNotificationService,
-                           UserRoleRepository userRoleRepository) {
+                           UserRoleRepository userRoleRepository,
+                           ContaboObjectService contaboObjectService,
+                           B2bMembershipApplicationRepository membershipApplicationRepo) {
         this.quoteRepo = quoteRepo;
         this.itemRepo = itemRepo;
         this.membershipRepo = membershipRepo;
@@ -113,6 +122,8 @@ public class B2bQuoteService {
         this.emailService = emailService;
         this.pushNotificationService = pushNotificationService;
         this.userRoleRepository = userRoleRepository;
+        this.contaboObjectService = contaboObjectService;
+        this.membershipApplicationRepo = membershipApplicationRepo;
     }
 
     // =========================================================================
@@ -434,100 +445,21 @@ public class B2bQuoteService {
             throw new IllegalStateException("This quote has expired and can no longer be checked out.");
         }
 
-        List<B2bQuoteItem> lines = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId());
-        if (lines.isEmpty()) {
-            throw new IllegalStateException("This quote has no lines to order");
-        }
-        for (B2bQuoteItem line : lines) {
-            if (line.getQuotedUnitPrice() == null) {
-                throw new IllegalStateException("This quote is not fully priced and cannot be ordered");
-            }
-        }
-
-        boolean isPickup = "PICKUP".equalsIgnoreCase(req.getDeliveryMethod());
-
-        // ── Build the order directly (mirrors OrderService.createOrder) ──────────
-        Order order = new Order();
-        order.setUserId(userId);
-        order.setAuthCredentialId(credentialId);
-        // See javadoc: no Cart exists; use the quote id so the NOT NULL cart_id column is set.
-        order.setCartId(quote.getId());
-        order.setStatus(OrderStatus.PENDING_PAYMENT);
-        order.setCurrency(quote.getCurrency());
-        order.setCountryCode(quote.getCountryCode());
-        order.setCountry(quote.getCountryCode());
-        order.setShippingFee(BigDecimal.ZERO);
-        order.setDiscount(BigDecimal.ZERO);
-
-        String billingName;
-        String billingPhone;
-        if (isPickup) {
-            if (req.getPickupStoreId() == null) {
-                throw new IllegalArgumentException("Please choose a store to pick up from.");
-            }
-            order.setDeliveryMethod(DeliveryMethod.PICKUP);
-            order.setPickupStoreId(req.getPickupStoreId());
-            billingName = "B2B Member";
-            billingPhone = null;
-        } else {
-            if (req.getAddressId() == null) {
-                throw new IllegalArgumentException("addressId is required for delivery");
-            }
-            UserAddress address = addressRepo.findById(req.getAddressId())
-                    .orElseThrow(() -> new IllegalArgumentException("Address not found: " + req.getAddressId()));
-            if (address.getUser() == null || !userId.equals(address.getUser().getId())) {
-                throw new AccessDeniedException("Address does not belong to the authenticated user");
-            }
-            order.setDeliveryMethod(DeliveryMethod.REGULAR);
-            order.setDeliveryAddressId(address.getId());
-            order.setRecipientFirstName(address.getFirstName());
-            order.setRecipientLastName(address.getLastName());
-            order.setRecipientPhone(address.getPhoneNumber());
-            order.setAddressLine1(address.getAddressLine1());
-            order.setAddressLine2(address.getAddressLine2());
-            order.setCity(address.getCity());
-            order.setState(address.getState());
-            order.setCountry(address.getCountry());
-            order.setPostalCode(address.getPostalCode());
-            order.setDeliveryLatitude(address.getLatitude());
-            order.setDeliveryLongitude(address.getLongitude());
-            billingName = ((address.getFirstName() == null ? "" : address.getFirstName())
-                    + " " + (address.getLastName() == null ? "" : address.getLastName())).trim();
-            billingPhone = address.getPhoneNumber();
-        }
-
-        // Pricing from the quoted lines (authoritative).
-        BigDecimal subtotal = lines.stream()
-                .map(B2bQuoteItem::quotedLineTotal)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        order.setSubtotal(subtotal);
-        order.setTotalAmount(subtotal);
-
-        order = orderRepo.save(order);
-
-        // Snapshot quote lines into order items (resolve store/supplier from the store-product).
-        for (B2bQuoteItem line : lines) {
-            StoreProduct sp = storeProductRepo.findById(line.getStoreProductId()).orElse(null);
-            OrderItem item = new OrderItem();
-            item.setOrder(order);
-            item.setProductId(line.getProductId());
-            item.setVariantId(line.getVariantId());
-            item.setProductSku(line.getSku());
-            item.setQuantity(line.getQuantity());
-            item.setUnitPrice(line.getQuotedUnitPrice());
-            item.setTotalPrice(line.quotedLineTotal());
-            if (sp != null) {
-                item.setStoreId(sp.getStore() != null ? sp.getStore().getId() : null);
-                item.setSupplierId(sp.getProduct() != null ? sp.getProduct().getSupplierId() : null);
-            }
-            order.getItems().add(item);
-        }
-        order = orderRepo.save(order);
+        Order order = buildOrderFromQuote(quote, userId, credentialId,
+                req.getDeliveryMethod(), req.getAddressId(), req.getPickupStoreId(),
+                OrderStatus.PENDING_PAYMENT);
 
         // Link the order to the quote and mark it ORDERED.
         quote.setOrderId(order.getId());
         quote.setStatus(B2bQuoteStatus.ORDERED);
         quoteRepo.save(quote);
+
+        // Billing details for the gateway are derived from the built order.
+        boolean isPickup = order.getDeliveryMethod() == DeliveryMethod.PICKUP;
+        String billingPhone = order.getRecipientPhone();
+        String billingName = isPickup ? "B2B Member"
+                : ((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName())
+                    + " " + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim();
 
         // Reuse the existing payment initiation on the created order (order-first flow).
         InitiatePaymentRequest ip = new InitiatePaymentRequest();
@@ -552,6 +484,81 @@ public class B2bQuoteService {
         ip.setRedirectionUrl(req.getRedirectionUrl());
 
         return paymentService.initiatePayment(ip);
+    }
+
+    /**
+     * Member pays an accepted quote by bank transfer and uploads proof of payment
+     * (ACCEPTED/QUOTED → AWAITING_PAYMENT_VERIFICATION). The order is created up front
+     * (PENDING_PAYMENT) from the quoted lines + chosen delivery; procurement validates the
+     * proof to place it. The proof document is stored and remains visible on the quote.
+     */
+    @Transactional
+    public B2bQuoteResponse submitBankTransfer(UUID userId, UUID quoteId,
+                                               BankTransferCheckoutRequest req, MultipartFile proof) {
+        requireActiveMembership(userId);
+        UUID credentialId = resolveCredentialId(userId);
+        B2bQuote quote = quoteRepo.findById(quoteId)
+                .orElseThrow(() -> new NoSuchElementException("Quote not found: " + quoteId));
+        requireOwner(quote, credentialId);
+
+        // Accept a still-QUOTED quote first (mirrors the gateway pay panel); otherwise it must
+        // already be ACCEPTED. Any other status can't be paid.
+        if (quote.getStatus() == B2bQuoteStatus.QUOTED) {
+            if (quote.getValidUntil() != null && Instant.now().isAfter(quote.getValidUntil())) {
+                quote.setStatus(B2bQuoteStatus.EXPIRED);
+                quoteRepo.save(quote);
+                throw new IllegalStateException("This quote has expired. Please request a new quote.");
+            }
+            quote.setStatus(B2bQuoteStatus.ACCEPTED);
+            quote.setAcceptedAt(Instant.now());
+        } else if (quote.getStatus() != B2bQuoteStatus.ACCEPTED) {
+            throw new IllegalStateException(
+                    "Only an accepted quote can be paid by bank transfer (current status: " + quote.getStatus() + ")");
+        }
+        if (quote.getValidUntil() != null && Instant.now().isAfter(quote.getValidUntil())) {
+            quote.setStatus(B2bQuoteStatus.EXPIRED);
+            quoteRepo.save(quote);
+            throw new IllegalStateException("This quote has expired and can no longer be paid.");
+        }
+
+        // Proof document is mandatory; validateDocument allowlists PDF/JPG/PNG/WebP ≤ 10 MB.
+        if (proof == null || proof.isEmpty()) {
+            throw new IllegalArgumentException("A proof-of-payment document is required");
+        }
+        FileValidationUtils.validateDocument(proof);
+
+        // Build the order once (idempotent on re-entry — reuse if one already exists).
+        if (quote.getOrderId() == null) {
+            Order order = buildOrderFromQuote(quote, userId, credentialId,
+                    req.getDeliveryMethod(), req.getAddressId(), req.getPickupStoreId(),
+                    OrderStatus.PENDING_PAYMENT);
+            quote.setOrderId(order.getId());
+        }
+
+        // Store the proof on Contabo under a per-quote key; persist the object key.
+        String key = "documents/b2b-quote-proofs/" + quote.getId() + "/"
+                + FileValidationUtils.sanitizeFilename(proof.getOriginalFilename());
+        quote.setProofOfPaymentKey(contaboObjectService.uploadFile(key, proof));
+        quote.setProofUploadedAt(Instant.now());
+        quote.setPaymentMethod("BANK_TRANSFER");
+        quote.setStatus(B2bQuoteStatus.AWAITING_PAYMENT_VERIFICATION);
+        quote = quoteRepo.save(quote);
+
+        // Notify procurement that a proof is awaiting validation (best-effort).
+        String companyName = resolveMemberCompanyName(quote.getUserId());
+        try {
+            emailService.sendB2bBankTransferSubmittedNotification(
+                    procurementEmail, companyName, quote.getId().toString(),
+                    webBaseUrl + "/procurement/quotes/" + quote.getId());
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] bank-transfer notification failed for quote {}: {}", quote.getId(), e.getMessage());
+        }
+        notifyQuoteAdmins("B2B_QUOTE_PROOF_UPLOADED", "B2B bank-transfer proof to validate",
+                (companyName != null ? companyName : "A B2B member")
+                        + " uploaded a bank-transfer proof for quote " + quote.getId() + ".",
+                quote.getId());
+
+        return toResponse(quote);
     }
 
     // =========================================================================
@@ -592,13 +599,19 @@ public class B2bQuoteService {
         java.util.Map<UUID, B2bQuoteItem> byId = lines.stream()
                 .collect(Collectors.toMap(B2bQuoteItem::getId, i -> i));
 
-        // Every line must be priced.
+        // Every line must be priced; capture the per-line lead time / description too.
         for (PriceQuoteRequest.LinePrice lp : req.getItems()) {
             B2bQuoteItem line = byId.get(lp.getItemId());
             if (line == null) {
                 throw new IllegalArgumentException("Line " + lp.getItemId() + " does not belong to this quote");
             }
             line.setQuotedUnitPrice(lp.getUnitPrice());
+            if (lp.getLeadTime() != null) {
+                line.setLeadTime(lp.getLeadTime().isBlank() ? null : lp.getLeadTime().trim());
+            }
+            if (lp.getDescription() != null) {
+                line.setDescription(lp.getDescription().isBlank() ? null : lp.getDescription().trim());
+            }
         }
         boolean allPriced = lines.stream().allMatch(i -> i.getQuotedUnitPrice() != null);
         if (!allPriced) {
@@ -612,6 +625,12 @@ public class B2bQuoteService {
         quote.setValidUntil(req.getValidUntil());
         if (req.getProcurementNote() != null) {
             quote.setProcurementNote(req.getProcurementNote());
+        }
+        if (req.getPaymentTerms() != null) {
+            quote.setPaymentTerms(req.getPaymentTerms().isBlank() ? null : req.getPaymentTerms().trim());
+        }
+        if (req.getTermsAndConditions() != null) {
+            quote.setTermsAndConditions(req.getTermsAndConditions().isBlank() ? null : req.getTermsAndConditions().trim());
         }
         quote = quoteRepo.save(quote);
 
@@ -653,6 +672,81 @@ public class B2bQuoteService {
                     req.getReason());
         } catch (Exception e) {
             log.warn("[B2B-QUOTE] quote-rejected email failed for quote {}: {}", quote.getId(), e.getMessage());
+        }
+
+        return toResponse(quote);
+    }
+
+    /**
+     * Procurement validates an uploaded bank-transfer proof — the order is placed
+     * (AWAITING_PAYMENT_VERIFICATION → ORDERED, linked order marked PAID) and a detailed
+     * confirmation email with every line, terms and both parties' details is sent.
+     */
+    @Transactional
+    public B2bQuoteResponse verifyBankTransfer(UUID adminCredentialId, UUID quoteId) {
+        B2bQuote quote = quoteRepo.findById(quoteId)
+                .orElseThrow(() -> new NoSuchElementException("Quote not found: " + quoteId));
+        if (quote.getStatus() != B2bQuoteStatus.AWAITING_PAYMENT_VERIFICATION) {
+            throw new IllegalStateException(
+                    "Only a quote awaiting payment verification can be validated (current status: " + quote.getStatus() + ")");
+        }
+
+        // Mark the pre-created order as paid — bank payment is confirmed.
+        if (quote.getOrderId() != null) {
+            orderRepo.findById(quote.getOrderId()).ifPresent(o -> {
+                o.setStatus(OrderStatus.PAID);
+                orderRepo.save(o);
+            });
+        }
+
+        quote.setStatus(B2bQuoteStatus.ORDERED);
+        quote.setPaymentVerifiedAt(Instant.now());
+        quote.setPaymentVerifiedBy(adminCredentialId);
+        quote = quoteRepo.save(quote);
+
+        sendOrderPlacedEmail(quote);
+
+        notifyQuoteAdmins("B2B_QUOTE_ORDER_PLACED", "B2B order placed",
+                "Bank-transfer payment for quote " + quote.getId() + " was validated and the order placed.",
+                quote.getId());
+
+        return toResponse(quote);
+    }
+
+    /**
+     * Procurement rejects an uploaded bank-transfer proof — the pending order is cancelled
+     * and the quote returns to ACCEPTED so the member can re-submit a corrected proof.
+     */
+    @Transactional
+    public B2bQuoteResponse rejectBankTransfer(UUID quoteId, RejectQuoteRequest req) {
+        B2bQuote quote = quoteRepo.findById(quoteId)
+                .orElseThrow(() -> new NoSuchElementException("Quote not found: " + quoteId));
+        if (quote.getStatus() != B2bQuoteStatus.AWAITING_PAYMENT_VERIFICATION) {
+            throw new IllegalStateException(
+                    "Only a quote awaiting payment verification can be sent back (current status: " + quote.getStatus() + ")");
+        }
+
+        // Cancel the pending order so a re-submission builds a fresh one.
+        if (quote.getOrderId() != null) {
+            orderRepo.findById(quote.getOrderId()).ifPresent(o -> {
+                o.setStatus(OrderStatus.CANCELLED);
+                orderRepo.save(o);
+            });
+            quote.setOrderId(null);
+        }
+        quote.setProcurementNote(req.getReason());
+        quote.setStatus(B2bQuoteStatus.ACCEPTED);
+        quote = quoteRepo.save(quote);
+
+        try {
+            emailService.sendB2bBankTransferRejectedEmail(
+                    resolveMemberEmail(quote.getUserId(), quote.getCredentialId()),
+                    resolveMemberName(quote.getUserId()),
+                    quote.getId().toString(),
+                    req.getReason(),
+                    webBaseUrl + "/b2b/quotes/" + quote.getId());
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] bank-transfer-rejected email failed for quote {}: {}", quote.getId(), e.getMessage());
         }
 
         return toResponse(quote);
@@ -713,7 +807,160 @@ public class B2bQuoteService {
 
     private B2bQuoteResponse toResponse(B2bQuote quote) {
         List<B2bQuoteItem> lines = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId());
-        return B2bQuoteResponse.from(quote, lines, B2B_MIN_QTY_PER_LINE);
+        B2bQuoteResponse r = B2bQuoteResponse.from(quote, lines, B2B_MIN_QTY_PER_LINE);
+        // Presign the stored proof-of-payment object key so the member/procurement can open it.
+        if (quote.getProofOfPaymentKey() != null && !quote.getProofOfPaymentKey().isBlank()) {
+            try {
+                r.setProofOfPaymentFileUrl(contaboObjectService.getPresignedUrl(quote.getProofOfPaymentKey()));
+            } catch (Exception e) {
+                log.warn("[B2B-QUOTE] could not presign proof for quote {}: {}", quote.getId(), e.getMessage());
+            }
+        }
+        return r;
+    }
+
+    /**
+     * Build (and persist) an {@link Order} from a fully-priced quote's lines and the chosen
+     * delivery target. Shared by gateway checkout and the bank-transfer flow; mirrors
+     * {@link com.buyology.ecommerce.order.service.OrderService#createOrder} (which is coupled
+     * to the consumer Cart, so we build directly). Does NOT touch the quote status.
+     */
+    private Order buildOrderFromQuote(B2bQuote quote, UUID userId, UUID credentialId,
+                                      String deliveryMethod, UUID addressId, UUID pickupStoreId,
+                                      OrderStatus initialStatus) {
+        List<B2bQuoteItem> lines = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId());
+        if (lines.isEmpty()) {
+            throw new IllegalStateException("This quote has no lines to order");
+        }
+        for (B2bQuoteItem line : lines) {
+            if (line.getQuotedUnitPrice() == null) {
+                throw new IllegalStateException("This quote is not fully priced and cannot be ordered");
+            }
+        }
+
+        boolean isPickup = "PICKUP".equalsIgnoreCase(deliveryMethod);
+
+        Order order = new Order();
+        order.setUserId(userId);
+        order.setAuthCredentialId(credentialId);
+        // No Cart exists for a B2B quote; use the quote id so the NOT NULL cart_id column is set.
+        order.setCartId(quote.getId());
+        order.setStatus(initialStatus);
+        order.setCurrency(quote.getCurrency());
+        order.setCountryCode(quote.getCountryCode());
+        order.setCountry(quote.getCountryCode());
+        order.setShippingFee(BigDecimal.ZERO);
+        order.setDiscount(BigDecimal.ZERO);
+
+        if (isPickup) {
+            if (pickupStoreId == null) {
+                throw new IllegalArgumentException("Please choose a store to pick up from.");
+            }
+            order.setDeliveryMethod(DeliveryMethod.PICKUP);
+            order.setPickupStoreId(pickupStoreId);
+        } else {
+            if (addressId == null) {
+                throw new IllegalArgumentException("addressId is required for delivery");
+            }
+            UserAddress address = addressRepo.findById(addressId)
+                    .orElseThrow(() -> new IllegalArgumentException("Address not found: " + addressId));
+            if (address.getUser() == null || !userId.equals(address.getUser().getId())) {
+                throw new AccessDeniedException("Address does not belong to the authenticated user");
+            }
+            order.setDeliveryMethod(DeliveryMethod.REGULAR);
+            order.setDeliveryAddressId(address.getId());
+            order.setRecipientFirstName(address.getFirstName());
+            order.setRecipientLastName(address.getLastName());
+            order.setRecipientPhone(address.getPhoneNumber());
+            order.setAddressLine1(address.getAddressLine1());
+            order.setAddressLine2(address.getAddressLine2());
+            order.setCity(address.getCity());
+            order.setState(address.getState());
+            order.setCountry(address.getCountry());
+            order.setPostalCode(address.getPostalCode());
+            order.setDeliveryLatitude(address.getLatitude());
+            order.setDeliveryLongitude(address.getLongitude());
+        }
+
+        // Pricing from the quoted lines (authoritative): subtotal = Σ(quotedUnitPrice · qty).
+        BigDecimal subtotal = lines.stream()
+                .map(B2bQuoteItem::quotedLineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        order.setSubtotal(subtotal);
+        order.setTotalAmount(subtotal);
+        order = orderRepo.save(order);
+
+        for (B2bQuoteItem line : lines) {
+            StoreProduct sp = storeProductRepo.findById(line.getStoreProductId()).orElse(null);
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setProductId(line.getProductId());
+            item.setVariantId(line.getVariantId());
+            item.setProductSku(line.getSku());
+            item.setQuantity(line.getQuantity());
+            item.setUnitPrice(line.getQuotedUnitPrice());
+            item.setTotalPrice(line.quotedLineTotal());
+            if (sp != null) {
+                item.setStoreId(sp.getStore() != null ? sp.getStore().getId() : null);
+                item.setSupplierId(sp.getProduct() != null ? sp.getProduct().getSupplierId() : null);
+            }
+            order.getItems().add(item);
+        }
+        return orderRepo.save(order);
+    }
+
+    /** Build + send the detailed "order placed" email once a bank-transfer proof is validated. */
+    private void sendOrderPlacedEmail(B2bQuote quote) {
+        try {
+            List<B2bQuoteItem> lines = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId());
+            List<EmailService.B2bOrderLine> emailLines = lines.stream()
+                    .map(l -> new EmailService.B2bOrderLine(
+                            l.getProductTitle() != null ? l.getProductTitle()
+                                    : (l.getSku() != null ? l.getSku() : "Item"),
+                            l.getDescription(),
+                            l.getQuantity() != null ? l.getQuantity() : 0,
+                            l.getQuotedUnitPrice() != null ? l.getQuotedUnitPrice().toPlainString() : "—",
+                            l.quotedLineTotal() != null ? l.quotedLineTotal().toPlainString() : "—",
+                            l.getLeadTime()))
+                    .collect(Collectors.toList());
+            BigDecimal total = lines.stream()
+                    .map(B2bQuoteItem::quotedLineTotal)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Buyer (B2B member) company details from their membership + application.
+            String buyerCompany = null, buyerWebsite = null, buyerEmail = null;
+            B2bMembership membership = membershipRepo.findByUserId(quote.getUserId()).orElse(null);
+            if (membership != null) {
+                buyerCompany = membership.getCompanyName();
+                if (membership.getApplicationId() != null) {
+                    B2bMembershipApplication app = membershipApplicationRepo.findById(membership.getApplicationId()).orElse(null);
+                    if (app != null) {
+                        buyerWebsite = app.getWebsite();
+                        buyerEmail = app.getContactEmail();
+                        if (buyerCompany == null) buyerCompany = app.getCompanyName();
+                    }
+                }
+            }
+            String memberEmail = resolveMemberEmail(quote.getUserId(), quote.getCredentialId());
+            if (buyerEmail == null) buyerEmail = memberEmail;
+            String orderRef = quote.getOrderId() != null ? quote.getOrderId().toString() : quote.getId().toString();
+
+            emailService.sendB2bOrderPlacedEmail(
+                    memberEmail, resolveMemberName(quote.getUserId()),
+                    quote.getId().toString(), orderRef,
+                    quote.getCurrency(), total.toPlainString(), emailLines,
+                    quote.getPaymentTerms(), quote.getTermsAndConditions(),
+                    buyerCompany, buyerWebsite, buyerEmail);
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] order-placed email failed for quote {}: {}", quote.getId(), e.getMessage());
+        }
+    }
+
+    private String resolveMemberCompanyName(UUID userId) {
+        if (userId == null) return null;
+        return membershipRepo.findByUserId(userId)
+                .map(B2bMembership::getCompanyName)
+                .orElse(null);
     }
 
     private String resolveTitle(UUID productId) {

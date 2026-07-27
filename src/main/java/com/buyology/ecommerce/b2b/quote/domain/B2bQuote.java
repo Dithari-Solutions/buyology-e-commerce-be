@@ -47,7 +47,7 @@ public class B2bQuote {
     private String currency;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 20)
+    @Column(name = "status", nullable = false, length = 40)
     private B2bQuoteStatus status = B2bQuoteStatus.DRAFT;
 
     @Column(name = "member_note", columnDefinition = "text")
@@ -55,6 +55,33 @@ public class B2bQuote {
 
     @Column(name = "procurement_note", columnDefinition = "text")
     private String procurementNote;
+
+    /** Payment terms set by procurement when pricing (e.g. "50% advance, 50% on delivery"). */
+    @Column(name = "payment_terms", columnDefinition = "text")
+    private String paymentTerms;
+
+    /** Terms & conditions set by procurement when pricing. */
+    @Column(name = "terms_and_conditions", columnDefinition = "text")
+    private String termsAndConditions;
+
+    /** How the member chose to pay this quote — currently only "BANK_TRANSFER" is tracked here. */
+    @Column(name = "payment_method", length = 20)
+    private String paymentMethod;
+
+    /** Contabo object key of the uploaded bank-transfer proof of payment. */
+    @Column(name = "proof_of_payment_key", length = 500)
+    private String proofOfPaymentKey;
+
+    @Column(name = "proof_uploaded_at")
+    private Instant proofUploadedAt;
+
+    /** When procurement validated the bank-transfer proof (order placed). */
+    @Column(name = "payment_verified_at")
+    private Instant paymentVerifiedAt;
+
+    /** auth_credentials.id / admin principal that validated the proof. */
+    @Column(name = "payment_verified_by")
+    private UUID paymentVerifiedBy;
 
     @Column(name = "submitted_at")
     private Instant submittedAt;
@@ -127,6 +154,27 @@ public class B2bQuote {
 
     public String getProcurementNote() { return procurementNote; }
     public void setProcurementNote(String procurementNote) { this.procurementNote = procurementNote; }
+
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+
+    public String getTermsAndConditions() { return termsAndConditions; }
+    public void setTermsAndConditions(String termsAndConditions) { this.termsAndConditions = termsAndConditions; }
+
+    public String getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
+
+    public String getProofOfPaymentKey() { return proofOfPaymentKey; }
+    public void setProofOfPaymentKey(String proofOfPaymentKey) { this.proofOfPaymentKey = proofOfPaymentKey; }
+
+    public Instant getProofUploadedAt() { return proofUploadedAt; }
+    public void setProofUploadedAt(Instant proofUploadedAt) { this.proofUploadedAt = proofUploadedAt; }
+
+    public Instant getPaymentVerifiedAt() { return paymentVerifiedAt; }
+    public void setPaymentVerifiedAt(Instant paymentVerifiedAt) { this.paymentVerifiedAt = paymentVerifiedAt; }
+
+    public UUID getPaymentVerifiedBy() { return paymentVerifiedBy; }
+    public void setPaymentVerifiedBy(UUID paymentVerifiedBy) { this.paymentVerifiedBy = paymentVerifiedBy; }
 
     public Instant getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(Instant submittedAt) { this.submittedAt = submittedAt; }

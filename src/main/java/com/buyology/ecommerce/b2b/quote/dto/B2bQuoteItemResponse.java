@@ -16,6 +16,12 @@ public class B2bQuoteItemResponse {
     private String productTitle;
     private String sku;
 
+    /** Lead time set by procurement at pricing (e.g. "2–3 weeks"). */
+    private String leadTime;
+
+    /** Optional line description set by procurement at pricing. */
+    private String description;
+
     /** Null until the quote is priced. */
     private BigDecimal quotedUnitPrice;
 
@@ -34,6 +40,8 @@ public class B2bQuoteItemResponse {
         r.quantity = i.getQuantity();
         r.productTitle = i.getProductTitle();
         r.sku = i.getSku();
+        r.leadTime = i.getLeadTime();
+        r.description = i.getDescription();
         r.quotedUnitPrice = i.getQuotedUnitPrice();
         r.quotedLineTotal = i.quotedLineTotal();
         r.belowMinimum = i.getQuantity() != null && i.getQuantity() < minQtyPerLine;
@@ -54,6 +62,10 @@ public class B2bQuoteItemResponse {
     public void setProductTitle(String productTitle) { this.productTitle = productTitle; }
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }
+    public String getLeadTime() { return leadTime; }
+    public void setLeadTime(String leadTime) { this.leadTime = leadTime; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
     public BigDecimal getQuotedUnitPrice() { return quotedUnitPrice; }
     public void setQuotedUnitPrice(BigDecimal quotedUnitPrice) { this.quotedUnitPrice = quotedUnitPrice; }
     public BigDecimal getQuotedLineTotal() { return quotedLineTotal; }

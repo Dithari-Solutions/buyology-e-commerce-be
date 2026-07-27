@@ -68,4 +68,20 @@ public class AdminB2bQuoteController {
             @Valid @RequestBody RejectQuoteRequest req) {
         return ApiResponse.success(quoteService.reject(id, req), "Quote rejected");
     }
+
+    /** Validate an uploaded bank-transfer proof — places the order (AWAITING_PAYMENT_VERIFICATION → ORDERED). */
+    @PostMapping("/{id}/verify-payment")
+    public ResponseEntity<ApiResponse<B2bQuoteResponse>> verifyPayment(
+            @AuthenticationPrincipal UUID adminId,
+            @PathVariable UUID id) {
+        return ApiResponse.success(quoteService.verifyBankTransfer(adminId, id), "Payment verified — order placed");
+    }
+
+    /** Reject an uploaded bank-transfer proof — returns the quote to ACCEPTED for re-submission. */
+    @PostMapping("/{id}/reject-payment")
+    public ResponseEntity<ApiResponse<B2bQuoteResponse>> rejectPayment(
+            @PathVariable UUID id,
+            @Valid @RequestBody RejectQuoteRequest req) {
+        return ApiResponse.success(quoteService.rejectBankTransfer(id, req), "Payment proof rejected");
+    }
 }

@@ -53,6 +53,14 @@ public class B2bQuoteItem {
     @Column(name = "sku", length = 255)
     private String sku;
 
+    /** Lead time for this line, set by procurement at pricing (e.g. "2–3 weeks"). */
+    @Column(name = "lead_time", length = 255)
+    private String leadTime;
+
+    /** Optional line description set by procurement at pricing (shown on the order email). */
+    @Column(name = "description", columnDefinition = "text")
+    private String description;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -105,6 +113,12 @@ public class B2bQuoteItem {
 
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }
+
+    public String getLeadTime() { return leadTime; }
+    public void setLeadTime(String leadTime) { this.leadTime = leadTime; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

@@ -22,11 +22,21 @@ public class B2bQuoteResponse {
     private String currency;
     private String memberNote;
     private String procurementNote;
+    private String paymentTerms;
+    private String termsAndConditions;
     private Instant submittedAt;
     private Instant quotedAt;
     private Instant validUntil;
     private Instant acceptedAt;
     private UUID orderId;
+
+    /** How the member paid: "BANK_TRANSFER" once they submit a bank-transfer proof. */
+    private String paymentMethod;
+    /** Presigned URL of the uploaded bank-transfer proof (set by the service). Null if none. */
+    private String proofOfPaymentFileUrl;
+    private Instant proofUploadedAt;
+    private Instant paymentVerifiedAt;
+
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -50,11 +60,17 @@ public class B2bQuoteResponse {
         r.currency = q.getCurrency();
         r.memberNote = q.getMemberNote();
         r.procurementNote = q.getProcurementNote();
+        r.paymentTerms = q.getPaymentTerms();
+        r.termsAndConditions = q.getTermsAndConditions();
         r.submittedAt = q.getSubmittedAt();
         r.quotedAt = q.getQuotedAt();
         r.validUntil = q.getValidUntil();
         r.acceptedAt = q.getAcceptedAt();
         r.orderId = q.getOrderId();
+        r.paymentMethod = q.getPaymentMethod();
+        r.proofUploadedAt = q.getProofUploadedAt();
+        r.paymentVerifiedAt = q.getPaymentVerifiedAt();
+        // proofOfPaymentFileUrl is presigned and set by the service layer (needs Contabo).
         r.createdAt = q.getCreatedAt();
         r.updatedAt = q.getUpdatedAt();
         r.minQtyPerLine = minQtyPerLine;
@@ -85,6 +101,18 @@ public class B2bQuoteResponse {
     public void setMemberNote(String memberNote) { this.memberNote = memberNote; }
     public String getProcurementNote() { return procurementNote; }
     public void setProcurementNote(String procurementNote) { this.procurementNote = procurementNote; }
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+    public String getTermsAndConditions() { return termsAndConditions; }
+    public void setTermsAndConditions(String termsAndConditions) { this.termsAndConditions = termsAndConditions; }
+    public String getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
+    public String getProofOfPaymentFileUrl() { return proofOfPaymentFileUrl; }
+    public void setProofOfPaymentFileUrl(String proofOfPaymentFileUrl) { this.proofOfPaymentFileUrl = proofOfPaymentFileUrl; }
+    public Instant getProofUploadedAt() { return proofUploadedAt; }
+    public void setProofUploadedAt(Instant proofUploadedAt) { this.proofUploadedAt = proofUploadedAt; }
+    public Instant getPaymentVerifiedAt() { return paymentVerifiedAt; }
+    public void setPaymentVerifiedAt(Instant paymentVerifiedAt) { this.paymentVerifiedAt = paymentVerifiedAt; }
     public Instant getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(Instant submittedAt) { this.submittedAt = submittedAt; }
     public Instant getQuotedAt() { return quotedAt; }

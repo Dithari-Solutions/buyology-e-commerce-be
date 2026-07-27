@@ -659,6 +659,135 @@ public class EmailService {
         }
     }
 
+    /** One priced line on a B2B order, for the detailed order-placed email. */
+    public record B2bOrderLine(String name, String description, int quantity,
+                               String unitPrice, String lineTotal, String leadTime) {}
+
+    /** Internal notification to procurement: a member uploaded a bank-transfer proof to validate. */
+    @Async
+    public void sendB2bBankTransferSubmittedNotification(String procurementEmail, String companyName,
+                                                         String quoteRef, String reviewUrl) {
+        try {
+            String body = "<p>A B2B member has paid by bank transfer and uploaded a proof of payment for validation.</p>"
+                    + "<p><strong>Company:</strong> " + escapeHtml(nullToEmpty(companyName)) + "<br/>"
+                    + "<strong>Quote:</strong> " + escapeHtml(nullToEmpty(quoteRef)) + "</p>"
+                    + "<p>Review the proof and validate the payment in Procurement → Quotes"
+                    + (reviewUrl != null && !reviewUrl.isBlank()
+                        ? ": <a href=\"" + reviewUrl + "\">" + reviewUrl + "</a>" : ".") + "</p>";
+            send(procurementEmail, "B2B bank-transfer proof to validate — " + nullToEmpty(companyName),
+                    accountEmailHtml("Bank-transfer proof uploaded", body));
+            log.info("B2B bank-transfer notification sent to {}", procurementEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B bank-transfer notification to {}: {}", procurementEmail, e.getMessage());
+        }
+    }
+
+    /** Member notification: their bank-transfer proof was not accepted; please re-submit. */
+    @Async
+    public void sendB2bBankTransferRejectedEmail(String toEmail, String memberName, String quoteRef,
+                                                 String reason, String quoteUrl) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>We were unable to validate the bank-transfer proof for your quote <strong>"
+                    + escapeHtml(nullToEmpty(quoteRef)) + "</strong>"
+                    + (reason != null && !reason.isBlank() ? " — " + escapeHtml(reason) : "") + ".</p>"
+                    + "<p>Please re-submit a valid proof of payment from your quote page"
+                    + (quoteUrl != null && !quoteUrl.isBlank()
+                        ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
+            send(toEmail, "Action needed: bank-transfer proof for your Buyology B2B order",
+                    accountEmailHtml("Proof of payment not accepted", body));
+            log.info("B2B bank-transfer-rejected email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B bank-transfer-rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Member confirmation: their bank-transfer proof was validated and the order placed.
+     * Includes every line (name, description, qty, lead time, unit price, line total), the
+     * payment terms, the terms &amp; conditions, and both the seller (Buyology) and buyer
+     * (B2B member) company details.
+     */
+    @Async
+    public void sendB2bOrderPlacedEmail(String toEmail, String memberName, String quoteRef, String orderRef,
+                                        String currency, String total, java.util.List<B2bOrderLine> lines,
+                                        String paymentTerms, String termsAndConditions,
+                                        String buyerCompany, String buyerWebsite, String buyerEmail) {
+        try {
+            String ccy = nullToEmpty(currency);
+            String cell = "padding:9px 8px;border-bottom:1px solid #eee;vertical-align:top;";
+            StringBuilder rows = new StringBuilder();
+            if (lines != null) {
+                for (B2bOrderLine l : lines) {
+                    String desc = l.description() != null && !l.description().isBlank()
+                            ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">" + escapeHtml(l.description()) + "</span>"
+                            : "";
+                    String lead = l.leadTime() != null && !l.leadTime().isBlank() ? escapeHtml(l.leadTime()) : "—";
+                    rows.append("<tr>")
+                        .append("<td style=\"").append(cell).append("\"><strong>").append(escapeHtml(nullToEmpty(l.name()))).append("</strong>").append(desc).append("</td>")
+                        .append("<td style=\"").append(cell).append("text-align:center;\">").append(l.quantity()).append("</td>")
+                        .append("<td style=\"").append(cell).append("\">").append(lead).append("</td>")
+                        .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.unitPrice())).append("</td>")
+                        .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.lineTotal())).append("</td>")
+                        .append("</tr>");
+                }
+            }
+            String head = "padding:9px 8px;text-align:left;font-size:12px;text-transform:uppercase;color:#6b6b6b;border-bottom:2px solid #e5e1f2;";
+            String itemsTable = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:8px 0 4px;font-family:Arial,sans-serif;font-size:13px;\">"
+                    + "<thead><tr>"
+                    + "<th style=\"" + head + "\">Item</th>"
+                    + "<th style=\"" + head + "text-align:center;\">Qty</th>"
+                    + "<th style=\"" + head + "\">Lead time</th>"
+                    + "<th style=\"" + head + "text-align:right;\">Unit price</th>"
+                    + "<th style=\"" + head + "text-align:right;\">Line total</th>"
+                    + "</tr></thead><tbody>" + rows + "</tbody>"
+                    + "<tfoot><tr>"
+                    + "<td colspan=\"4\" style=\"padding:11px 8px;text-align:right;font-weight:bold;\">Total</td>"
+                    + "<td style=\"padding:11px 8px;text-align:right;font-weight:bold;\">" + ccy + " " + nullToEmpty(total) + "</td>"
+                    + "</tr></tfoot></table>";
+
+            String block = "background:#faf9fd;border:1px solid #efecf8;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;color:#4a4a4a;";
+            String terms = "";
+            if (paymentTerms != null && !paymentTerms.isBlank()) {
+                terms += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Payment terms</p>"
+                        + "<div style=\"" + block + "\">" + escapeHtml(paymentTerms).replace("\n", "<br/>") + "</div>";
+            }
+            if (termsAndConditions != null && !termsAndConditions.isBlank()) {
+                terms += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Terms &amp; conditions</p>"
+                        + "<div style=\"" + block + "\">" + escapeHtml(termsAndConditions).replace("\n", "<br/>") + "</div>";
+            }
+
+            String buyerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Buyer</p>"
+                    + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                    + escapeHtml(nullToEmpty(buyerCompany))
+                    + (buyerWebsite != null && !buyerWebsite.isBlank() ? "<br/>" + escapeHtml(buyerWebsite) : "")
+                    + (buyerEmail != null && !buyerEmail.isBlank() ? "<br/>" + escapeHtml(buyerEmail) : "")
+                    + "</p>";
+            String sellerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Seller</p>"
+                    + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                    + "Buyology<br/>https://buyology.online<br/>support@buyology.com</p>";
+            String parties = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:18px;\"><tr>"
+                    + "<td width=\"50%\" style=\"vertical-align:top;padding-right:8px;\">" + buyerBlock + "</td>"
+                    + "<td width=\"50%\" style=\"vertical-align:top;padding-left:8px;\">" + sellerBlock + "</td>"
+                    + "</tr></table>";
+
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>Your bank-transfer payment has been validated and your order is now placed. "
+                    + "Thank you for your business.</p>"
+                    + "<p style=\"font-size:13px;color:#6b6b6b;\"><strong>Order:</strong> " + escapeHtml(nullToEmpty(orderRef))
+                    + " &nbsp;·&nbsp; <strong>Quote:</strong> " + escapeHtml(nullToEmpty(quoteRef)) + "</p>"
+                    + "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Order summary</p>"
+                    + itemsTable
+                    + terms
+                    + parties;
+
+            send(toEmail, "Your Buyology B2B order is placed", accountEmailHtml("Order placed", body));
+            log.info("B2B order-placed email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B order-placed email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── B2B product-sourcing requests ──────────────────────────────────────────
 
     /** Member confirmation: their product-sourcing request was received. */
