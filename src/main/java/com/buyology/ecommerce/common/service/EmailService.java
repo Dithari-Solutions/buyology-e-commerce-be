@@ -580,18 +580,28 @@ public class EmailService {
         }
     }
 
-    /** Member notification: procurement has priced their quote and it awaits acceptance. */
+    /**
+     * Member notification: procurement has priced their quote and it awaits acceptance.
+     * Detailed email — per-item image + SKU + description + qty + lead time + prices,
+     * payment terms, terms &amp; conditions, and the member's company details.
+     */
     @Async
     public void sendB2bQuoteReadyEmail(String toEmail, String memberName, String quoteRef,
-                                       String total, String currency, String validUntil, String quoteUrl) {
+                                       String currency, String total, java.util.List<B2bOrderLine> lines,
+                                       String paymentTerms, String termsAndConditions,
+                                       String buyerCompany, String buyerWebsite, String buyerEmail,
+                                       String validUntil, String quoteUrl) {
         try {
             String body = "<p>Hi " + safeName(memberName) + ",</p>"
-                    + "<p>Your quote request <strong>" + nullToEmpty(quoteRef) + "</strong> has been priced by our "
-                    + "procurement team.</p>"
-                    + "<p><strong>Total:</strong> " + nullToEmpty(currency) + " " + nullToEmpty(total)
-                    + (validUntil != null && !validUntil.isBlank() ? "<br/><strong>Valid until:</strong> " + validUntil : "")
-                    + "</p>"
-                    + "<p>Review the quoted prices and accept to proceed to checkout"
+                    + "<p>Your quote request <strong>" + escapeHtml(nullToEmpty(quoteRef)) + "</strong> has been "
+                    + "priced by our procurement team. The details are below.</p>"
+                    + (validUntil != null && !validUntil.isBlank()
+                        ? "<p style=\"font-size:13px;color:#6b6b6b;\"><strong>Valid until:</strong> " + escapeHtml(validUntil) + "</p>" : "")
+                    + "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Quote summary</p>"
+                    + b2bItemsTableHtml(currency, total, lines)
+                    + b2bTermsHtml(paymentTerms, termsAndConditions)
+                    + b2bPartiesHtml(buyerCompany, buyerWebsite, buyerEmail)
+                    + "<p style=\"margin-top:20px;\">Review the quoted prices and accept to proceed to checkout"
                     + (quoteUrl != null && !quoteUrl.isBlank()
                         ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
             send(toEmail, "Your Buyology B2B quote is ready", accountEmailHtml("Your quote is ready", body));
@@ -659,9 +669,85 @@ public class EmailService {
         }
     }
 
-    /** One priced line on a B2B order, for the detailed order-placed email. */
+    /** One priced line on a B2B quote/order, for the detailed emails (incl. SKU + image). */
     public record B2bOrderLine(String name, String description, int quantity,
-                               String unitPrice, String lineTotal, String leadTime) {}
+                               String unitPrice, String lineTotal, String leadTime,
+                               String sku, String imageUrl) {}
+
+    // ── Shared B2B quote/order email fragments ──────────────────────────────────
+
+    /** Item table: image, name + description + SKU, qty, lead time, unit price, line total. */
+    private String b2bItemsTableHtml(String currency, String total, java.util.List<B2bOrderLine> lines) {
+        String ccy = nullToEmpty(currency);
+        String cell = "padding:10px 8px;border-bottom:1px solid #eee;vertical-align:top;";
+        StringBuilder rows = new StringBuilder();
+        if (lines != null) {
+            for (B2bOrderLine l : lines) {
+                String img = l.imageUrl() != null && !l.imageUrl().isBlank()
+                        ? "<img src=\"" + l.imageUrl() + "\" width=\"56\" height=\"56\" alt=\"\" style=\"width:56px;height:56px;object-fit:contain;border-radius:8px;background:#f4f2fb;border:1px solid #eee;\" />"
+                        : "<div style=\"width:56px;height:56px;border-radius:8px;background:#f4f2fb;border:1px solid #eee;\"></div>";
+                String desc = l.description() != null && !l.description().isBlank()
+                        ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">" + escapeHtml(l.description()) + "</span>" : "";
+                String sku = l.sku() != null && !l.sku().isBlank()
+                        ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">SKU: <span style=\"font-family:monospace;color:#4a4a4a;\">" + escapeHtml(l.sku()) + "</span></span>" : "";
+                String lead = l.leadTime() != null && !l.leadTime().isBlank() ? escapeHtml(l.leadTime()) : "—";
+                rows.append("<tr>")
+                    .append("<td style=\"").append(cell).append("width:64px;\">").append(img).append("</td>")
+                    .append("<td style=\"").append(cell).append("\"><strong>").append(escapeHtml(nullToEmpty(l.name()))).append("</strong>").append(desc).append(sku).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:center;\">").append(l.quantity()).append("</td>")
+                    .append("<td style=\"").append(cell).append("\">").append(lead).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.unitPrice())).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.lineTotal())).append("</td>")
+                    .append("</tr>");
+            }
+        }
+        String head = "padding:9px 8px;text-align:left;font-size:12px;text-transform:uppercase;color:#6b6b6b;border-bottom:2px solid #e5e1f2;";
+        return "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:8px 0 4px;font-family:Arial,sans-serif;font-size:13px;\">"
+                + "<thead><tr>"
+                + "<th style=\"" + head + "\">Image</th>"
+                + "<th style=\"" + head + "\">Item</th>"
+                + "<th style=\"" + head + "text-align:center;\">Qty</th>"
+                + "<th style=\"" + head + "\">Lead time</th>"
+                + "<th style=\"" + head + "text-align:right;\">Unit price</th>"
+                + "<th style=\"" + head + "text-align:right;\">Line total</th>"
+                + "</tr></thead><tbody>" + rows + "</tbody>"
+                + "<tfoot><tr>"
+                + "<td colspan=\"5\" style=\"padding:11px 8px;text-align:right;font-weight:bold;\">Total</td>"
+                + "<td style=\"padding:11px 8px;text-align:right;font-weight:bold;\">" + ccy + " " + nullToEmpty(total) + "</td>"
+                + "</tr></tfoot></table>";
+    }
+
+    /** Payment-terms + terms &amp; conditions blocks (each omitted when blank). */
+    private String b2bTermsHtml(String paymentTerms, String termsAndConditions) {
+        String block = "background:#faf9fd;border:1px solid #efecf8;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;color:#4a4a4a;";
+        String out = "";
+        if (paymentTerms != null && !paymentTerms.isBlank()) {
+            out += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Payment terms</p>"
+                    + "<div style=\"" + block + "\">" + escapeHtml(paymentTerms).replace("\n", "<br/>") + "</div>";
+        }
+        if (termsAndConditions != null && !termsAndConditions.isBlank()) {
+            out += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Terms &amp; conditions</p>"
+                    + "<div style=\"" + block + "\">" + escapeHtml(termsAndConditions).replace("\n", "<br/>") + "</div>";
+        }
+        return out;
+    }
+
+    /** Buyer (B2B member company / website / email) + Seller (Buyology) blocks, side by side. */
+    private String b2bPartiesHtml(String buyerCompany, String buyerWebsite, String buyerEmail) {
+        String buyerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Buyer</p>"
+                + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                + escapeHtml(nullToEmpty(buyerCompany))
+                + (buyerWebsite != null && !buyerWebsite.isBlank() ? "<br/>" + escapeHtml(buyerWebsite) : "")
+                + (buyerEmail != null && !buyerEmail.isBlank() ? "<br/>" + escapeHtml(buyerEmail) : "")
+                + "</p>";
+        String sellerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Seller</p>"
+                + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                + "Buyology<br/>https://buyology.online<br/>support@buyology.com</p>";
+        return "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:18px;\"><tr>"
+                + "<td width=\"50%\" style=\"vertical-align:top;padding-right:8px;\">" + buyerBlock + "</td>"
+                + "<td width=\"50%\" style=\"vertical-align:top;padding-left:8px;\">" + sellerBlock + "</td>"
+                + "</tr></table>";
+    }
 
     /** Internal notification to procurement: a member uploaded a bank-transfer proof to validate. */
     @Async
@@ -714,72 +800,15 @@ public class EmailService {
                                         String paymentTerms, String termsAndConditions,
                                         String buyerCompany, String buyerWebsite, String buyerEmail) {
         try {
-            String ccy = nullToEmpty(currency);
-            String cell = "padding:9px 8px;border-bottom:1px solid #eee;vertical-align:top;";
-            StringBuilder rows = new StringBuilder();
-            if (lines != null) {
-                for (B2bOrderLine l : lines) {
-                    String desc = l.description() != null && !l.description().isBlank()
-                            ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">" + escapeHtml(l.description()) + "</span>"
-                            : "";
-                    String lead = l.leadTime() != null && !l.leadTime().isBlank() ? escapeHtml(l.leadTime()) : "—";
-                    rows.append("<tr>")
-                        .append("<td style=\"").append(cell).append("\"><strong>").append(escapeHtml(nullToEmpty(l.name()))).append("</strong>").append(desc).append("</td>")
-                        .append("<td style=\"").append(cell).append("text-align:center;\">").append(l.quantity()).append("</td>")
-                        .append("<td style=\"").append(cell).append("\">").append(lead).append("</td>")
-                        .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.unitPrice())).append("</td>")
-                        .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.lineTotal())).append("</td>")
-                        .append("</tr>");
-                }
-            }
-            String head = "padding:9px 8px;text-align:left;font-size:12px;text-transform:uppercase;color:#6b6b6b;border-bottom:2px solid #e5e1f2;";
-            String itemsTable = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:8px 0 4px;font-family:Arial,sans-serif;font-size:13px;\">"
-                    + "<thead><tr>"
-                    + "<th style=\"" + head + "\">Item</th>"
-                    + "<th style=\"" + head + "text-align:center;\">Qty</th>"
-                    + "<th style=\"" + head + "\">Lead time</th>"
-                    + "<th style=\"" + head + "text-align:right;\">Unit price</th>"
-                    + "<th style=\"" + head + "text-align:right;\">Line total</th>"
-                    + "</tr></thead><tbody>" + rows + "</tbody>"
-                    + "<tfoot><tr>"
-                    + "<td colspan=\"4\" style=\"padding:11px 8px;text-align:right;font-weight:bold;\">Total</td>"
-                    + "<td style=\"padding:11px 8px;text-align:right;font-weight:bold;\">" + ccy + " " + nullToEmpty(total) + "</td>"
-                    + "</tr></tfoot></table>";
-
-            String block = "background:#faf9fd;border:1px solid #efecf8;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;color:#4a4a4a;";
-            String terms = "";
-            if (paymentTerms != null && !paymentTerms.isBlank()) {
-                terms += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Payment terms</p>"
-                        + "<div style=\"" + block + "\">" + escapeHtml(paymentTerms).replace("\n", "<br/>") + "</div>";
-            }
-            if (termsAndConditions != null && !termsAndConditions.isBlank()) {
-                terms += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Terms &amp; conditions</p>"
-                        + "<div style=\"" + block + "\">" + escapeHtml(termsAndConditions).replace("\n", "<br/>") + "</div>";
-            }
-
-            String buyerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Buyer</p>"
-                    + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
-                    + escapeHtml(nullToEmpty(buyerCompany))
-                    + (buyerWebsite != null && !buyerWebsite.isBlank() ? "<br/>" + escapeHtml(buyerWebsite) : "")
-                    + (buyerEmail != null && !buyerEmail.isBlank() ? "<br/>" + escapeHtml(buyerEmail) : "")
-                    + "</p>";
-            String sellerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Seller</p>"
-                    + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
-                    + "Buyology<br/>https://buyology.online<br/>support@buyology.com</p>";
-            String parties = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:18px;\"><tr>"
-                    + "<td width=\"50%\" style=\"vertical-align:top;padding-right:8px;\">" + buyerBlock + "</td>"
-                    + "<td width=\"50%\" style=\"vertical-align:top;padding-left:8px;\">" + sellerBlock + "</td>"
-                    + "</tr></table>";
-
             String body = "<p>Hi " + safeName(memberName) + ",</p>"
                     + "<p>Your bank-transfer payment has been validated and your order is now placed. "
                     + "Thank you for your business.</p>"
                     + "<p style=\"font-size:13px;color:#6b6b6b;\"><strong>Order:</strong> " + escapeHtml(nullToEmpty(orderRef))
                     + " &nbsp;·&nbsp; <strong>Quote:</strong> " + escapeHtml(nullToEmpty(quoteRef)) + "</p>"
                     + "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Order summary</p>"
-                    + itemsTable
-                    + terms
-                    + parties;
+                    + b2bItemsTableHtml(currency, total, lines)
+                    + b2bTermsHtml(paymentTerms, termsAndConditions)
+                    + b2bPartiesHtml(buyerCompany, buyerWebsite, buyerEmail);
 
             send(toEmail, "Your Buyology B2B order is placed", accountEmailHtml("Order placed", body));
             log.info("B2B order-placed email sent to {}", toEmail);

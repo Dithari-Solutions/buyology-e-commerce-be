@@ -25,7 +25,9 @@ import com.buyology.ecommerce.payment.dto.InitiatePaymentRequest;
 import com.buyology.ecommerce.payment.dto.PaymentInitiatedResponse;
 import com.buyology.ecommerce.payment.service.PaymentService;
 import com.buyology.ecommerce.product.domain.Product;
+import com.buyology.ecommerce.product.domain.ProductMedia;
 import com.buyology.ecommerce.product.domain.ProductTranslation;
+import com.buyology.ecommerce.product.repository.ProductMediaRepository;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import com.buyology.ecommerce.store.domain.Country;
@@ -87,6 +89,7 @@ public class B2bQuoteService {
     private final UserRoleRepository userRoleRepository;
     private final ContaboObjectService contaboObjectService;
     private final B2bMembershipApplicationRepository membershipApplicationRepo;
+    private final ProductMediaRepository productMediaRepository;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String procurementEmail;
@@ -108,7 +111,8 @@ public class B2bQuoteService {
                            PushNotificationService pushNotificationService,
                            UserRoleRepository userRoleRepository,
                            ContaboObjectService contaboObjectService,
-                           B2bMembershipApplicationRepository membershipApplicationRepo) {
+                           B2bMembershipApplicationRepository membershipApplicationRepo,
+                           ProductMediaRepository productMediaRepository) {
         this.quoteRepo = quoteRepo;
         this.itemRepo = itemRepo;
         this.membershipRepo = membershipRepo;
@@ -124,6 +128,7 @@ public class B2bQuoteService {
         this.userRoleRepository = userRoleRepository;
         this.contaboObjectService = contaboObjectService;
         this.membershipApplicationRepo = membershipApplicationRepo;
+        this.productMediaRepository = productMediaRepository;
     }
 
     // =========================================================================
@@ -640,9 +645,13 @@ public class B2bQuoteService {
         String memberEmail = resolveMemberEmail(quote.getUserId(), quote.getCredentialId());
         String memberName = resolveMemberName(quote.getUserId());
         try {
+            List<EmailService.B2bOrderLine> emailLines = buildEmailLines(lines);
+            BuyerDetails buyer = resolveBuyerDetails(quote.getUserId(), memberEmail);
             emailService.sendB2bQuoteReadyEmail(
                     memberEmail, memberName, quote.getId().toString(),
-                    total.toPlainString(), quote.getCurrency(),
+                    quote.getCurrency(), total.toPlainString(), emailLines,
+                    quote.getPaymentTerms(), quote.getTermsAndConditions(),
+                    buyer.company(), buyer.website(), buyer.email(),
                     quote.getValidUntil() != null ? quote.getValidUntil().toString() : null,
                     webBaseUrl + "/b2b/quotes/" + quote.getId());
         } catch (Exception e) {
@@ -913,36 +922,13 @@ public class B2bQuoteService {
     private void sendOrderPlacedEmail(B2bQuote quote) {
         try {
             List<B2bQuoteItem> lines = itemRepo.findByQuote_IdOrderByCreatedAtAsc(quote.getId());
-            List<EmailService.B2bOrderLine> emailLines = lines.stream()
-                    .map(l -> new EmailService.B2bOrderLine(
-                            l.getProductTitle() != null ? l.getProductTitle()
-                                    : (l.getSku() != null ? l.getSku() : "Item"),
-                            l.getDescription(),
-                            l.getQuantity() != null ? l.getQuantity() : 0,
-                            l.getQuotedUnitPrice() != null ? l.getQuotedUnitPrice().toPlainString() : "—",
-                            l.quotedLineTotal() != null ? l.quotedLineTotal().toPlainString() : "—",
-                            l.getLeadTime()))
-                    .collect(Collectors.toList());
+            List<EmailService.B2bOrderLine> emailLines = buildEmailLines(lines);
             BigDecimal total = lines.stream()
                     .map(B2bQuoteItem::quotedLineTotal)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            // Buyer (B2B member) company details from their membership + application.
-            String buyerCompany = null, buyerWebsite = null, buyerEmail = null;
-            B2bMembership membership = membershipRepo.findByUserId(quote.getUserId()).orElse(null);
-            if (membership != null) {
-                buyerCompany = membership.getCompanyName();
-                if (membership.getApplicationId() != null) {
-                    B2bMembershipApplication app = membershipApplicationRepo.findById(membership.getApplicationId()).orElse(null);
-                    if (app != null) {
-                        buyerWebsite = app.getWebsite();
-                        buyerEmail = app.getContactEmail();
-                        if (buyerCompany == null) buyerCompany = app.getCompanyName();
-                    }
-                }
-            }
             String memberEmail = resolveMemberEmail(quote.getUserId(), quote.getCredentialId());
-            if (buyerEmail == null) buyerEmail = memberEmail;
+            BuyerDetails buyer = resolveBuyerDetails(quote.getUserId(), memberEmail);
             String orderRef = quote.getOrderId() != null ? quote.getOrderId().toString() : quote.getId().toString();
 
             emailService.sendB2bOrderPlacedEmail(
@@ -950,10 +936,76 @@ public class B2bQuoteService {
                     quote.getId().toString(), orderRef,
                     quote.getCurrency(), total.toPlainString(), emailLines,
                     quote.getPaymentTerms(), quote.getTermsAndConditions(),
-                    buyerCompany, buyerWebsite, buyerEmail);
+                    buyer.company(), buyer.website(), buyer.email());
         } catch (Exception e) {
             log.warn("[B2B-QUOTE] order-placed email failed for quote {}: {}", quote.getId(), e.getMessage());
         }
+    }
+
+    /** Buyer's company details shown on the quote/order emails. */
+    private record BuyerDetails(String company, String website, String email) {}
+
+    /** Map priced quote lines to the detailed email rows (name, description, SKU, qty, lead time, prices, image). */
+    private List<EmailService.B2bOrderLine> buildEmailLines(List<B2bQuoteItem> lines) {
+        return lines.stream()
+                .map(l -> new EmailService.B2bOrderLine(
+                        l.getProductTitle() != null ? l.getProductTitle()
+                                : (l.getSku() != null ? l.getSku() : "Item"),
+                        l.getDescription(),
+                        l.getQuantity() != null ? l.getQuantity() : 0,
+                        l.getQuotedUnitPrice() != null ? l.getQuotedUnitPrice().toPlainString() : "—",
+                        l.quotedLineTotal() != null ? l.quotedLineTotal().toPlainString() : "—",
+                        l.getLeadTime(),
+                        l.getSku(),
+                        resolveProductImageUrl(l.getProductId())))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Resolve a presigned image URL for a product (primary media, else lowest order-index),
+     * so the email can render the item thumbnail. Best-effort — returns null on any miss.
+     */
+    private String resolveProductImageUrl(UUID productId) {
+        if (productId == null) return null;
+        try {
+            List<ProductMedia> media = productMediaRepository.findByProductId(productId);
+            if (media == null || media.isEmpty()) return null;
+            ProductMedia chosen = media.stream()
+                    .filter(m -> m.getMediaType() == ProductMedia.MediaType.IMAGE)
+                    .filter(m -> Boolean.TRUE.equals(m.getIsPrimary()))
+                    .findFirst()
+                    .orElseGet(() -> media.stream()
+                            .filter(m -> m.getMediaType() == ProductMedia.MediaType.IMAGE)
+                            .min(java.util.Comparator.comparing(m -> m.getOrderIndex() == null ? 0 : m.getOrderIndex()))
+                            .orElse(null));
+            if (chosen == null || chosen.getUrl() == null || chosen.getUrl().isBlank()) return null;
+            return contaboObjectService.getPresignedUrl(chosen.getUrl());
+        } catch (Exception e) {
+            log.warn("[B2B-QUOTE] could not resolve product image for {}: {}", productId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Resolve the buyer's company name / website / contact email from their membership and
+     * (if present) the underlying application, falling back to the member's login email.
+     */
+    private BuyerDetails resolveBuyerDetails(UUID userId, String fallbackEmail) {
+        String company = null, website = null, email = null;
+        B2bMembership membership = userId != null ? membershipRepo.findByUserId(userId).orElse(null) : null;
+        if (membership != null) {
+            company = membership.getCompanyName();
+            if (membership.getApplicationId() != null) {
+                B2bMembershipApplication app = membershipApplicationRepo.findById(membership.getApplicationId()).orElse(null);
+                if (app != null) {
+                    website = app.getWebsite();
+                    email = app.getContactEmail();
+                    if (company == null) company = app.getCompanyName();
+                }
+            }
+        }
+        if (email == null || email.isBlank()) email = fallbackEmail;
+        return new BuyerDetails(company, website, email);
     }
 
     private String resolveMemberCompanyName(UUID userId) {
