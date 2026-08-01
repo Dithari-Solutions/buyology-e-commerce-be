@@ -4,10 +4,16 @@ import com.buyology.ecommerce.admin.dto.AdminEmailLookupResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserSummaryResponse;
+import com.buyology.ecommerce.admin.dto.ChangeAdminPasswordRequest;
 import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
 import com.buyology.ecommerce.admin.dto.PromoteToAdminRequest;
+import com.buyology.ecommerce.admin.dto.SetAdminRolesRequest;
+import com.buyology.ecommerce.admin.dto.UpdateAdminRequest;
+import com.buyology.ecommerce.role.domain.UserPermission;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.auth.repository.RefreshTokenRepository;
+import com.buyology.ecommerce.role.repository.UserPermissionRepository;
 import com.buyology.ecommerce.common.utils.PasswordPolicy;
 import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
@@ -44,10 +50,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -59,6 +67,8 @@ import java.util.stream.Collectors;
 public class AdminUserService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
+
+    private static final String SUPERADMIN = "SUPERADMIN";
 
     private static final DateTimeFormatter JOINED_ON =
             DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH).withZone(ZoneOffset.UTC);
@@ -73,6 +83,8 @@ public class AdminUserService {
     private final CartItemSpecSelectionRepository specSelectionRepository;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final UserPermissionRepository userPermissionRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     public AdminUserService(UserRepository userRepository,
                             UserProfilesRepository profilesRepository,
@@ -83,7 +95,9 @@ public class AdminUserService {
                             CartItemRepository cartItemRepository,
                             CartItemSpecSelectionRepository specSelectionRepository,
                             RoleRepository roleRepository,
-                            UserRoleRepository userRoleRepository) {
+                            UserRoleRepository userRoleRepository,
+                            UserPermissionRepository userPermissionRepository,
+                            RefreshTokenRepository refreshTokenRepository) {
         this.userRepository = userRepository;
         this.profilesRepository = profilesRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -94,6 +108,8 @@ public class AdminUserService {
         this.specSelectionRepository = specSelectionRepository;
         this.roleRepository = roleRepository;
         this.userRoleRepository = userRoleRepository;
+        this.userPermissionRepository = userPermissionRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
     }
 
     // ─── Create an admin user with roles (SUPERADMIN only) ────────────────────
@@ -242,6 +258,246 @@ public class AdminUserService {
         return ApiResponse.success(detail, "Account promoted to admin");
     }
 
+    // ─── Edit / delete an admin (SUPERADMIN only) ─────────────────────────────
+
+    /** Updates an admin's name and email. Absent fields are left as they are. */
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> updateAdmin(UUID userId, UpdateAdminRequest req) {
+        Users user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin not found");
+        }
+        if (isRetired(user)) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "This account has been deleted and cannot be edited.");
+        }
+
+        if (req.getFirstName() != null) user.setFirstName(trimToNull(req.getFirstName()));
+        if (req.getLastName() != null) user.setLastName(trimToNull(req.getLastName()));
+
+        AuthCredentials credential = primaryCredential(user.getId());
+        String newEmail = normaliseEmail(req.getEmail());
+        if (newEmail != null && credential != null && !newEmail.equalsIgnoreCase(credential.getEmail())) {
+            // Same diagnosis as creating an admin, minus this account's own rows — otherwise an admin
+            // would always collide with itself the moment anything else on the form was edited.
+            AdminEmailLookupResponse holder = lookupEmailHolder(newEmail, false, user.getId());
+            if (!holder.isAvailable()) {
+                return ApiResponse.failure(HttpStatus.CONFLICT, holder.getReason());
+            }
+            credential.setEmail(newEmail);
+            authCredentialRepository.save(credential);
+        }
+
+        userRepository.save(user);
+        log.info("Admin {} updated by {}", user.getId(), actorIdForLog());
+        return ApiResponse.success(buildAdminDetail(user, credential), "Admin updated");
+    }
+
+    /**
+     * Sets a new password for an admin and signs them out everywhere.
+     *
+     * <p>Revoking the refresh tokens is the point, not a side effect: this is the lost-access
+     * recovery path, so any session already open on the old password must stop working.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<String>> changeAdminPassword(UUID userId, ChangeAdminPasswordRequest req) {
+        Users user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin not found");
+        }
+        if (isRetired(user)) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "This account has been deleted.");
+        }
+        try {
+            PasswordPolicy.validate(req.getNewPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+
+        List<AuthCredentials> credentials = authCredentialRepository.findByUserId(user.getId()).stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .collect(Collectors.toList());
+        if (credentials.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "This account signs in through an external provider and has no password to change.");
+        }
+
+        String hash = PasswordUtils.hashPassword(req.getNewPassword());
+        Instant now = Instant.now();
+        int revoked = 0;
+        for (AuthCredentials c : credentials) {
+            c.setPasswordHash(hash);
+            c.setIsActive(true);
+            authCredentialRepository.save(c);
+            revoked += refreshTokenRepository.revokeAllActiveByAuthCredential(c, now);
+        }
+
+        log.info("Password reset for admin {} by {} ({} session(s) revoked)",
+                user.getId(), actorIdForLog(), revoked);
+        return ApiResponse.success("updated",
+                "Password updated. The admin has been signed out of " + revoked + " active session(s).");
+    }
+
+    /** Replaces an admin's roles with exactly {@code req.roleIds}. */
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<List<String>>> setAdminRoles(UUID userId, SetAdminRolesRequest req) {
+        Users user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin not found");
+        }
+
+        List<UUID> requested = req.getRoleIds() == null ? List.of() : req.getRoleIds();
+        LinkedHashSet<UUID> desired = new LinkedHashSet<>(requested);
+        desired.remove(null);
+        if (desired.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "At least one role is required");
+        }
+
+        Map<UUID, Role> roles = new HashMap<>();
+        for (UUID roleId : desired) {
+            Role role = roleRepository.findById(roleId).orElse(null);
+            if (role == null) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Role not found: " + roleId);
+            }
+            roles.put(roleId, role);
+        }
+
+        boolean keepsSuperadmin = roles.values().stream().anyMatch(r -> SUPERADMIN.equalsIgnoreCase(r.getName()));
+        boolean hadSuperadmin = userRoleRepository.findRoleNamesByUserId(userId).stream()
+                .anyMatch(SUPERADMIN::equalsIgnoreCase);
+        if (hadSuperadmin && !keepsSuperadmin) {
+            if (userId.equals(SecurityUtils.currentUserIdOrNull())) {
+                return ApiResponse.failure(HttpStatus.CONFLICT,
+                        "You cannot remove your own Super Admin role — you would lose access to this page. "
+                                + "Ask another Super Admin to do it.");
+            }
+            if (countOtherSuperadmins(userId) == 0) {
+                return ApiResponse.failure(HttpStatus.CONFLICT,
+                        "This is the only Super Admin. Grant the role to someone else first.");
+            }
+        }
+
+        Users assignedBy = currentActor();
+        for (UserRole existing : userRoleRepository.findByIdUserId(userId)) {
+            UUID roleId = existing.getId().getRoleId();
+            if (!desired.contains(roleId)) {
+                userRoleRepository.deleteByIdUserIdAndIdRoleId(userId, roleId);
+            }
+        }
+        for (UUID roleId : desired) {
+            if (!userRoleRepository.existsByIdUserIdAndIdRoleId(userId, roleId)) {
+                UserRole ur = new UserRole();
+                ur.setId(new UserRoleId(userId, roleId));
+                ur.setUser(user);
+                ur.setRole(roles.get(roleId));
+                ur.setAssignedBy(assignedBy);
+                userRoleRepository.save(ur);
+            }
+        }
+
+        List<String> names = roles.values().stream().map(Role::getName).sorted().toList();
+        log.info("Admin {} roles set to {} by {}", userId, names, actorIdForLog());
+        return ApiResponse.success(names, "Roles updated");
+    }
+
+    /**
+     * Deletes an admin account.
+     *
+     * <p>Anonymised rather than removed from the table. {@code user_roles.assigned_by} and various
+     * audit trails point at admin rows, so a hard delete would either fail on a foreign key or erase
+     * the record of who granted what. The email is rewritten so the address can be reused, and every
+     * session is revoked so access stops immediately.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<String>> deleteAdmin(UUID userId) {
+        Users user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Admin not found");
+        }
+        if (user.getUserType() != Users.UserType.ADMIN) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "This is a customer account. Delete it from the Users page instead.");
+        }
+        if (userId.equals(SecurityUtils.currentUserIdOrNull())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "You cannot delete your own account.");
+        }
+        if (isRetired(user)) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "This account has already been deleted.");
+        }
+        boolean isSuperadmin = userRoleRepository.findRoleNamesByUserId(userId).stream()
+                .anyMatch(SUPERADMIN::equalsIgnoreCase);
+        if (isSuperadmin && countOtherSuperadmins(userId) == 0) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "This is the only Super Admin. Promote someone else before deleting this account.");
+        }
+
+        Instant now = Instant.now();
+        int revoked = 0;
+        for (AuthCredentials c : authCredentialRepository.findByUserId(userId)) {
+            revoked += refreshTokenRepository.revokeAllActiveByAuthCredential(c, now);
+            c.setIsActive(false);
+            c.setEmail("deleted+" + userId + "@deleted.buyology.local");
+            authCredentialRepository.save(c);
+        }
+
+        // Drop the access grants outright — a deleted admin restored by hand should come back with no
+        // privileges rather than silently regaining whatever it held.
+        for (UserRole ur : userRoleRepository.findByIdUserId(userId)) {
+            userRoleRepository.deleteByIdUserIdAndIdRoleId(userId, ur.getId().getRoleId());
+        }
+        for (UserPermission up : userPermissionRepository.findByIdUserId(userId)) {
+            userPermissionRepository.deleteByIdUserIdAndIdPermissionId(userId, up.getId().getPermissionId());
+        }
+
+        user.setStatus("DELETED");
+        user.setDeletedAt(now);
+        userRepository.save(user);
+
+        log.info("Admin {} deleted by {} ({} session(s) revoked)", userId, actorIdForLog(), revoked);
+        return ApiResponse.success("deleted", "Admin deleted and signed out everywhere.");
+    }
+
+    /** Live SUPERADMIN accounts other than {@code excludingUserId}. */
+    private long countOtherSuperadmins(UUID excludingUserId) {
+        return userRoleRepository.findUserIdsByRoleName(SUPERADMIN).stream()
+                .filter(id -> !id.equals(excludingUserId))
+                .map(id -> userRepository.findById(id).orElse(null))
+                .filter(Objects::nonNull)
+                .filter(u -> !isRetired(u))
+                .count();
+    }
+
+    private AuthCredentials primaryCredential(UUID userId) {
+        List<AuthCredentials> all = authCredentialRepository.findByUserId(userId);
+        return all.stream()
+                .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                .findFirst()
+                .orElseGet(() -> all.stream().findFirst().orElse(null));
+    }
+
+    private AdminUserDetailResponse buildAdminDetail(Users user, AuthCredentials credential) {
+        AdminUserDetailResponse detail = new AdminUserDetailResponse();
+        detail.setUserId(user.getId());
+        detail.setAuthCredentialId(credential != null ? credential.getId() : null);
+        detail.setEmail(credential != null ? credential.getEmail() : null);
+        detail.setUserType(user.getUserType() != null ? user.getUserType().name() : null);
+        detail.setStatus(user.getStatus());
+        detail.setJoinedAt(user.getCreatedAt());
+        detail.setFirstName(user.getFirstName());
+        detail.setLastName(user.getLastName());
+        return detail;
+    }
+
+    private static String trimToNull(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static Object actorIdForLog() {
+        UUID id = SecurityUtils.currentUserIdOrNull();
+        return id != null ? id : "system";
+    }
+
     // ─── Email availability lookup (SUPERADMIN only) ──────────────────────────
 
     /** Reports what currently holds {@code rawEmail}, so a create-admin conflict is actionable. */
@@ -266,10 +522,20 @@ public class AdminUserService {
      *             so such orphans survive user deletion and would otherwise block the email forever.
      */
     private AdminEmailLookupResponse lookupEmailHolder(String email, boolean heal) {
+        return lookupEmailHolder(email, heal, null);
+    }
+
+    /**
+     * @param excludeUserId account whose own credentials do not count as a clash — set when editing an
+     *                      existing admin, which would otherwise always collide with itself.
+     */
+    private AdminEmailLookupResponse lookupEmailHolder(String email, boolean heal, UUID excludeUserId) {
         AdminEmailLookupResponse result = new AdminEmailLookupResponse();
         result.setEmail(email);
 
-        List<AuthCredentials> credentials = authCredentialRepository.findAllByEmailIgnoreCase(email);
+        List<AuthCredentials> credentials = authCredentialRepository.findAllByEmailIgnoreCase(email).stream()
+                .filter(c -> excludeUserId == null || !excludeUserId.equals(c.getUserId()))
+                .collect(Collectors.toList());
 
         AuthCredentials blocking = null;
         Users blockingUser = null;

@@ -3,8 +3,11 @@ package com.buyology.ecommerce.admin.controller;
 import com.buyology.ecommerce.admin.dto.AdminEmailLookupResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
+import com.buyology.ecommerce.admin.dto.ChangeAdminPasswordRequest;
 import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
 import com.buyology.ecommerce.admin.dto.PromoteToAdminRequest;
+import com.buyology.ecommerce.admin.dto.SetAdminRolesRequest;
+import com.buyology.ecommerce.admin.dto.UpdateAdminRequest;
 import com.buyology.ecommerce.admin.service.AdminInactivityService;
 import com.buyology.ecommerce.admin.service.AdminUserService;
 import com.buyology.ecommerce.auth.service.MfaService;
@@ -74,6 +77,48 @@ public class AdminUserController {
             @PathVariable UUID userId,
             @Valid @RequestBody PromoteToAdminRequest request) {
         return adminUserService.promoteToAdmin(userId, request);
+    }
+
+    @Operation(summary = "Edit an admin's name and email (SUPERADMIN only)",
+               description = "Applies only the fields present in the body. Changing the email runs the "
+                       + "same conflict check as creating an admin, ignoring this account's own rows.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PutMapping("/{userId}")
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> updateAdmin(
+            @PathVariable UUID userId,
+            @Valid @RequestBody UpdateAdminRequest request) {
+        return adminUserService.updateAdmin(userId, request);
+    }
+
+    @Operation(summary = "Set an admin's password (SUPERADMIN only)",
+               description = "Lost-access recovery: sets a new password without needing the old one and "
+                       + "revokes every active session, so sessions on the previous password stop working.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PostMapping("/{userId}/password")
+    public ResponseEntity<ApiResponse<String>> changeAdminPassword(
+            @PathVariable UUID userId,
+            @Valid @RequestBody ChangeAdminPasswordRequest request) {
+        return adminUserService.changeAdminPassword(userId, request);
+    }
+
+    @Operation(summary = "Replace an admin's roles (SUPERADMIN only)",
+               description = "Sets the admin's roles to exactly the supplied ids in one atomic call. "
+                       + "Refuses to remove the caller's own Super Admin role, or the last one on the platform.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PutMapping("/{userId}/roles")
+    public ResponseEntity<ApiResponse<java.util.List<String>>> setAdminRoles(
+            @PathVariable UUID userId,
+            @Valid @RequestBody SetAdminRolesRequest request) {
+        return adminUserService.setAdminRoles(userId, request);
+    }
+
+    @Operation(summary = "Delete an admin (SUPERADMIN only)",
+               description = "Revokes the account's sessions and access grants and anonymises it, freeing "
+                       + "the email for reuse. Refuses to delete the caller or the last Super Admin.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @DeleteMapping("/{userId}")
+    public ResponseEntity<ApiResponse<String>> deleteAdmin(@PathVariable UUID userId) {
+        return adminUserService.deleteAdmin(userId);
     }
 
     @Operation(summary = "List all users (paginated)")
