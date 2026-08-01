@@ -322,6 +322,7 @@ public class RepairService {
         CourierFeeChargeRequest charge = new CourierFeeChargeRequest(
                 null,                        // refundRequestId — this is a repair fee
                 request.getId(),             // repairId
+                null,                        // sellRequestId — this is a repair fee
                 request.getCredentialId(),   // payer (auth_credentials.id / sub)
                 COURIER_FEE_AED,
                 FEE_BASE_CURRENCY,

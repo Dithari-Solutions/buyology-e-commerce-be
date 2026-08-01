@@ -957,6 +957,92 @@ public class EmailService {
         }
     }
 
+    // ── Sell (trade-in) requests ───────────────────────────────────────────────
+    // Mirrors the repair emails above. Each one no-ops on a blank recipient so callers don't have
+    // to null-check a contact address that was snapshotted at submit time.
+
+    /** Customer confirmation: their sell request was received. */
+    @Async
+    public void sendSellReceivedEmail(String toEmail, String customerName, String requestRef, String productName) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)));
+            send(toEmail, "We received your sell request", html);
+            log.info("Sell received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Internal notification to procurement: a customer wants to sell a device. */
+    @Async
+    public void sendSellTeamNotificationEmail(String teamEmail, String customerName, String requestRef,
+                                              String productName, String brand, String model,
+                                              String condition, String description, String reviewUrl) {
+        if (teamEmail == null || teamEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-request-notification.html")
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(nullToEmpty(customerName)))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{BRAND}}", escapeHtml(nullToEmpty(brand)))
+                    .replace("{{MODEL}}", escapeHtml(nullToEmpty(model)))
+                    .replace("{{CONDITION}}", escapeHtml(nullToEmpty(condition)))
+                    .replace("{{DESCRIPTION}}", escapeHtml(nullToEmpty(description)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(teamEmail, "New sell request: " + nullToEmpty(productName), html);
+            log.info("Sell team notification sent to {}", teamEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell team notification to {}: {}", teamEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Customer notification for a sell-request status change (with a stage label + optional note).
+     * Silently swallows failures.
+     */
+    @Async
+    public void sendSellStatusEmail(String toEmail, String customerName, String requestRef,
+                                    String productName, String stageLabel, String note) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-status-update.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{STAGE_LABEL}}", escapeHtml(nullToEmpty(stageLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your sell request: " + nullToEmpty(productName), html);
+            log.info("Sell status email ({}) sent to {}", stageLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Customer notification: procurement quoted what Buyology will pay, awaiting their approval. */
+    @Async
+    public void sendSellOfferEmail(String toEmail, String customerName, String requestRef,
+                                   String productName, String currency, BigDecimal price,
+                                   String validFor, String note) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-offer.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{PRICE}}", escapeHtml(money(currency, price)))
+                    .replace("{{VALID_FOR}}", escapeHtml(nullToEmpty(validFor)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Your Buyology offer is ready: " + nullToEmpty(productName), html);
+            log.info("Sell offer email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell offer email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Order confirmation & status updates ────────────────────────────────────
 
     /** A single line on the order-confirmation email. */

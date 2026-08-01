@@ -53,6 +53,10 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     Optional<PaymentTransaction> findFirstByRepairIdAndPurposeAndStatusInOrderByCreatedAtDesc(
             UUID repairId, PaymentPurpose purpose, List<PaymentStatus> statuses);
 
+    /** Latest courier-fee charge for a sell request in any of the given statuses (resume/idempotency). */
+    Optional<PaymentTransaction> findFirstBySellRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+            UUID sellRequestId, PaymentPurpose purpose, List<PaymentStatus> statuses);
+
     /**
      * Delivery-fee revenue, bucketed by time. Sums successfully-charged courier
      * return-pickup fees (purpose = COURIER_RETURN_FEE) per period. Amounts are in

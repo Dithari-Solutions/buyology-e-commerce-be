@@ -129,6 +129,10 @@ services:
       REPAIR_AI_ESTIMATE_ENABLED: ${REPAIR_AI_ESTIMATE_ENABLED:-true}
       # Optional external price-list file (mounted into the container). Blank = bundled.
       REPAIR_PRICING_PATH: ${REPAIR_PRICING_PATH:-}
+      # Claude API — AI sell (trade-in) valuation. Same key; blank = feature off.
+      SELL_AI_ESTIMATE_ENABLED: ${SELL_AI_ESTIMATE_ENABLED:-true}
+      # Optional external buy-back policy file (mounted into the container). Blank = bundled.
+      SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
       FIREBASE_ENABLED: "true"
       COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY}
       CONTABO_S3_ENDPOINT: ${CONTABO_S3_ENDPOINT}
