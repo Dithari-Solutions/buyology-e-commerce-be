@@ -105,6 +105,23 @@ public class SellRequest {
     @Column(name = "courier_fee_paid", nullable = false)
     private boolean courierFeePaid = false;
 
+    /**
+     * True when the customer paid for a courier pickup and then switched to a free store
+     * drop-off: we took money for a collection we will no longer make, so a refund is owed.
+     * Surfaced to procurement in the dashboard — nothing refunds automatically.
+     */
+    @Column(name = "courier_fee_refund_due", nullable = false)
+    private boolean courierFeeRefundDue = false;
+
+    /** The inbound method in force before the customer's last change (null if never changed). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "previous_inbound_delivery_method", length = 20)
+    private SellDeliveryMethod previousInboundDeliveryMethod;
+
+    /** When the customer last changed how the device reaches us. Drives the "changed" flag for the team. */
+    @Column(name = "inbound_delivery_changed_at")
+    private Instant inboundDeliveryChangedAt;
+
     // ── Offer (what Buyology pays) ────────────────────────────────────────────
 
     @Column(name = "offer_price", precision = 12, scale = 2)
@@ -279,6 +296,15 @@ public class SellRequest {
 
     public boolean isCourierFeePaid() { return courierFeePaid; }
     public void setCourierFeePaid(boolean courierFeePaid) { this.courierFeePaid = courierFeePaid; }
+
+    public boolean isCourierFeeRefundDue() { return courierFeeRefundDue; }
+    public void setCourierFeeRefundDue(boolean courierFeeRefundDue) { this.courierFeeRefundDue = courierFeeRefundDue; }
+
+    public SellDeliveryMethod getPreviousInboundDeliveryMethod() { return previousInboundDeliveryMethod; }
+    public void setPreviousInboundDeliveryMethod(SellDeliveryMethod m) { this.previousInboundDeliveryMethod = m; }
+
+    public Instant getInboundDeliveryChangedAt() { return inboundDeliveryChangedAt; }
+    public void setInboundDeliveryChangedAt(Instant inboundDeliveryChangedAt) { this.inboundDeliveryChangedAt = inboundDeliveryChangedAt; }
 
     public BigDecimal getOfferPrice() { return offerPrice; }
     public void setOfferPrice(BigDecimal offerPrice) { this.offerPrice = offerPrice; }

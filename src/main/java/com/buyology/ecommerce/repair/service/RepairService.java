@@ -212,29 +212,52 @@ public class RepairService {
     }
 
     /**
-     * Choose how the device reaches the store (only valid while SUBMITTED). STORE_DROPOFF requires
-     * a store branch and is free — the request advances to AWAITING_DEVICE immediately.
-     * COURIER_PICKUP records the 20 AED fee and returns a Paymob checkout session: the request
-     * stays SUBMITTED (courier method recorded, unpaid) until the fee is paid, when the
-     * {@link RepairCourierFeePaidEvent} webhook advances it to AWAITING_DEVICE.
+     * Choose — or change — how the device reaches the store. STORE_DROPOFF requires a store branch
+     * and is free, so the request advances to AWAITING_DEVICE immediately. COURIER_PICKUP records
+     * the 20 AED fee and returns a Paymob checkout session: the request stays SUBMITTED (courier
+     * method recorded, unpaid) until the fee is paid, when the {@link RepairCourierFeePaidEvent}
+     * webhook advances it to AWAITING_DEVICE.
+     *
+     * <p>Valid while SUBMITTED <em>or</em> AWAITING_DEVICE — the customer can change their mind
+     * right up until the device is with us and the diagnosis starts (UNDER_REVIEW). A change is
+     * recorded on the request ({@code previousInboundDeliveryMethod} +
+     * {@code inboundDeliveryChangedAt}) and re-raises the unread flag, so the repair team sees it
+     * rather than dispatching a courier for a device the customer is now bringing in themselves.
+     *
+     * <p>Switching away from an already-PAID courier pickup sets {@code courierFeeRefundDue}: we
+     * collected money for a collection that will not happen. Nothing refunds automatically — the
+     * flag exists so the team can settle it.
      */
     @Transactional
     public RepairDeliveryResponse chooseDelivery(UUID userId, UUID id, RepairDeliveryMethod method,
                                                  UUID storeLocationId, String currency, String redirectionUrl) {
         RepairRequest request = requireOwner(loadOrThrow(id), userId);
-        if (request.getStatus() != RepairStatus.SUBMITTED) {
-            throw new IllegalStateException("Delivery can only be chosen while the request is awaiting your choice.");
+        if (request.getStatus() != RepairStatus.SUBMITTED && request.getStatus() != RepairStatus.AWAITING_DEVICE) {
+            throw new IllegalStateException(
+                    "Your device is already with our team — the delivery method can no longer be changed.");
         }
         if (method != RepairDeliveryMethod.COURIER_PICKUP && method != RepairDeliveryMethod.STORE_DROPOFF) {
             throw new IllegalArgumentException("Inbound delivery must be COURIER_PICKUP or STORE_DROPOFF.");
+        }
+
+        RepairDeliveryMethod previous = request.getInboundDeliveryMethod();
+        boolean methodChanged = previous != null && previous != method;
+        if (methodChanged) {
+            request.setPreviousInboundDeliveryMethod(previous);
+            request.setInboundDeliveryChangedAt(Instant.now());
         }
 
         request.setInboundDeliveryMethod(method);
         if (method == RepairDeliveryMethod.STORE_DROPOFF) {
             StoreLocation branch = requireStoreLocation(storeLocationId);
             request.setStoreLocationId(branch.getId());
-            request.setCourierFeeAmount(null);
-            request.setCourierFeeCurrency(null);
+            if (previous == RepairDeliveryMethod.COURIER_PICKUP && request.isCourierFeePaid()) {
+                // Keep the amount/currency as the record of what was actually charged.
+                request.setCourierFeeRefundDue(true);
+            } else {
+                request.setCourierFeeAmount(null);
+                request.setCourierFeeCurrency(null);
+            }
             request.setCourierFeePaid(false);
             request.setStatus(RepairStatus.AWAITING_DEVICE);
             request.setAdminUnread(true);
@@ -242,10 +265,14 @@ public class RepairService {
             return new RepairDeliveryResponse(toResponse(request), null);
         }
 
-        // Courier pickup — the customer pays the fee first; the request stays SUBMITTED (unpaid).
+        // Courier pickup — the customer pays the fee first; the request drops back to SUBMITTED
+        // (unpaid) so a switch from an already-confirmed drop-off doesn't leave it "awaiting" a
+        // collection nobody has paid for yet.
         request.setStoreLocationId(null);
         applyCourierFee(request, currency);
         request.setCourierFeePaid(false);
+        request.setStatus(RepairStatus.SUBMITTED);
+        request.setAdminUnread(true);
         request = repairRepo.save(request);
         PaymentInitiatedResponse payment = initiateRepairCourierFee(request, redirectionUrl);
         return new RepairDeliveryResponse(toResponse(request), payment);

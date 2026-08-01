@@ -39,6 +39,10 @@ public class SellRequestResponse {
     private BigDecimal courierFeeAmount;
     private String courierFeeCurrency;
     private boolean courierFeePaid;
+    /** Money taken for a courier pickup the customer then swapped for a store drop-off. */
+    private boolean courierFeeRefundDue;
+    private SellDeliveryMethod previousInboundDeliveryMethod;
+    private Instant inboundDeliveryChangedAt;
 
     private BigDecimal offerPrice;
     private String offerPriceCurrency;
@@ -100,6 +104,9 @@ public class SellRequestResponse {
         dto.courierFeeAmount = r.getCourierFeeAmount();
         dto.courierFeeCurrency = r.getCourierFeeCurrency();
         dto.courierFeePaid = r.isCourierFeePaid();
+        dto.courierFeeRefundDue = r.isCourierFeeRefundDue();
+        dto.previousInboundDeliveryMethod = r.getPreviousInboundDeliveryMethod();
+        dto.inboundDeliveryChangedAt = r.getInboundDeliveryChangedAt();
         dto.offerPrice = r.getOfferPrice();
         dto.offerPriceCurrency = r.getOfferPriceCurrency();
         dto.offerValidFor = r.getOfferValidFor();
@@ -162,6 +169,12 @@ public class SellRequestResponse {
     public void setCourierFeeCurrency(String courierFeeCurrency) { this.courierFeeCurrency = courierFeeCurrency; }
     public boolean isCourierFeePaid() { return courierFeePaid; }
     public void setCourierFeePaid(boolean courierFeePaid) { this.courierFeePaid = courierFeePaid; }
+    public boolean isCourierFeeRefundDue() { return courierFeeRefundDue; }
+    public void setCourierFeeRefundDue(boolean v) { this.courierFeeRefundDue = v; }
+    public SellDeliveryMethod getPreviousInboundDeliveryMethod() { return previousInboundDeliveryMethod; }
+    public void setPreviousInboundDeliveryMethod(SellDeliveryMethod v) { this.previousInboundDeliveryMethod = v; }
+    public Instant getInboundDeliveryChangedAt() { return inboundDeliveryChangedAt; }
+    public void setInboundDeliveryChangedAt(Instant v) { this.inboundDeliveryChangedAt = v; }
     public BigDecimal getOfferPrice() { return offerPrice; }
     public void setOfferPrice(BigDecimal offerPrice) { this.offerPrice = offerPrice; }
     public String getOfferPriceCurrency() { return offerPriceCurrency; }

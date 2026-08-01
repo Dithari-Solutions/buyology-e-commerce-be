@@ -239,29 +239,52 @@ public class SellService {
     }
 
     /**
-     * Choose how the device reaches the store (only valid while SUBMITTED). STORE_DROPOFF requires
-     * a store branch and is free — the request advances to AWAITING_DEVICE immediately.
-     * COURIER_PICKUP records the 20 AED fee and returns a Paymob checkout session: the request
-     * stays SUBMITTED (courier method recorded, unpaid) until the fee is paid, when the
-     * {@link SellCourierFeePaidEvent} webhook advances it to AWAITING_DEVICE.
+     * Choose — or change — how the device reaches the store. STORE_DROPOFF requires a store branch
+     * and is free, so the request advances to AWAITING_DEVICE immediately. COURIER_PICKUP records
+     * the 20 AED fee and returns a Paymob checkout session: the request stays SUBMITTED (courier
+     * method recorded, unpaid) until the fee is paid, when the {@link SellCourierFeePaidEvent}
+     * webhook advances it to AWAITING_DEVICE.
+     *
+     * <p>Valid while SUBMITTED <em>or</em> AWAITING_DEVICE — the customer can change their mind
+     * right up until the device is with us and the inspection starts (UNDER_REVIEW). A change is
+     * recorded on the request ({@code previousInboundDeliveryMethod} +
+     * {@code inboundDeliveryChangedAt}) and re-raises the unread flag, so procurement sees it
+     * rather than dispatching a courier for a device the customer is now bringing in themselves.
+     *
+     * <p>Switching away from an already-PAID courier pickup sets {@code courierFeeRefundDue}: we
+     * collected money for a collection that will not happen. Nothing refunds automatically — the
+     * flag exists so the team can settle it.
      */
     @Transactional
     public SellDeliveryResponse chooseDelivery(UUID userId, UUID id, SellDeliveryMethod method,
                                                UUID storeLocationId, String currency, String redirectionUrl) {
         SellRequest request = requireOwner(loadOrThrow(id), userId);
-        if (request.getStatus() != SellStatus.SUBMITTED) {
-            throw new IllegalStateException("Delivery can only be chosen while the request is awaiting your choice.");
+        if (request.getStatus() != SellStatus.SUBMITTED && request.getStatus() != SellStatus.AWAITING_DEVICE) {
+            throw new IllegalStateException(
+                    "Your device is already with our team — the delivery method can no longer be changed.");
         }
         if (method != SellDeliveryMethod.COURIER_PICKUP && method != SellDeliveryMethod.STORE_DROPOFF) {
             throw new IllegalArgumentException("Inbound delivery must be COURIER_PICKUP or STORE_DROPOFF.");
+        }
+
+        SellDeliveryMethod previous = request.getInboundDeliveryMethod();
+        boolean methodChanged = previous != null && previous != method;
+        if (methodChanged) {
+            request.setPreviousInboundDeliveryMethod(previous);
+            request.setInboundDeliveryChangedAt(Instant.now());
         }
 
         request.setInboundDeliveryMethod(method);
         if (method == SellDeliveryMethod.STORE_DROPOFF) {
             StoreLocation branch = requireStoreLocation(storeLocationId);
             request.setStoreLocationId(branch.getId());
-            request.setCourierFeeAmount(null);
-            request.setCourierFeeCurrency(null);
+            if (previous == SellDeliveryMethod.COURIER_PICKUP && request.isCourierFeePaid()) {
+                // Keep the amount/currency as the record of what was actually charged.
+                request.setCourierFeeRefundDue(true);
+            } else {
+                request.setCourierFeeAmount(null);
+                request.setCourierFeeCurrency(null);
+            }
             request.setCourierFeePaid(false);
             request.setStatus(SellStatus.AWAITING_DEVICE);
             request.setAdminUnread(true);
@@ -269,10 +292,14 @@ public class SellService {
             return new SellDeliveryResponse(toResponse(request), null);
         }
 
-        // Courier pickup — the customer pays the fee first; the request stays SUBMITTED (unpaid).
+        // Courier pickup — the customer pays the fee first; the request drops back to SUBMITTED
+        // (unpaid) so a switch from an already-confirmed drop-off doesn't leave it "awaiting" a
+        // collection nobody has paid for yet.
         request.setStoreLocationId(null);
         applyCourierFee(request, currency);
         request.setCourierFeePaid(false);
+        request.setStatus(SellStatus.SUBMITTED);
+        request.setAdminUnread(true);
         request = sellRepo.save(request);
         PaymentInitiatedResponse payment = initiateSellCourierFee(request, redirectionUrl);
         return new SellDeliveryResponse(toResponse(request), payment);
