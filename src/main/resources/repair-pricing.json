@@ -1,0 +1,51 @@
+{
+  "currency": "AED",
+  "ram_upgrade": {
+    "DDR4": [
+      { "capacity_gb": 8,  "price_aed": 180 },
+      { "capacity_gb": 16, "price_aed": 280 },
+      { "capacity_gb": 32, "price_aed": 500 }
+    ],
+    "DDR5": [
+      { "capacity_gb": 8,  "price_aed": 230, "note": "an earlier figure was crossed out" },
+      { "capacity_gb": 16, "price_aed": 370 },
+      { "capacity_gb": 32, "price_aed": 720 }
+    ]
+  },
+  "ssd_standalone": [
+    { "capacity": "128GB", "price_aed": 100 },
+    { "capacity": "256GB", "price_aed": 180 },
+    { "capacity": "512GB", "price_aed": 300 },
+    { "capacity": "1TB",   "price_aed": 500 }
+  ],
+  "ssd_upgrade_swap": [
+    { "from": "128GB", "to": "256GB", "price_aed": 100 },
+    { "from": "256GB", "to": "512GB", "price_aed": 150, "note": "figure appears struck through" },
+    { "from": "512GB", "to": "1TB",   "price_aed": 250 },
+    { "from": "256GB", "to": "1TB",   "price_aed": 300 }
+  ],
+  "software_install": [
+    { "item": "Windows",         "price_aed": 100, "note": "OC" },
+    { "item": "CAD / Photoshop", "price_aed": 150, "note": "OC; add-on, earlier price crossed out" }
+  ],
+  "repaint": [
+    { "coverage": "full", "material": "plastic", "price_aed": 100 },
+    { "coverage": "full", "material": "metal",   "price_aed": 150 },
+    { "coverage": "back", "material": "plastic", "price_aed": 40 },
+    { "coverage": "back", "material": "metal",   "price_aed": 60 },
+    { "coverage": "top",  "material": "plastic", "price_aed": 40 },
+    { "coverage": "top",  "material": "metal",   "price_aed": 60 }
+  ],
+  "keyboard_replacement": [
+    { "generation": "6th–7th",   "price_aed": 70,  "note": "pencil annotations '30' and '55' nearby — possibly cost price" },
+    { "generation": "8th–10th",  "price_aed": 100 },
+    { "generation": "11th–14th", "price_aed": 150 },
+    { "generation": "gaming",    "price_range_aed": [350, 500], "note": "marked 'gaming different'" }
+  ],
+  "display_replacement": [
+    { "type": "non-touch", "price_aed": 150, "tier": "standard" },
+    { "type": "touch",     "price_aed": 210, "tier": "standard" },
+    { "type": "non-touch", "price_aed": 200, "tier": "second column — size/spec unclear" },
+    { "type": "touch",     "price_aed": 250, "tier": "second column — size/spec unclear" }
+  ]
+}

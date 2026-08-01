@@ -28,8 +28,12 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -73,27 +77,42 @@ public class RepairAiEstimateService {
     private static final long MAX_IMAGE_BYTES = 4_500_000L;
     private static final long MAX_TOKENS = 4_000L;
 
-    private static final String SYSTEM_PROMPT = """
-            You are a device-repair estimator for a consumer electronics retailer in the UAE.
+    /**
+     * Base instructions. The company's own price list is appended at construction to form the full
+     * system prompt, so estimates come from OUR prices, not the model's guess of the UAE market.
+     */
+    private static final String SYSTEM_PROMPT_BASE = """
+            You are a device-repair estimator for a consumer electronics retailer in the UAE. You
+            price jobs strictly from the company's own price list, provided below as JSON (all
+            amounts in AED).
 
-            - Price the repair for the UAE market in AED, parts and labour included.
-            - Give a realistic min/max range, never a single number. Widen the range when the \
-              photos and description leave the fault uncertain.
-            - Estimate only from what is visible or stated. Do not invent damage or assume the \
-              best case. If information is too thin to price well, still give a range and set \
-              confidence to LOW, noting what is missing.
-            - Set repairable false if the device is likely beyond economical repair.
-            - Confidence: HIGH = fault clear and part cost known; MEDIUM = likely fault known but \
-              extent unclear; LOW = largely guessing.
+            How to price:
+            - Identify the service(s) the request needs, then take the price(s) from the price list.
+              In each list entry, `price_aed` is the authoritative current price; `price_range_aed`
+              gives an explicit [min, max]. `note` fields are provenance from a scanned sheet
+              (struck-through / pencil annotations) — never treat a note as the price; only ever
+              use `price_aed` / `price_range_aed`.
+            - When the photos or description don't pin down which list row applies (e.g. touch vs
+              non-touch display, DDR4 vs DDR5, generation), span the plausible rows as your min/max
+              and lower confidence. When a single row clearly applies, min and max may be equal.
+            - For a job needing several services, SUM the relevant line items into the range.
+            - If the requested repair is NOT covered by the price list at all (e.g. motherboard,
+              battery, charging port, water damage, won't power on), say so plainly in the
+              diagnosis, set confidence LOW, and give only a cautious rough range — do not invent a
+              precise figure. Set repairable false if the device looks beyond economical repair.
+            - Confidence: HIGH = the exact list row is clear; MEDIUM = the service is clear but the
+              row/extent is uncertain; LOW = not in the list, or largely guessing.
 
-            The diagnosis is shown to the customer: one or two plain sentences, no markdown, no \
-            price, and never promise a final price — a technician inspects the device first.
-            Be brief; do not over-deliberate.
+            The diagnosis is shown to the customer: one or two plain sentences, no markdown, no
+            price (the price is carried separately), and never promise a final price — a technician
+            inspects the device first. Be brief; do not over-deliberate.
             """;
 
     private final RepairRequestRepository repairRepo;
     private final ContaboObjectService contaboObjectService;
     private final String model;
+    /** Base instructions + the company price list — built once, reused for every request. */
+    private final String systemPrompt;
     /** Null when the feature is disabled or no API key is configured — every call then no-ops. */
     private final AnthropicClient client;
 
@@ -101,10 +120,12 @@ public class RepairAiEstimateService {
                                    ContaboObjectService contaboObjectService,
                                    @Value("${anthropic.api-key:}") String apiKey,
                                    @Value("${anthropic.model:claude-opus-4-8}") String model,
-                                   @Value("${repair.ai-estimate.enabled:true}") boolean enabled) {
+                                   @Value("${repair.ai-estimate.enabled:true}") boolean enabled,
+                                   @Value("${repair.pricing.path:}") String pricingPath) {
         this.repairRepo = repairRepo;
         this.contaboObjectService = contaboObjectService;
         this.model = (model == null || model.isBlank()) ? "claude-opus-4-8" : model.trim();
+        this.systemPrompt = buildSystemPrompt(pricingPath);
 
         AnthropicClient built = null;
         if (enabled && apiKey != null && !apiKey.isBlank()) {
@@ -122,6 +143,42 @@ public class RepairAiEstimateService {
             log.info("[REPAIR-AI] Price estimation disabled (no ANTHROPIC_API_KEY or feature flag off).");
         }
         this.client = built;
+    }
+
+    /**
+     * Builds the system prompt: base instructions + the company price list. The list loads from
+     * {@code repair.pricing.path} (an external file, so prices can be updated on the server without
+     * a rebuild) when set and readable, otherwise from the bundled {@code repair-pricing.json}
+     * classpath resource. If neither can be read the model still runs on the base instructions
+     * alone — it just falls back to a generic UAE-market estimate rather than our prices.
+     */
+    private static String buildSystemPrompt(String pricingPath) {
+        String pricing = loadPricing(pricingPath);
+        if (pricing == null || pricing.isBlank()) {
+            log.warn("[REPAIR-AI] No price list loaded — estimates will use generic UAE pricing.");
+            return SYSTEM_PROMPT_BASE;
+        }
+        log.info("[REPAIR-AI] Loaded repair price list ({} chars).", pricing.length());
+        return SYSTEM_PROMPT_BASE + "\n\nCOMPANY PRICE LIST (authoritative, AED):\n" + pricing.trim();
+    }
+
+    private static String loadPricing(String pricingPath) {
+        // External override first — lets prices change without redeploying the jar.
+        if (pricingPath != null && !pricingPath.isBlank()) {
+            try {
+                return Files.readString(Path.of(pricingPath.trim()));
+            } catch (Exception e) {
+                log.error("[REPAIR-AI] Could not read repair.pricing.path={}; falling back to the "
+                        + "bundled price list.", pricingPath, e);
+            }
+        }
+        try (InputStream in = RepairAiEstimateService.class.getResourceAsStream("/repair-pricing.json")) {
+            if (in == null) return null;
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.error("[REPAIR-AI] Could not read the bundled repair-pricing.json.", e);
+            return null;
+        }
     }
 
     /** True when an estimate can actually be produced. */
@@ -206,7 +263,7 @@ public class RepairAiEstimateService {
                 .model(model)
                 .maxTokens(MAX_TOKENS)
                 .thinking(ThinkingConfigAdaptive.builder().build())
-                .system(SYSTEM_PROMPT)
+                .system(systemPrompt)
                 .addUserMessageOfBlockParams(blocks)
                 .outputConfig(RepairEstimate.class)
                 .build();
