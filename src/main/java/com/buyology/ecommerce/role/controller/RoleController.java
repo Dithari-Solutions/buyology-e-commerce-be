@@ -3,7 +3,9 @@ package com.buyology.ecommerce.role.controller;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.role.dto.CreateRoleRequest;
 import com.buyology.ecommerce.role.dto.PermissionResponse;
+import com.buyology.ecommerce.role.dto.RoleHolderResponse;
 import com.buyology.ecommerce.role.dto.RoleResponse;
+import com.buyology.ecommerce.role.dto.SetRolePermissionsRequest;
 import com.buyology.ecommerce.role.dto.UpdateRoleRequest;
 import com.buyology.ecommerce.role.service.RoleService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -68,6 +70,22 @@ public class RoleController {
     @GetMapping("/{roleId}/permissions")
     public ResponseEntity<ApiResponse<List<PermissionResponse>>> getRolePermissions(@PathVariable UUID roleId) {
         return roleService.getRolePermissions(roleId);
+    }
+
+    @Operation(summary = "Replace a role's permissions",
+               description = "Sets the role's permissions to exactly the supplied ids — the whole "
+                       + "permission matrix saved in one atomic call. An empty list clears them all.")
+    @PutMapping("/{roleId}/permissions")
+    public ResponseEntity<ApiResponse<RoleResponse>> setRolePermissions(
+            @PathVariable UUID roleId,
+            @Valid @RequestBody SetRolePermissionsRequest request) {
+        return roleService.setRolePermissions(roleId, request);
+    }
+
+    @Operation(summary = "List the users holding a role")
+    @GetMapping("/{roleId}/users")
+    public ResponseEntity<ApiResponse<List<RoleHolderResponse>>> getRoleHolders(@PathVariable UUID roleId) {
+        return roleService.getRoleHolders(roleId);
     }
 
     @Operation(summary = "Add a permission to a role")

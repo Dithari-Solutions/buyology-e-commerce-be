@@ -20,4 +20,14 @@ public interface AuthCredentialRepository extends JpaRepository<AuthCredentials,
     Optional<AuthCredentials> findByEmailAndProvider(String email, String provider);
 
     List<AuthCredentials> findAllByEmailAndProvider(String email, String provider);
+
+    /**
+     * Every credential holding this email, regardless of provider and letter case.
+     *
+     * <p>Emails are stored inconsistently: {@code AdminUserService} and the B2B/supplier flows
+     * lower-case before saving, while {@code AuthService.signup} persists whatever the user typed.
+     * A case-sensitive {@code =} therefore both misses real duplicates and reports phantom ones, so
+     * every "is this email taken?" check must go through this method.
+     */
+    List<AuthCredentials> findAllByEmailIgnoreCase(String email);
 }

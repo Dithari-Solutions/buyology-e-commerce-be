@@ -4,44 +4,46 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public class AdminUserSummaryResponse {
+/**
+ * What (if anything) currently holds an email address.
+ *
+ * <p>Backs the "this email already exists" conflict on the create-admin form: the message alone
+ * left superadmins stuck, because the blocking account is frequently a <em>customer</em> and so is
+ * invisible on the Admins page. This tells the UI exactly which account is in the way and whether
+ * it can be promoted instead.
+ */
+public class AdminEmailLookupResponse {
+
+    private String email;
+    private boolean available;
 
     private UUID userId;
     private UUID authCredentialId;
-    private String email;
     private String firstName;
     private String lastName;
     private String userType;
     private String status;
+    private String provider;
     private Instant joinedAt;
-
-    /** Assigned role names. Populated by the admin list; null on the general user list. */
     private List<String> roles;
 
-    public AdminUserSummaryResponse() {
-    }
+    /** True when the holder is a live CUSTOMER that a superadmin may convert into an admin. */
+    private boolean promotable;
 
-    public AdminUserSummaryResponse(UUID userId, UUID authCredentialId, String email,
-                                    String firstName, String lastName,
-                                    String userType, String status, Instant joinedAt) {
-        this.userId = userId;
-        this.authCredentialId = authCredentialId;
-        this.email = email;
-        this.firstName = firstName;
-        this.lastName = lastName;
-        this.userType = userType;
-        this.status = status;
-        this.joinedAt = joinedAt;
-    }
+    /** Human-readable explanation, safe to show verbatim in the form. */
+    private String reason;
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public boolean isAvailable() { return available; }
+    public void setAvailable(boolean available) { this.available = available; }
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
 
     public UUID getAuthCredentialId() { return authCredentialId; }
     public void setAuthCredentialId(UUID authCredentialId) { this.authCredentialId = authCredentialId; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
 
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
@@ -55,9 +57,18 @@ public class AdminUserSummaryResponse {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
+    public String getProvider() { return provider; }
+    public void setProvider(String provider) { this.provider = provider; }
+
     public Instant getJoinedAt() { return joinedAt; }
     public void setJoinedAt(Instant joinedAt) { this.joinedAt = joinedAt; }
 
     public List<String> getRoles() { return roles; }
     public void setRoles(List<String> roles) { this.roles = roles; }
+
+    public boolean isPromotable() { return promotable; }
+    public void setPromotable(boolean promotable) { this.promotable = promotable; }
+
+    public String getReason() { return reason; }
+    public void setReason(String reason) { this.reason = reason; }
 }

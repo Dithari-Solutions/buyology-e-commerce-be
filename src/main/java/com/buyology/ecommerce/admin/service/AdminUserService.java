@@ -1,11 +1,14 @@
 package com.buyology.ecommerce.admin.service;
 
+import com.buyology.ecommerce.admin.dto.AdminEmailLookupResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserSummaryResponse;
 import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
+import com.buyology.ecommerce.admin.dto.PromoteToAdminRequest;
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.common.utils.PasswordPolicy;
 import com.buyology.ecommerce.common.utils.PasswordUtils;
 import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.role.domain.Role;
@@ -32,6 +35,8 @@ import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -39,9 +44,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -49,6 +57,11 @@ import java.util.stream.Collectors;
 
 @Service
 public class AdminUserService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
+
+    private static final DateTimeFormatter JOINED_ON =
+            DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH).withZone(ZoneOffset.UTC);
 
     private final UserRepository userRepository;
     private final UserProfilesRepository profilesRepository;
@@ -87,12 +100,22 @@ public class AdminUserService {
 
     @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> createAdmin(CreateAdminRequest req) {
-        String email = req.getEmail() == null ? null : req.getEmail().trim().toLowerCase();
-        if (email == null || email.isBlank()) {
+        String email = normaliseEmail(req.getEmail());
+        if (email == null) {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is required");
         }
-        if (authCredentialRepository.findByEmailAndProvider(email, "LOCAL").isPresent()) {
-            return ApiResponse.failure(HttpStatus.CONFLICT, "An account with this email already exists");
+
+        try {
+            PasswordPolicy.validate(req.getPassword());
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+
+        // Diagnose (rather than merely detect) an email clash: the blocking account is often a
+        // customer or a stale credential the superadmin can neither see nor act on from this page.
+        AdminEmailLookupResponse holder = lookupEmailHolder(email, true);
+        if (!holder.isAvailable()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, holder.getReason());
         }
 
         // Resolve + validate every requested role before creating anything.
@@ -126,9 +149,7 @@ public class AdminUserService {
         credentials.setIsActive(true);
         authCredentialRepository.save(credentials);
 
-        Users assignedBy = SecurityUtils.currentUserId() != null
-                ? userRepository.findById(SecurityUtils.currentUserId()).orElse(null)
-                : null;
+        Users assignedBy = currentActor();
         for (Role role : roles) {
             if (!userRoleRepository.existsByIdUserIdAndIdRoleId(user.getId(), role.getId())) {
                 UserRole ur = new UserRole();
@@ -150,6 +171,231 @@ public class AdminUserService {
         detail.setFirstName(user.getFirstName());
         detail.setLastName(user.getLastName());
         return ApiResponse.created(detail, "Admin created");
+    }
+
+    // ─── Promote an existing account to admin (SUPERADMIN only) ───────────────
+
+    /**
+     * Converts a live account into an ADMIN and assigns roles.
+     *
+     * <p>The escape hatch for the most common create-admin conflict: the address already belongs to
+     * a customer account (staff who once shopped on the storefront), which cannot be created over
+     * and is not visible on the Admins page.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> promoteToAdmin(UUID userId, PromoteToAdminRequest req) {
+        Users user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "User not found");
+        }
+        if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "This account is " + user.getStatus() + " and cannot be promoted. Restore it first.");
+        }
+
+        List<Role> roles = new ArrayList<>();
+        if (req.getRoleIds() != null) {
+            for (UUID roleId : req.getRoleIds()) {
+                Role role = roleRepository.findById(roleId).orElse(null);
+                if (role == null) {
+                    return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Role not found: " + roleId);
+                }
+                roles.add(role);
+            }
+        }
+        if (roles.isEmpty()) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "At least one role is required");
+        }
+
+        user.setUserType(Users.UserType.ADMIN);
+        userRepository.save(user);
+
+        Users assignedBy = currentActor();
+        for (Role role : roles) {
+            if (!userRoleRepository.existsByIdUserIdAndIdRoleId(user.getId(), role.getId())) {
+                UserRole ur = new UserRole();
+                ur.setId(new UserRoleId(user.getId(), role.getId()));
+                ur.setUser(user);
+                ur.setRole(role);
+                ur.setAssignedBy(assignedBy);
+                userRoleRepository.save(ur);
+            }
+        }
+
+        log.info("User {} promoted to ADMIN with roles {} by {}",
+                user.getId(),
+                roles.stream().map(Role::getName).toList(),
+                assignedBy != null ? assignedBy.getId() : "system");
+
+        AuthCredentials credential = authCredentialRepository.findByUserId(user.getId()).stream()
+                .findFirst().orElse(null);
+
+        AdminUserDetailResponse detail = new AdminUserDetailResponse();
+        detail.setUserId(user.getId());
+        detail.setAuthCredentialId(credential != null ? credential.getId() : null);
+        detail.setEmail(credential != null ? credential.getEmail() : null);
+        detail.setUserType(user.getUserType().name());
+        detail.setStatus(user.getStatus());
+        detail.setJoinedAt(user.getCreatedAt());
+        detail.setFirstName(user.getFirstName());
+        detail.setLastName(user.getLastName());
+        return ApiResponse.success(detail, "Account promoted to admin");
+    }
+
+    // ─── Email availability lookup (SUPERADMIN only) ──────────────────────────
+
+    /** Reports what currently holds {@code rawEmail}, so a create-admin conflict is actionable. */
+    public ResponseEntity<ApiResponse<AdminEmailLookupResponse>> lookupEmail(String rawEmail) {
+        String email = normaliseEmail(rawEmail);
+        if (email == null) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Email is required");
+        }
+        return ApiResponse.success(lookupEmailHolder(email, false), "Email lookup complete");
+    }
+
+    /**
+     * Resolves the account holding {@code email}, optionally healing stale rows.
+     *
+     * <p>Matching is case-insensitive and spans every provider. The old check compared
+     * {@code email = ?} against provider {@code LOCAL} only, which both missed social sign-ups and
+     * — because {@code AuthService} stores the address as typed while this service lower-cases it —
+     * disagreed with itself on mixed-case addresses.
+     *
+     * @param heal when true, credentials whose {@code users} row no longer exists are retired so the
+     *             address becomes usable again. {@code auth_credentials.user_id} has no foreign key,
+     *             so such orphans survive user deletion and would otherwise block the email forever.
+     */
+    private AdminEmailLookupResponse lookupEmailHolder(String email, boolean heal) {
+        AdminEmailLookupResponse result = new AdminEmailLookupResponse();
+        result.setEmail(email);
+
+        List<AuthCredentials> credentials = authCredentialRepository.findAllByEmailIgnoreCase(email);
+
+        AuthCredentials blocking = null;
+        Users blockingUser = null;
+        for (AuthCredentials c : credentials) {
+            Users owner = c.getUserId() == null ? null : userRepository.findById(c.getUserId()).orElse(null);
+            if (owner == null) {
+                if (heal) {
+                    // Tombstone rather than delete: carts, favorites and refresh tokens hold real
+                    // foreign keys to auth_credentials, so a DELETE here could fail and roll back the
+                    // whole admin creation. Renaming frees the address and deactivating stops the row
+                    // shadowing the new account at sign-in — the same treatment the account-deletion
+                    // purge applies (UserAccountService).
+                    log.warn("Retiring orphaned credential {} for {} — user {} no longer exists",
+                            c.getId(), email, c.getUserId());
+                    c.setIsActive(false);
+                    c.setEmail("orphaned+" + c.getId() + "@deleted.buyology.local");
+                    authCredentialRepository.save(c);
+                }
+                continue;
+            }
+            // Several rows can share one address (no unique index on email). Report the live one —
+            // a soft-deleted account is a weaker explanation than an active one holding the same email.
+            boolean preferable = blocking == null || (isRetired(blockingUser) && !isRetired(owner));
+            if (preferable) {
+                blocking = c;
+                blockingUser = owner;
+            }
+        }
+
+        if (blocking == null) {
+            result.setAvailable(true);
+            result.setReason("This email is available.");
+            return result;
+        }
+
+        List<String> roleNames = userRoleRepository.findRoleNamesByUserId(blockingUser.getId());
+        boolean isAdmin = blockingUser.getUserType() == Users.UserType.ADMIN;
+        boolean retired = isRetired(blockingUser);
+        String who = displayName(blockingUser, blocking.getEmail());
+        String joined = blockingUser.getCreatedAt() != null ? JOINED_ON.format(blockingUser.getCreatedAt()) : null;
+
+        result.setAvailable(false);
+        result.setUserId(blockingUser.getId());
+        result.setAuthCredentialId(blocking.getId());
+        result.setFirstName(blockingUser.getFirstName());
+        result.setLastName(blockingUser.getLastName());
+        result.setUserType(blockingUser.getUserType() != null ? blockingUser.getUserType().name() : null);
+        result.setStatus(blockingUser.getStatus());
+        result.setProvider(blocking.getProvider());
+        result.setJoinedAt(blockingUser.getCreatedAt());
+        result.setRoles(roleNames);
+        result.setPromotable(!isAdmin && !retired);
+
+        if (retired) {
+            result.setReason("This email belongs to " + who + ", an account scheduled for deletion ("
+                    + blockingUser.getStatus() + "). Use a different address until the deletion completes.");
+        } else if (isAdmin) {
+            result.setReason("This email already belongs to the admin account " + who
+                    + (roleNames.isEmpty() ? " (no roles assigned)" : " (" + String.join(", ", roleNames) + ")")
+                    + ". Open it from the Admins list to change roles or reset access.");
+        } else {
+            result.setReason("This email belongs to a customer account, " + who
+                    + (joined != null ? ", registered " + joined : "")
+                    + ". Promote that account to admin, or use a different address.");
+        }
+        return result;
+    }
+
+    /** Accounts in the soft-delete grace window or already purged. */
+    private static boolean isRetired(Users user) {
+        String status = user == null ? null : user.getStatus();
+        return user != null && (user.getDeletedAt() != null
+                || "PENDING_DELETION".equalsIgnoreCase(status)
+                || "DELETED".equalsIgnoreCase(status));
+    }
+
+    private static String displayName(Users user, String email) {
+        String name = ((user.getFirstName() == null ? "" : user.getFirstName().trim()) + " "
+                + (user.getLastName() == null ? "" : user.getLastName().trim())).trim();
+        if (!name.isEmpty()) return name;
+        return email != null && !email.isBlank() ? email : "an existing account";
+    }
+
+    private static String normaliseEmail(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim().toLowerCase(Locale.ROOT);
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private Users currentActor() {
+        UUID actorId = SecurityUtils.currentUserId();
+        return actorId != null ? userRepository.findById(actorId).orElse(null) : null;
+    }
+
+    // ─── List admin users (paginated, server-side filtered) ───────────────────
+
+    /**
+     * Admin accounts only, filtered in the database.
+     *
+     * <p>Replaces the dashboard's old approach of pulling the newest 200 users of any type and
+     * filtering client-side, which quietly dropped every admin once the store had more than 200
+     * registered users — the reason admins could "already exist" yet be missing from the list.
+     */
+    public ResponseEntity<ApiResponse<AdminUserListResponse>> listAdmins(int page, int size, String search) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<Users> adminsPage = (search == null || search.isBlank())
+                ? userRepository.findByUserType(Users.UserType.ADMIN, pageable)
+                : userRepository.searchUsersByType(Users.UserType.ADMIN, search.trim(), pageable);
+
+        List<AdminUserSummaryResponse> summaries = toSummaries(adminsPage.getContent());
+
+        // Attach each admin's roles so the list can show what they can actually do.
+        for (AdminUserSummaryResponse summary : summaries) {
+            summary.setRoles(summary.getUserId() == null
+                    ? List.of()
+                    : userRoleRepository.findRoleNamesByUserId(summary.getUserId()));
+        }
+
+        AdminUserListResponse response = new AdminUserListResponse(
+                page, size,
+                adminsPage.getTotalElements(),
+                adminsPage.getTotalPages(),
+                summaries
+        );
+
+        return ApiResponse.success(response, "Admins retrieved");
     }
 
     // ─── List all users (paginated) ───────────────────────────────────────────

@@ -23,4 +23,6 @@ public interface UserPermissionRepository extends JpaRepository<UserPermission, 
 
     @Query("SELECT up FROM UserPermission up JOIN FETCH up.permission WHERE up.id.userId = :userId")
     List<UserPermission> findWithPermissionByUserId(@Param("userId") UUID userId);
+
+    long countByIdPermissionId(UUID permissionId);
 }

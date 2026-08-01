@@ -41,4 +41,25 @@ public interface UserRepository extends JpaRepository<Users, UUID> {
             """)
     org.springframework.data.domain.Page<Users> searchUsers(
             @Param("q") String q, org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Same search as {@link #searchUsers} but restricted to one user type.
+     *
+     * <p>The Admins page used to fetch the newest 200 users of <em>any</em> type and filter for
+     * ADMIN in the browser, so every admin older than the 200 most recent signups silently vanished
+     * from the list while still occupying their email. Filtering server-side is what keeps the list
+     * complete.
+     */
+    @Query("""
+            SELECT DISTINCT u FROM Users u
+            WHERE u.userType = :userType
+              AND (LOWER(u.firstName) LIKE LOWER(CONCAT('%', :q, '%'))
+                OR LOWER(u.lastName) LIKE LOWER(CONCAT('%', :q, '%'))
+                OR EXISTS (SELECT 1 FROM com.buyology.ecommerce.auth.domain.AuthCredentials c
+                           WHERE c.userId = u.id AND LOWER(c.email) LIKE LOWER(CONCAT('%', :q, '%'))))
+            """)
+    org.springframework.data.domain.Page<Users> searchUsersByType(
+            @Param("userType") Users.UserType userType,
+            @Param("q") String q,
+            org.springframework.data.domain.Pageable pageable);
 }

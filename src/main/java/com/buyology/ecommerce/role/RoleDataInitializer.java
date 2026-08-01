@@ -19,13 +19,17 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Seeds predefined roles and permissions on every startup (idempotent).
+ * Seeds predefined roles and permissions on startup (idempotent).
  *
- * Roles and their access:
+ * Roles and their starter access:
  *   CUSTOMER_SUPPORT — review & questions module
  *   COURIER_ADMIN    — courier module (no delete)
  *   STORE_ADMIN      — store product assignment for their store
  *   SUPERADMIN       — full access to all modules
+ *
+ * <p>The permission lists below are <em>starting points</em>, applied when a role row is first
+ * created. Afterwards the RBAC console owns them: this class will not re-grant, and never revokes.
+ * SUPERADMIN alone is kept in sync with the full permission set on every boot.
  */
 @Component
 public class RoleDataInitializer implements ApplicationRunner {
@@ -168,11 +172,22 @@ public class RoleDataInitializer implements ApplicationRunner {
         // Ensure every permission code exists in the permissions table
         Map<String, Permission> permByCode = ensurePermissions();
 
-        // Ensure every role exists and has exactly the configured permissions
         for (RoleDefinition def : ROLE_DEFINITIONS) {
+            boolean existed = roleRepository.findByName(def.name()).isPresent();
             Role role = ensureRole(def.name(), def.description());
-            ensureRolePermissions(role, def.permissions(), permByCode);
+
+            // Grant the starter permission set only when the role is first created. Re-applying it on
+            // every boot would resurrect permissions a superadmin had deliberately revoked in the RBAC
+            // console — from their side, the change would simply undo itself after the next deploy.
+            if (!existed) {
+                grantPermissions(role, def.permissions(), permByCode);
+            }
         }
+
+        // SUPERADMIN is the exception: it is the recovery path for every other permission mistake, so
+        // it stays synced to the full set and is locked against editing in the API.
+        roleRepository.findByName("SUPERADMIN")
+                .ifPresent(superadmin -> grantPermissions(superadmin, ALL_PERMISSIONS, permByCode));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -198,7 +213,8 @@ public class RoleDataInitializer implements ApplicationRunner {
         });
     }
 
-    private void ensureRolePermissions(Role role, List<String> codes, Map<String, Permission> permByCode) {
+    /** Adds any missing grants. Never revokes — existing grants are the superadmin's to manage. */
+    private void grantPermissions(Role role, List<String> codes, Map<String, Permission> permByCode) {
         for (String code : codes) {
             Permission permission = permByCode.get(code);
             if (permission == null) continue;

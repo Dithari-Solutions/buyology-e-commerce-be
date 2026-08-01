@@ -35,4 +35,11 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UserRoleId> 
     /** Distinct user IDs holding any of the given role names (e.g. PROCUREMENT + SUPERADMIN). */
     @Query("SELECT DISTINCT ur.id.userId FROM UserRole ur JOIN ur.role r WHERE r.name IN :roleNames")
     List<UUID> findUserIdsByRoleNameIn(@Param("roleNames") Set<String> roleNames);
+
+    long countByIdRoleId(UUID roleId);
+
+    /** {@code [roleId, holderCount]} for every role that has at least one holder — powers the
+     *  "assigned to N admins" column without an N+1 across roles. */
+    @Query("SELECT ur.id.roleId, COUNT(ur) FROM UserRole ur GROUP BY ur.id.roleId")
+    List<Object[]> countHoldersPerRole();
 }

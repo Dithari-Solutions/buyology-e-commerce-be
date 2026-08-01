@@ -1,8 +1,10 @@
 package com.buyology.ecommerce.admin.controller;
 
+import com.buyology.ecommerce.admin.dto.AdminEmailLookupResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserDetailResponse;
 import com.buyology.ecommerce.admin.dto.AdminUserListResponse;
 import com.buyology.ecommerce.admin.dto.CreateAdminRequest;
+import com.buyology.ecommerce.admin.dto.PromoteToAdminRequest;
 import com.buyology.ecommerce.admin.service.AdminInactivityService;
 import com.buyology.ecommerce.admin.service.AdminUserService;
 import com.buyology.ecommerce.auth.service.MfaService;
@@ -41,6 +43,38 @@ public class AdminUserController {
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> createAdmin(
             @Valid @RequestBody CreateAdminRequest request) {
         return adminUserService.createAdmin(request);
+    }
+
+    @Operation(summary = "List admin users (paginated, SUPERADMIN only)",
+               description = "Admin accounts filtered in the database, each with its assigned roles. "
+                       + "Use this rather than paging the full user list and filtering client-side.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @GetMapping("/admins")
+    public ResponseEntity<ApiResponse<AdminUserListResponse>> listAdmins(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String search) {
+        return adminUserService.listAdmins(page, size, search);
+    }
+
+    @Operation(summary = "Check what holds an email address (SUPERADMIN only)",
+               description = "Explains a create-admin conflict: reports the account occupying the "
+                       + "address and whether it can be promoted to admin instead.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @GetMapping("/lookup")
+    public ResponseEntity<ApiResponse<AdminEmailLookupResponse>> lookupEmail(@RequestParam String email) {
+        return adminUserService.lookupEmail(email);
+    }
+
+    @Operation(summary = "Promote an existing account to admin (SUPERADMIN only)",
+               description = "Converts a customer account to ADMIN and assigns the given roles. "
+                       + "Resolves the common case where staff already hold a storefront account.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
+    @PostMapping("/{userId}/promote")
+    public ResponseEntity<ApiResponse<AdminUserDetailResponse>> promoteToAdmin(
+            @PathVariable UUID userId,
+            @Valid @RequestBody PromoteToAdminRequest request) {
+        return adminUserService.promoteToAdmin(userId, request);
     }
 
     @Operation(summary = "List all users (paginated)")
