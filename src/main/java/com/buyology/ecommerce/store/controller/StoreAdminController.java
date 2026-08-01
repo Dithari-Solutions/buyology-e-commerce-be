@@ -24,7 +24,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/stores")
-@PreAuthorize("hasRole('SUPERADMIN') or hasRole('ADMIN')")
 @Tag(name = "Store Admin", description = "APIs for assigning and managing store administrators")
 public class StoreAdminController {
 
@@ -36,6 +35,7 @@ public class StoreAdminController {
 
     @Operation(summary = "Assign an admin to a store",
             description = "Assigns a user as STORE_OWNER, STORE_MANAGER, or STORE_STAFF for the given store.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:assign') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storeId}/admins")
     public ResponseEntity<ApiResponse<StoreAdminResponse>> assignAdmin(
             @PathVariable UUID storeId,
@@ -44,6 +44,7 @@ public class StoreAdminController {
     }
 
     @Operation(summary = "Get all admins of a store")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{storeId}/admins")
     public ResponseEntity<ApiResponse<List<StoreAdminResponse>>> getAdminsByStore(
             @PathVariable UUID storeId) {
@@ -51,6 +52,7 @@ public class StoreAdminController {
     }
 
     @Operation(summary = "Get active admins of a store")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{storeId}/admins/active")
     public ResponseEntity<ApiResponse<List<StoreAdminResponse>>> getActiveAdminsByStore(
             @PathVariable UUID storeId) {
@@ -58,6 +60,7 @@ public class StoreAdminController {
     }
 
     @Operation(summary = "Get a specific store admin by their assignment ID")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/admins/{adminId}")
     public ResponseEntity<ApiResponse<StoreAdminResponse>> getAdminById(
             @PathVariable UUID adminId) {
@@ -65,6 +68,7 @@ public class StoreAdminController {
     }
 
     @Operation(summary = "Update a store admin's role or active status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/admins/{adminId}")
     public ResponseEntity<ApiResponse<StoreAdminResponse>> updateAdmin(
             @PathVariable UUID adminId,
@@ -73,6 +77,7 @@ public class StoreAdminController {
     }
 
     @Operation(summary = "Remove (deactivate) a store admin")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:admin:remove') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/admins/{adminId}")
     public ResponseEntity<ApiResponse<Void>> removeAdmin(@PathVariable UUID adminId) {
         return storeAdminService.removeAdmin(adminId);

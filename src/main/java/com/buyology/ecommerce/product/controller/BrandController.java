@@ -31,7 +31,7 @@ public class BrandController {
     }
 
     @Operation(summary = "Create a new brand (admin)")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:brand:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/api/admin/brand")
     public ResponseEntity<ApiResponse<BrandResponse>> createBrand(
             @Valid @RequestBody CreateBrandRequest request) {
@@ -39,7 +39,7 @@ public class BrandController {
     }
 
     @Operation(summary = "Deactivate a brand (admin)")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:brand:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/api/admin/brand/{brandId}")
     public ResponseEntity<ApiResponse<Void>> deleteBrand(@PathVariable UUID brandId) {
         return brandService.deleteBrand(brandId);

@@ -22,7 +22,6 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/admin/b2b/product-requests")
-@PreAuthorize("hasAnyRole('SUPERADMIN','PROCUREMENT')")
 public class AdminB2bProductRequestController {
 
     private final B2bProductRequestService requestService;
@@ -31,22 +30,26 @@ public class AdminB2bProductRequestController {
         this.requestService = requestService;
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:product-request:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<B2bProductRequestResponse>>> list(
             @RequestParam(required = false) B2bProductRequestStatus status) {
         return ApiResponse.success(requestService.listAll(status), "Product requests fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:product-request:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/count")
     public ResponseEntity<ApiResponse<Map<String, Long>>> count() {
         return ApiResponse.success(Map.of("newCount", requestService.countNew()), "New request count");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:product-request:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<B2bProductRequestResponse>> get(@PathVariable UUID id) {
         return ApiResponse.success(requestService.getById(id), "Product request fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:product-request:moderate') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<B2bProductRequestResponse>> updateStatus(
             @AuthenticationPrincipal UUID adminId,
@@ -57,6 +60,7 @@ public class AdminB2bProductRequestController {
                 "Product request status updated");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:product-request:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{id}/update")
     public ResponseEntity<ApiResponse<B2bProductRequestResponse>> sendUpdate(
             @AuthenticationPrincipal UUID adminId,

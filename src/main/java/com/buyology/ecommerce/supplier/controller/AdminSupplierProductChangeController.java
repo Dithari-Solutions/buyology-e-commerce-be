@@ -21,7 +21,6 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/admin/supplier-product-changes")
-@PreAuthorize("hasRole('SUPERADMIN')")
 public class AdminSupplierProductChangeController {
 
     private final SupplierProductChangeService changeService;
@@ -30,6 +29,7 @@ public class AdminSupplierProductChangeController {
         this.changeService = changeService;
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<Page<SupplierProductChangeResponse>>> list(
             @RequestParam(required = false) Status status,
@@ -37,6 +37,7 @@ public class AdminSupplierProductChangeController {
         return changeService.listForAdmin(status, pageable);
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/{id}/approve")
     public ResponseEntity<ApiResponse<SupplierProductChangeResponse>> approve(
             @PathVariable UUID id,
@@ -44,6 +45,7 @@ public class AdminSupplierProductChangeController {
         return changeService.approve(id, adminId);
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/{id}/reject")
     public ResponseEntity<ApiResponse<SupplierProductChangeResponse>> reject(
             @PathVariable UUID id,

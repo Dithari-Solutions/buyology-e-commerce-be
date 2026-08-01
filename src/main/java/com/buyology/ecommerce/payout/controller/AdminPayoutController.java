@@ -30,7 +30,7 @@ public class AdminPayoutController {
     }
 
     @GetMapping("/requests")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payout:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Page<PayoutRequestResponse>>> list(
             @RequestParam(required = false) PayoutRequestStatus status,
             @RequestParam(defaultValue = "0") int page,
@@ -39,13 +39,13 @@ public class AdminPayoutController {
     }
 
     @GetMapping("/requests/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payout:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PayoutRequestResponse>> get(@PathVariable UUID id) {
         return ApiResponse.success(requestService.getForAdmin(id), "Payout request fetched");
     }
 
     @PostMapping("/requests/{id}/mark-paid")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payout:payout') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PayoutRequestResponse>> markPaid(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id,
@@ -55,7 +55,7 @@ public class AdminPayoutController {
     }
 
     @PostMapping("/requests/{id}/reject")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payout:moderate') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PayoutRequestResponse>> reject(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id,
@@ -65,7 +65,7 @@ public class AdminPayoutController {
     }
 
     @GetMapping("/suppliers/{supplierId}/account")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payout:account:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<SupplierPayoutAccountResponse>> supplierAccount(
             @PathVariable UUID supplierId) {
         return accountService.getForSupplier(supplierId)

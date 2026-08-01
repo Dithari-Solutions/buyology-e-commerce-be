@@ -16,7 +16,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/user-permissions")
-@PreAuthorize("hasRole('SUPERADMIN')")
 @Tag(name = "User Permissions", description = "Admin APIs for assigning and removing direct permissions from users")
 public class UserPermissionController {
 
@@ -27,12 +26,14 @@ public class UserPermissionController {
     }
 
     @Operation(summary = "Get all direct permissions assigned to a user")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/users/{userId}")
     public ResponseEntity<ApiResponse<List<UserPermissionResponse>>> getUserPermissions(@PathVariable UUID userId) {
         return userPermissionService.getUserPermissions(userId);
     }
 
     @Operation(summary = "Assign a direct permission to a user (ALLOW or DENY)")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<UserPermissionResponse>> assignPermissionToUser(
             @Valid @RequestBody AssignPermissionToUserRequest request) {
@@ -40,6 +41,7 @@ public class UserPermissionController {
     }
 
     @Operation(summary = "Remove a direct permission from a user")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @DeleteMapping("/users/{userId}/permissions/{permissionId}")
     public ResponseEntity<ApiResponse<Void>> removePermissionFromUser(
             @PathVariable UUID userId,

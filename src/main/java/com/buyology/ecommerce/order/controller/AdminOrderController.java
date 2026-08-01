@@ -21,7 +21,6 @@ import java.util.UUID;
 
 /**
  * Admin-only order management endpoints.
- * Role check is enforced by @PreAuthorize("hasRole('ADMIN')") on each method.
  * The /api/admin/** prefix is also locked to authenticated users via SecurityConfig.
  */
 @RestController
@@ -38,7 +37,7 @@ public class AdminOrderController {
      * List all orders with optional filtering by status, delivery method, and store.
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Page<OrderSummaryResponse>>> listAllOrders(
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(required = false) DeliveryMethod deliveryMethod,
@@ -55,7 +54,7 @@ public class AdminOrderController {
      * Get full order detail for any order.
      */
     @GetMapping("/{orderId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable UUID orderId) {
         return ApiResponse.success(
                 orderService.getOrderForAdmin(orderId),
@@ -66,7 +65,7 @@ public class AdminOrderController {
      * Get full order detail including delivery proof (photos) from courier service.
      */
     @GetMapping("/{orderId}/with-proof")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderAdminResponse>> getOrderWithProof(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId) {
@@ -81,7 +80,7 @@ public class AdminOrderController {
      * Validates the status transition — invalid transitions return HTTP 409.
      */
     @PatchMapping("/{orderId}/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:status:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderResponse>> updateStatus(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId,
@@ -96,7 +95,7 @@ public class AdminOrderController {
      * Body: { "courierProfileId": "<uuid>" }.
      */
     @PatchMapping("/{orderId}/courier")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:courier:assign') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderResponse>> assignCourier(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId,
@@ -112,7 +111,7 @@ public class AdminOrderController {
      * For REGULAR orders being marked as SHIPPED, trackingCode is required.
      */
     @PostMapping("/{orderId}/tracking")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:tracking:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderResponse>> addTracking(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId,
@@ -127,7 +126,7 @@ public class AdminOrderController {
      * Multipart form: field {@code file} carries the image.
      */
     @PostMapping(value = "/{orderId}/proof/{type}", consumes = "multipart/form-data")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:tracking:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<OrderAdminResponse>> uploadProof(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId,

@@ -29,13 +29,13 @@ public class B2bController {
     }
 
     @GetMapping("/api/admin/b2b/inquiries")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:inquiry:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<B2bInquiryResponse>>> listAll() {
         return ApiResponse.success(service.listAll(), "B2B inquiries fetched");
     }
 
     @PatchMapping("/api/admin/b2b/inquiries/{id}/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:inquiry:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<B2bInquiryResponse>> updateStatus(
             @PathVariable UUID id,
             @RequestBody Map<String, String> body) {

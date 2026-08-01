@@ -20,7 +20,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/roles")
-@PreAuthorize("hasRole('SUPERADMIN')")
 @Tag(name = "Roles", description = "Admin APIs for managing roles and their permissions")
 public class RoleController {
 
@@ -31,24 +30,28 @@ public class RoleController {
     }
 
     @Operation(summary = "Get all roles")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<RoleResponse>>> getAllRoles() {
         return roleService.getAllRoles();
     }
 
     @Operation(summary = "Get role by ID")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<RoleResponse>> getRoleById(@PathVariable UUID id) {
         return roleService.getRoleById(id);
     }
 
     @Operation(summary = "Create a new role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<RoleResponse>> createRole(@Valid @RequestBody CreateRoleRequest request) {
         return roleService.createRole(request);
     }
 
     @Operation(summary = "Update a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<RoleResponse>> updateRole(
             @PathVariable UUID id,
@@ -57,6 +60,7 @@ public class RoleController {
     }
 
     @Operation(summary = "Delete a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteRole(@PathVariable UUID id) {
         return roleService.deleteRole(id);
@@ -67,6 +71,7 @@ public class RoleController {
     // =====================
 
     @Operation(summary = "Get all permissions assigned to a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/{roleId}/permissions")
     public ResponseEntity<ApiResponse<List<PermissionResponse>>> getRolePermissions(@PathVariable UUID roleId) {
         return roleService.getRolePermissions(roleId);
@@ -75,6 +80,7 @@ public class RoleController {
     @Operation(summary = "Replace a role's permissions",
                description = "Sets the role's permissions to exactly the supplied ids — the whole "
                        + "permission matrix saved in one atomic call. An empty list clears them all.")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PutMapping("/{roleId}/permissions")
     public ResponseEntity<ApiResponse<RoleResponse>> setRolePermissions(
             @PathVariable UUID roleId,
@@ -83,12 +89,14 @@ public class RoleController {
     }
 
     @Operation(summary = "List the users holding a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/{roleId}/users")
     public ResponseEntity<ApiResponse<List<RoleHolderResponse>>> getRoleHolders(@PathVariable UUID roleId) {
         return roleService.getRoleHolders(roleId);
     }
 
     @Operation(summary = "Add a permission to a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/{roleId}/permissions/{permissionId}")
     public ResponseEntity<ApiResponse<Void>> addPermissionToRole(
             @PathVariable UUID roleId,
@@ -97,6 +105,7 @@ public class RoleController {
     }
 
     @Operation(summary = "Remove a permission from a role")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @DeleteMapping("/{roleId}/permissions/{permissionId}")
     public ResponseEntity<ApiResponse<Void>> removePermissionFromRole(
             @PathVariable UUID roleId,

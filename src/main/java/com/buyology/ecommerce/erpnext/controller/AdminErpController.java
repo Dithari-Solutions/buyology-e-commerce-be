@@ -23,7 +23,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/admin/erp")
-@PreAuthorize("hasRole('SUPERADMIN')")
 public class AdminErpController {
 
     /** Default number of products to pull for the testing page. */
@@ -39,6 +38,7 @@ public class AdminErpController {
     }
 
     /** Meta — works even when disabled so the UI can render and prompt to enable. */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('erp:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/config")
     public ResponseEntity<ApiResponse<Map<String, Object>>> config() {
         Map<String, Object> cfg = new LinkedHashMap<>();
@@ -52,6 +52,7 @@ public class AdminErpController {
     /**
      * Fetch the first {@code limit} products (default 10) live from ERPNext. No DB persistence.
      */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('erp:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/products")
     public ResponseEntity<ApiResponse<List<ErpProduct>>> products(
             @RequestParam(name = "limit", defaultValue = "" + DEFAULT_LIMIT) int limit) {

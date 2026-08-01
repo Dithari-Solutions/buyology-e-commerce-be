@@ -29,7 +29,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/admin/quiqup")
-@PreAuthorize("hasRole('SUPERADMIN')")
 public class AdminQuiqupController {
 
     private final QuiqupProperties props;
@@ -56,6 +55,7 @@ public class AdminQuiqupController {
 
     // ── meta (work even when disabled, so the UI can render + prompt to enable) ──
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/config")
     public ResponseEntity<ApiResponse<Map<String, Object>>> config() {
         Map<String, Object> cfg = new LinkedHashMap<>();
@@ -77,11 +77,13 @@ public class AdminQuiqupController {
         return ApiResponse.success(cfg, "Quiqup config");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/samples")
     public ResponseEntity<ApiResponse<Map<String, JsonNode>>> samples() {
         return ApiResponse.success(samples.all(), "Quiqup sample payloads");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/verify")
     public ResponseEntity<ApiResponse<Map<String, Object>>> verify() {
         if (disabled()) return disabledMap();
@@ -91,6 +93,7 @@ public class AdminQuiqupController {
     // ── orders (unified /orders API) ─────────────────────────────────────────────
 
     /** Create an order. POST /orders */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/orders")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> create(@RequestBody JsonNode body) {
         if (disabled()) return disabledResult();
@@ -98,6 +101,7 @@ public class AdminQuiqupController {
     }
 
     /** Retrieve an order. GET /orders/{id} */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/orders/{id}")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> get(@PathVariable String id) {
         if (disabled()) return disabledResult();
@@ -105,6 +109,7 @@ public class AdminQuiqupController {
     }
 
     /** Mark an order ready for collection (triggers pickup). PUT /orders/{id}/ready_for_collection */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/orders/{id}/ready")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> ready(@PathVariable String id) {
         if (disabled()) return disabledResult();
@@ -114,6 +119,7 @@ public class AdminQuiqupController {
     }
 
     /** Download the AWB document metadata. GET /order_label/{id} */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/orders/{id}/label")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> label(@PathVariable String id) {
         if (disabled()) return disabledResult();
@@ -121,6 +127,7 @@ public class AdminQuiqupController {
     }
 
     /** Cancel an order via the batch endpoint. PUT /orders/batch/set_cancelled  (id in body). */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:cancel') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/orders/cancel")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> cancel(@RequestBody CancelRequest req) {
         if (disabled()) return disabledResult();
@@ -135,6 +142,7 @@ public class AdminQuiqupController {
 
     // ── raw request tester ──────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/raw")
     public ResponseEntity<ApiResponse<QuiqupApiResult>> raw(@RequestBody RawRequest req) {
         if (disabled()) return disabledResult();
@@ -147,6 +155,7 @@ public class AdminQuiqupController {
 
     // ── received webhooks ───────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/events")
     public ResponseEntity<ApiResponse<List<QuiqupEventView>>> events() {
         List<QuiqupEventView> views = eventRepository.findTop100ByOrderByCreatedAtDesc()
@@ -154,6 +163,7 @@ public class AdminQuiqupController {
         return ApiResponse.success(views, "Quiqup webhook events");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:event:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/events")
     public ResponseEntity<ApiResponse<Map<String, Object>>> clearEvents() {
         eventRepository.deleteAllInBatch();

@@ -17,7 +17,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/questions")
-@PreAuthorize("hasRole('SUPERADMIN') or hasRole('CUSTOMER_SUPPORT') or hasRole('ADMIN')")
 @Tag(name = "Questions (Admin)", description = "Admin APIs for moderating questions and managing answers")
 public class QuestionAdminController {
 
@@ -29,6 +28,7 @@ public class QuestionAdminController {
 
     @Operation(summary = "List all questions",
             description = "Filter by status: PENDING, APPROVED, REJECTED. Omit status to get all non-deleted questions.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<QuestionResponse>>> getAllQuestions(
             @RequestParam(required = false) ModerationStatus status,
@@ -38,6 +38,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Get a question by ID (includes deleted records)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{questionId}")
     public ResponseEntity<ApiResponse<QuestionResponse>> getQuestionById(
             @PathVariable UUID questionId) {
@@ -45,6 +46,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Approve or reject a question")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:moderate') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{questionId}/moderate")
     public ResponseEntity<ApiResponse<QuestionResponse>> moderateQuestion(
             @PathVariable UUID questionId,
@@ -54,6 +56,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Delete a question (soft-delete)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{questionId}")
     public ResponseEntity<ApiResponse<Void>> deleteQuestion(
             @PathVariable UUID questionId) {
@@ -62,6 +65,7 @@ public class QuestionAdminController {
 
     @Operation(summary = "Add an admin answer to a question",
             description = "Only one answer per question is allowed. Use PUT to update an existing answer.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:answer:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{questionId}/answer")
     public ResponseEntity<ApiResponse<QuestionResponse>> addAnswer(
             @PathVariable UUID questionId,
@@ -71,6 +75,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Update the admin answer for a question")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:answer:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/{questionId}/answer")
     public ResponseEntity<ApiResponse<QuestionResponse>> updateAnswer(
             @PathVariable UUID questionId,
@@ -79,6 +84,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Toggle the visibility of an answer (isActive toggle)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:answer:toggle') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{questionId}/answer/toggle")
     public ResponseEntity<ApiResponse<QuestionResponse>> toggleAnswer(
             @PathVariable UUID questionId) {
@@ -86,6 +92,7 @@ public class QuestionAdminController {
     }
 
     @Operation(summary = "Delete the admin answer for a question (soft-delete)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('question:answer:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{questionId}/answer")
     public ResponseEntity<ApiResponse<Void>> deleteAnswer(
             @PathVariable UUID questionId) {

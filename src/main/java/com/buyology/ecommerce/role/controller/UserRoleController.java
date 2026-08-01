@@ -16,7 +16,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/user-roles")
-@PreAuthorize("hasRole('SUPERADMIN')")
 @Tag(name = "User Roles", description = "Admin APIs for assigning and removing roles from users")
 public class UserRoleController {
 
@@ -27,12 +26,14 @@ public class UserRoleController {
     }
 
     @Operation(summary = "Get all roles assigned to a user")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/users/{userId}")
     public ResponseEntity<ApiResponse<List<UserRoleResponse>>> getUserRoles(@PathVariable UUID userId) {
         return userRoleService.getUserRoles(userId);
     }
 
     @Operation(summary = "Assign a role to a user")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<UserRoleResponse>> assignRoleToUser(
             @Valid @RequestBody AssignRoleToUserRequest request) {
@@ -40,6 +41,7 @@ public class UserRoleController {
     }
 
     @Operation(summary = "Remove a role from a user")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @DeleteMapping("/users/{userId}/roles/{roleId}")
     public ResponseEntity<ApiResponse<Void>> removeRoleFromUser(
             @PathVariable UUID userId,

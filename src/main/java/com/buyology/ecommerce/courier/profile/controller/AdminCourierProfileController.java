@@ -28,7 +28,7 @@ public class AdminCourierProfileController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:profile:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<CourierProfileResponse>>> listByStore(
             @RequestParam UUID storeId,
             @RequestParam(defaultValue = "false") boolean activeOnly) {
@@ -36,20 +36,20 @@ public class AdminCourierProfileController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:profile:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<CourierProfileResponse>> getById(@PathVariable UUID id) {
         return service.getById(id);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:profile:create') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<CourierProfileResponse>> create(
             @Valid @RequestBody CreateCourierProfileRequest req) {
         return service.create(req);
     }
 
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:profile:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<CourierProfileResponse>> update(
             @PathVariable UUID id,
             @RequestBody UpdateCourierProfileRequest req) {
@@ -57,7 +57,7 @@ public class AdminCourierProfileController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:profile:delete') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
         return service.delete(id);
     }

@@ -43,7 +43,7 @@ public class StoreController {
 
     @Operation(summary = "Create a store",
             description = "Multipart form: 'request' part is JSON, 'banner' part is an optional image file.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> createStore(
             @RequestPart("request") String requestJson,
@@ -53,6 +53,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Get all stores")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<StoreResponse>>> getAllStores() {
         return storeService.getAllStores();
@@ -65,12 +66,14 @@ public class StoreController {
     }
 
     @Operation(summary = "Get a store by ID")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<StoreResponse>> getStoreById(@PathVariable UUID id) {
         return storeService.getStoreById(id);
     }
 
     @Operation(summary = "Get a store by slug")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/slug/{slug}")
     public ResponseEntity<ApiResponse<StoreResponse>> getStoreBySlug(@PathVariable String slug) {
         return storeService.getStoreBySlug(slug);
@@ -78,7 +81,7 @@ public class StoreController {
 
     @Operation(summary = "Update a store",
             description = "Multipart form: 'request' part is JSON (all fields optional), 'banner' part is an optional new image file.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoreResponse>> updateStore(
             @PathVariable UUID id,
@@ -89,7 +92,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Soft-delete a store")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteStore(@PathVariable UUID id) {
         return storeService.deleteStore(id);
@@ -98,7 +101,7 @@ public class StoreController {
     // ── Translation sub-resource ─────────────────────────────────────────────
 
     @Operation(summary = "Add a translation to a store")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storeId}/translations")
     public ResponseEntity<ApiResponse<StoreTranslationResponse>> addTranslation(
             @PathVariable UUID storeId,
@@ -107,7 +110,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Update a store translation by language code")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{storeId}/translations/{language}")
     public ResponseEntity<ApiResponse<StoreTranslationResponse>> updateTranslation(
             @PathVariable UUID storeId,
@@ -117,7 +120,7 @@ public class StoreController {
     }
 
     @Operation(summary = "Delete a store translation by language code")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:update') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{storeId}/translations/{language}")
     public ResponseEntity<ApiResponse<Void>> deleteTranslation(
             @PathVariable UUID storeId,

@@ -33,13 +33,13 @@ public class AdminRefundController {
     // ── Settings ────────────────────────────────────────────────────────────
 
     @GetMapping("/refund-settings")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:setting:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundSettingResponse>> getSettings() {
         return ApiResponse.success(settingService.getResponse(), "Refund settings fetched");
     }
 
     @PutMapping("/refund-settings")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:setting:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundSettingResponse>> updateSettings(
             @AuthenticationPrincipal UUID adminId,
             @Valid @RequestBody UpdateRefundSettingRequest body) {
@@ -49,7 +49,7 @@ public class AdminRefundController {
     // ── Refund requests ─────────────────────────────────────────────────────
 
     @GetMapping("/refunds")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Page<RefundRequestResponse>>> list(
             @RequestParam(required = false) RefundRequestStatus status,
             @RequestParam(required = false) UUID storeId,
@@ -59,13 +59,13 @@ public class AdminRefundController {
     }
 
     @GetMapping("/refunds/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundRequestResponse>> get(@PathVariable UUID id) {
         return ApiResponse.success(refundService.getForAdmin(id), "Refund request fetched");
     }
 
     @PostMapping("/refunds/{id}/approve")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:moderate') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundRequestResponse>> approve(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id,
@@ -75,7 +75,7 @@ public class AdminRefundController {
     }
 
     @PostMapping("/refunds/{id}/reject")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:moderate') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundRequestResponse>> reject(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id,
@@ -85,7 +85,7 @@ public class AdminRefundController {
     }
 
     @PostMapping("/refunds/{id}/mark-received")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundRequestResponse>> markReceived(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id) {
@@ -93,7 +93,7 @@ public class AdminRefundController {
     }
 
     @PostMapping("/refunds/{id}/pay")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('refund:payout') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<RefundRequestResponse>> pay(
             @AuthenticationPrincipal UUID adminId,
             @PathVariable UUID id) {

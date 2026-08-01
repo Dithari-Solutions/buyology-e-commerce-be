@@ -35,7 +35,7 @@ public class AdminAuthController {
                 + "Only an existing ADMIN/SUPERADMIN may create new admin accounts. "
                 + "The very first admin is provisioned via the BOOTSTRAP_ADMIN_* env vars (see AdminBootstrapInitializer)."
     )
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<String>> adminSignup(@RequestBody AdminSignUpRequest request) {
         return authService.adminSignup(request);
@@ -49,7 +49,7 @@ public class AdminAuthController {
                 "(Path=/auth/refresh, MaxAge=7d). " +
                 "NOTE: Swagger UI cannot display HttpOnly cookies — use curl or Postman to inspect."
     )
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/verify-otp")
     public ResponseEntity<ApiResponse<SignInResponse>> adminVerifyOtp(
             @RequestBody OtpVerifyRequest request,

@@ -67,7 +67,7 @@ public class PaymentController {
      * Initiate a refund (full or partial) for a successful transaction.
      * Enforces the partial refund guard before calling Paymob.
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('payment:refund') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/refunds")
     public ResponseEntity<ApiResponse<RefundResponse>> initiateRefund(
             @Valid @RequestBody RefundRequest request) {

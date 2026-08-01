@@ -26,7 +26,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/stores/{storeId}/products")
-@PreAuthorize("hasRole('SUPERADMIN') or hasRole('STORE_ADMIN') or hasRole('ADMIN')")
 @Tag(name = "Store Products", description = "Assign global products to a store with local pricing and stock")
 public class StoreProductController {
 
@@ -38,6 +37,7 @@ public class StoreProductController {
 
     @Operation(summary = "Assign a product to a store",
             description = "Links a global product to a store with a store-specific price and optional discount. Variants can be assigned inline or added separately.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:assign') or @rbacPolicy.legacyAdmin()")
     @PostMapping
     public ResponseEntity<ApiResponse<StoreProductResponse>> assignProduct(
             @PathVariable UUID storeId,
@@ -46,6 +46,7 @@ public class StoreProductController {
     }
 
     @Operation(summary = "List all products assigned to a store")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<StoreProductResponse>>> getStoreProducts(
             @PathVariable UUID storeId) {
@@ -53,6 +54,7 @@ public class StoreProductController {
     }
 
     @Operation(summary = "Update a store product's price, discount, or active status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{storeProductId}")
     public ResponseEntity<ApiResponse<StoreProductResponse>> updateStoreProduct(
             @PathVariable UUID storeId,
@@ -63,6 +65,7 @@ public class StoreProductController {
 
     @Operation(summary = "Remove a product from a store",
             description = "Soft-removes the store product assignment. The global product is unaffected.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:remove') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{storeProductId}")
     public ResponseEntity<ApiResponse<Void>> removeProduct(
             @PathVariable UUID storeId,
@@ -74,6 +77,7 @@ public class StoreProductController {
 
     @Operation(summary = "Assign a variant to a store product",
             description = "Sets the store-specific price and stock for a product variant. The variant must belong to the assigned product.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:assign') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storeProductId}/variants")
     public ResponseEntity<ApiResponse<StoreProductResponse.StoreVariantResponse>> assignVariant(
             @PathVariable UUID storeId,
@@ -83,6 +87,7 @@ public class StoreProductController {
     }
 
     @Operation(summary = "Update a store variant's price, stock, or active status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{storeProductId}/variants/{storeVariantId}")
     public ResponseEntity<ApiResponse<StoreProductResponse.StoreVariantResponse>> updateStoreVariant(
             @PathVariable UUID storeId,
@@ -93,6 +98,7 @@ public class StoreProductController {
     }
 
     @Operation(summary = "Remove a variant from a store product")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:remove') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{storeProductId}/variants/{storeVariantId}")
     public ResponseEntity<ApiResponse<Void>> removeVariant(
             @PathVariable UUID storeId,

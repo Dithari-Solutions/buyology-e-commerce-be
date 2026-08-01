@@ -21,7 +21,6 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/admin/b2b/quotes")
-@PreAuthorize("hasAnyRole('SUPERADMIN','PROCUREMENT')")
 public class AdminB2bQuoteController {
 
     private final B2bQuoteService quoteService;
@@ -30,6 +29,7 @@ public class AdminB2bQuoteController {
         this.quoteService = quoteService;
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:quote:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<B2bQuoteResponse>>> list(
             @RequestParam(required = false) B2bQuoteStatus status) {
@@ -41,11 +41,13 @@ public class AdminB2bQuoteController {
      * {@code /count} path (which Spring matches ahead of {@code /{id}}) so "count" is never
      * captured as a quote id path variable.
      */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:quote:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/count")
     public ResponseEntity<ApiResponse<NewCountResponse>> newCount() {
         return ApiResponse.success(new NewCountResponse(quoteService.countSubmitted()), "New quote count fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:quote:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<B2bQuoteResponse>> get(@PathVariable UUID id) {
         return ApiResponse.success(quoteService.getForProcurement(id), "Quote fetched");
@@ -54,6 +56,7 @@ public class AdminB2bQuoteController {
     /** Shared contract: {@code GET /api/admin/b2b/quotes/count → ApiResponse<{ newCount }>}. */
     public record NewCountResponse(long newCount) {}
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:quote:moderate') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{id}/price")
     public ResponseEntity<ApiResponse<B2bQuoteResponse>> price(
             @AuthenticationPrincipal UUID adminId,
@@ -62,6 +65,7 @@ public class AdminB2bQuoteController {
         return ApiResponse.success(quoteService.price(adminId, id, req), "Quote priced");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:quote:moderate') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{id}/reject")
     public ResponseEntity<ApiResponse<B2bQuoteResponse>> reject(
             @PathVariable UUID id,

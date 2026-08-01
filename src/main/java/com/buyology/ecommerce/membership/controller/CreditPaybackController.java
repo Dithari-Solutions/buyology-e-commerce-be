@@ -60,7 +60,7 @@ public class CreditPaybackController {
     // ── Admin endpoints ─────────────────────────────────────────────────────
 
     @GetMapping("/api/admin/membership/credit/usages")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:credit:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<CreditUsage>>> listUsages(
             @RequestParam(required = false) CreditUsage.Status status) {
         List<CreditUsage> all = usageRepository.findAll();
@@ -73,7 +73,7 @@ public class CreditPaybackController {
     public record SetDeadlineRequest(Instant dueAt, Integer extendDays) {}
 
     @PatchMapping("/api/admin/membership/credit/usages/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:credit:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<CreditUsage>> updateUsageDeadline(
             @PathVariable UUID id,
             @RequestBody SetDeadlineRequest req) {
@@ -96,7 +96,7 @@ public class CreditPaybackController {
     public record PaybackConfigRequest(int paybackDays) {}
 
     @GetMapping("/api/admin/membership/credit/config")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:credit:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getPaybackConfig() {
         return ApiResponse.success(
                 Map.of("paybackDays", platformConfigService.getPaybackDays()),
@@ -104,7 +104,7 @@ public class CreditPaybackController {
     }
 
     @PatchMapping("/api/admin/membership/credit/config")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:credit:config:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> updatePaybackConfig(
             @AuthenticationPrincipal UUID actorId,
             @RequestBody PaybackConfigRequest req) {

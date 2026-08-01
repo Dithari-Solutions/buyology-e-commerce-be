@@ -52,26 +52,26 @@ public class PromoCodeController {
     // ── Admin endpoints ──────────────────────────────────────────────────────
 
     @PostMapping("/api/admin/promo")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:create') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PromoCodeResponse>> create(
             @Valid @RequestBody CreatePromoCodeRequest req) {
         return ApiResponse.created(promoCodeService.createPromoCode(req), "Promo code created");
     }
 
     @GetMapping("/api/admin/promo")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<PromoCodeResponse>>> listAll() {
         return ApiResponse.success(promoCodeService.listAll(), "Promo codes fetched");
     }
 
     @GetMapping("/api/admin/promo/{id}/usages")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<PromoUsageResponse>>> usages(@PathVariable UUID id) {
         return ApiResponse.success(promoCodeService.listUsages(id), "Promo usage fetched");
     }
 
     @PutMapping("/api/admin/promo/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PromoCodeResponse>> update(
             @PathVariable UUID id,
             @Valid @RequestBody CreatePromoCodeRequest req) {
@@ -79,14 +79,14 @@ public class PromoCodeController {
     }
 
     @DeleteMapping("/api/admin/promo/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:delete') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
         promoCodeService.deactivate(id);
         return ApiResponse.success(null, "Promo code deactivated");
     }
 
     @PostMapping("/api/admin/promo/{id}/send")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:issue') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Void>> sendToCustomers(
             @PathVariable UUID id,
             @RequestBody SendPromoRequest req) {
@@ -96,7 +96,7 @@ public class PromoCodeController {
 
     /** Mint a coupon bound to ONE user and email/notify only that user. */
     @PostMapping("/api/admin/promo/issue")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:issue') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<PromoCodeResponse>> issueToUser(
             @Valid @RequestBody IssuePersonalCodeRequest req) {
         return ApiResponse.created(promoCodeService.issuePersonalCode(req),
@@ -106,7 +106,7 @@ public class PromoCodeController {
     // ── Admin: token-redemption configuration ────────────────────────────────
 
     @GetMapping("/api/admin/promo/redeem-config")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<TokenRedemptionConfigDto>> getRedeemConfig() {
         return ApiResponse.success(
                 TokenRedemptionConfigDto.from(promoCodeService.getOrCreateConfig()),
@@ -114,7 +114,7 @@ public class PromoCodeController {
     }
 
     @PutMapping("/api/admin/promo/redeem-config")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('promo:config:update') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<TokenRedemptionConfigDto>> updateRedeemConfig(
             @RequestBody TokenRedemptionConfigDto req) {
         return ApiResponse.success(promoCodeService.updateConfig(req),

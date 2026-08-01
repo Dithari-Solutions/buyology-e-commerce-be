@@ -22,7 +22,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/game")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin – Daily Games", description = "Manage daily games and quizzes")
 public class AdminGameController {
 
@@ -33,6 +32,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Configure daily game type")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:config:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/config")
     public ResponseEntity<ApiResponse<DailyGameConfig>> configureDailyGame(@Valid @RequestBody DailyGameConfigDto dto) {
         DailyGameConfig config = gameService.configureDailyGame(dto);
@@ -40,6 +40,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Create a new quiz question")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:quiz:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/quiz")
     public ResponseEntity<ApiResponse<QuizQuestionResponse>> createQuizQuestion(@Valid @RequestBody QuizQuestionRequest request) {
         QuizQuestionResponse response = gameService.createQuizQuestion(request);
@@ -47,6 +48,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Get all quiz questions")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/quiz")
     public ResponseEntity<ApiResponse<List<QuizQuestionResponse>>> getAllQuizQuestions() {
         List<QuizQuestionResponse> questions = gameService.getAllQuizQuestions();
@@ -54,6 +56,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Update a quiz question")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:quiz:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/quiz/{id}")
     public ResponseEntity<ApiResponse<QuizQuestionResponse>> updateQuizQuestion(
             @PathVariable UUID id,
@@ -63,6 +66,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Delete a quiz question")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:quiz:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/quiz/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteQuizQuestion(@PathVariable UUID id) {
         gameService.deleteQuizQuestion(id);
@@ -70,6 +74,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Get the daily game configuration for a given date (defaults to today)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/config")
     public ResponseEntity<ApiResponse<DailyGameConfig>> getDailyGameConfig(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
@@ -79,6 +84,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Get the token-reward config (tokens awarded per game/quiz)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/reward-config")
     public ResponseEntity<ApiResponse<GameRewardConfigDto>> getRewardConfig() {
         return ApiResponse.success(
@@ -87,6 +93,7 @@ public class AdminGameController {
     }
 
     @Operation(summary = "Update the token-reward config (tokens awarded per game/quiz)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('game:reward:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/reward-config")
     public ResponseEntity<ApiResponse<GameRewardConfigDto>> updateRewardConfig(
             @RequestBody GameRewardConfigDto dto) {

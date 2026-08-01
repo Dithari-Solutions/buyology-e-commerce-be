@@ -26,8 +26,12 @@ public class PermissionService {
 
     private static final Logger log = LoggerFactory.getLogger(PermissionService.class);
 
-    /** Codes are lower-case {@code module:action} segments, e.g. {@code store:product:assign}. */
-    private static final Pattern PERMISSION_CODE = Pattern.compile("^[a-z][a-z0-9]*(:[a-z0-9]+)+$");
+    /**
+     * Codes are lower-case {@code module:action} segments, e.g. {@code store:product:assign}.
+     * Hyphens are allowed inside a segment because some resources are two words
+     * ({@code b2b:product-request:read}).
+     */
+    private static final Pattern PERMISSION_CODE = Pattern.compile("^[a-z][a-z0-9]*(:[a-z0-9-]+)+$");
 
     private static final String CODE_HELP =
             "Permission code must be lower-case colon-separated segments, e.g. 'store:product:assign'";

@@ -47,7 +47,7 @@ public class AdminCourierController {
     //   "drivingLicenceBack"  — licence back image  (JPEG/PNG/WebP, ≤10 MB, required for SCOOTER/CAR)
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:create') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Create a new courier — multipart form")
     public ResponseEntity<Object> createCourier(
             @RequestPart("data") String dataJson,
@@ -73,7 +73,7 @@ public class AdminCourierController {
     // Query params forwarded as-is: status, vehicleType, isAvailable
 
     @GetMapping("/map")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:read') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "All couriers with latest GPS location for map display")
     public ResponseEntity<Object> getCouriersForMap(HttpServletRequest httpRequest) {
         return parsed(courierServiceClient.forwardNoBody(
@@ -86,7 +86,7 @@ public class AdminCourierController {
     // Query params forwarded as-is: status, vehicleType, isAvailable, page, size, sort
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:read') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "List couriers with optional filters")
     public ResponseEntity<Object> listCouriers(HttpServletRequest httpRequest) {
         return parsed(courierServiceClient.forwardNoBody(
@@ -98,7 +98,7 @@ public class AdminCourierController {
     // Proxies → GET /api/v1/couriers/{id}
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:read') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Get courier by ID — includes image URLs")
     public ResponseEntity<Object> getCourier(
             @PathVariable UUID id,
@@ -118,7 +118,7 @@ public class AdminCourierController {
     //   "drivingLicenceImage"— new driving licence image  (JPEG/PNG/WebP, ≤10 MB)
 
     @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:update') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Update courier profile fields and/or images — multipart form")
     public ResponseEntity<Object> updateCourier(
             @PathVariable UUID id,
@@ -141,7 +141,7 @@ public class AdminCourierController {
     // Body: { "status": "ACTIVE" | "OFFLINE" | "SUSPENDED" }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:update') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Update courier operational status")
     public ResponseEntity<Object> updateStatus(
             @PathVariable UUID id,
@@ -158,7 +158,7 @@ public class AdminCourierController {
     // Body: { "available": true | false }
 
     @PatchMapping("/{id}/availability")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:update') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Toggle courier availability")
     public ResponseEntity<Object> updateAvailability(
             @PathVariable UUID id,
@@ -174,7 +174,7 @@ public class AdminCourierController {
     // Proxies → DELETE /api/v1/couriers/{id}
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'COURIER_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('courier:delete') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "Soft-delete a courier")
     public ResponseEntity<Object> deleteCourier(
             @PathVariable UUID id,

@@ -18,7 +18,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/membership")
-@PreAuthorize("hasRole('ADMIN')")
 public class AdminB2bMembershipController {
 
     private final B2bMembershipService membershipService;
@@ -35,11 +34,13 @@ public class AdminB2bMembershipController {
 
     // ── Applications ──────────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:application:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/applications")
     public ResponseEntity<ApiResponse<List<MembershipApplicationResponse>>> listApplications() {
         return ApiResponse.success(membershipService.listAllApplications(), "Applications fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:application:moderate') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/applications/{id}/action")
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> processAction(
             @PathVariable UUID id,
@@ -53,6 +54,7 @@ public class AdminB2bMembershipController {
      * the user, which then goes through the normal review queue. Sent as
      * multipart/form-data: a "data" JSON part + a "tradeLicense" file part.
      */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:application:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping(value = "/convert-user/{userId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<MembershipApplicationResponse>> convertUser(
             @PathVariable UUID userId,
@@ -65,16 +67,19 @@ public class AdminB2bMembershipController {
 
     // ── Memberships ───────────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/memberships")
     public ResponseEntity<ApiResponse<List<MembershipCardResponse>>> listMemberships() {
         return ApiResponse.success(membershipService.listAllMemberships(), "Memberships fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/memberships/{id}")
     public ResponseEntity<ApiResponse<B2bMembershipDetailResponse>> getMembership(@PathVariable UUID id) {
         return ApiResponse.success(membershipService.getMembershipDetail(id), "Membership fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/memberships/{id}")
     public ResponseEntity<ApiResponse<MembershipCardResponse>> updateMembership(
             @PathVariable UUID id,
@@ -84,11 +89,13 @@ public class AdminB2bMembershipController {
 
     // ── Wallet Management ─────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:wallet:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/wallet/{userId}")
     public ResponseEntity<ApiResponse<WalletResponse>> getUserWallet(@PathVariable UUID userId) {
         return ApiResponse.success(walletService.getWallet(userId), "Wallet fetched");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:wallet:credit') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/wallet/{userId}/credit")
     public ResponseEntity<ApiResponse<WalletResponse>> addCredit(
             @PathVariable UUID userId,
@@ -98,6 +105,7 @@ public class AdminB2bMembershipController {
                 "Credit added");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:wallet:adjust') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/wallet/{userId}/deduct")
     public ResponseEntity<ApiResponse<WalletResponse>> deductCredit(
             @PathVariable UUID userId,
@@ -107,6 +115,7 @@ public class AdminB2bMembershipController {
                 "Credit deducted");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:wallet:adjust') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/wallet/{userId}/adjust")
     public ResponseEntity<ApiResponse<WalletResponse>> adjustBalance(
             @PathVariable UUID userId,
@@ -116,6 +125,7 @@ public class AdminB2bMembershipController {
                 "Balance adjusted");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:wallet:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/wallet/{userId}/transactions")
     public ResponseEntity<ApiResponse<List<WalletTransactionResponse>>> getTransactions(
             @PathVariable UUID userId) {
@@ -124,6 +134,7 @@ public class AdminB2bMembershipController {
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/memberships/{id}/freeze")
     public ResponseEntity<ApiResponse<String>> freeze(
             @PathVariable UUID id,
@@ -131,6 +142,7 @@ public class AdminB2bMembershipController {
         return lifecycleService.adminFreeze(id, actorId != null ? "admin:" + actorId : "admin");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/memberships/{id}/unfreeze")
     public ResponseEntity<ApiResponse<String>> unfreeze(
             @PathVariable UUID id,
@@ -138,6 +150,7 @@ public class AdminB2bMembershipController {
         return lifecycleService.adminUnfreeze(id, actorId != null ? "admin:" + actorId : "admin");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/memberships/{id}")
     public ResponseEntity<ApiResponse<String>> trash(
             @PathVariable UUID id,
@@ -145,6 +158,7 @@ public class AdminB2bMembershipController {
         return lifecycleService.adminDelete(id, actorId != null ? "admin:" + actorId : "admin");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:delete') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/memberships/{id}/restore")
     public ResponseEntity<ApiResponse<String>> restore(
             @PathVariable UUID id,
@@ -156,6 +170,7 @@ public class AdminB2bMembershipController {
      * Re-send the set-password email to a member who hasn't completed setup.
      * Errors with 409 if the member already has a password.
      */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:membership:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/memberships/{id}/resend-setup")
     public ResponseEntity<ApiResponse<String>> resendSetup(@PathVariable UUID id) {
         try {

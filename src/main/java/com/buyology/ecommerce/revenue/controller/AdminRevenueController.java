@@ -19,7 +19,6 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/admin/revenue")
-@PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
 public class AdminRevenueController {
 
     private final RevenueService revenueService;
@@ -29,6 +28,7 @@ public class AdminRevenueController {
     }
 
     /** Buyology's own revenue (platform-owned products), optionally filtered to one store. */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('revenue:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/platform")
     public ResponseEntity<ApiResponse<RevenueReportResponse>> platform(
             @RequestParam(defaultValue = "MONTHLY") RevenuePeriod period,
@@ -39,6 +39,7 @@ public class AdminRevenueController {
     }
 
     /** All suppliers' revenue totals. */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('revenue:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/suppliers")
     public ResponseEntity<ApiResponse<SupplierRevenueOverviewResponse>> suppliers(
             @RequestParam(defaultValue = "MONTHLY") RevenuePeriod period,
@@ -48,6 +49,7 @@ public class AdminRevenueController {
     }
 
     /** A single supplier's revenue, bucketed. */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('revenue:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/suppliers/{supplierId}")
     public ResponseEntity<ApiResponse<RevenueReportResponse>> supplier(
             @PathVariable UUID supplierId,

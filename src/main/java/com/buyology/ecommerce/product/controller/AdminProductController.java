@@ -34,7 +34,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/product")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Product", description = "Admin APIs for managing all products")
 public class AdminProductController {
 
@@ -55,6 +54,7 @@ public class AdminProductController {
                     encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
             )
     )
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponse>> createProduct(
             @Parameter(hidden = true) @RequestPart("request") String requestJson,
@@ -73,6 +73,7 @@ public class AdminProductController {
                     encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
             )
     )
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping(value = "/{productId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
             @PathVariable UUID productId,
@@ -85,6 +86,7 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Get all products (all statuses) — unpaged")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts(
             @RequestParam String lang) {
@@ -92,6 +94,7 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Paginated + searchable product list (all statuses)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/page")
     public ResponseEntity<ApiResponse<com.buyology.ecommerce.common.response.PageResponse<ProductResponse>>> getAllProductsPaged(
             @RequestParam String lang,
@@ -103,12 +106,14 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Product status counts for the admin dashboard")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/stats")
     public ResponseEntity<ApiResponse<java.util.Map<String, Long>>> getProductStats() {
         return productService.getAdminProductStats();
     }
 
     @Operation(summary = "Get product by ID with all details including media (all statuses)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{productId}")
     public ResponseEntity<ApiResponse<ProductResponse>> getProductById(
             @PathVariable UUID productId,
@@ -117,6 +122,7 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Get all products by category (excludes trash)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/category/{categoryId}")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getProductsByCategory(
             @PathVariable UUID categoryId,
@@ -125,6 +131,7 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Activate or deactivate a product (status ACTIVE / INACTIVE)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:moderate') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{productId}/status")
     public ResponseEntity<ApiResponse<Void>> setProductStatus(
             @PathVariable UUID productId,
@@ -133,18 +140,21 @@ public class AdminProductController {
     }
 
     @Operation(summary = "Soft-delete a product — moves it to trash (auto-purged after 30 days)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{productId}")
     public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable UUID productId) {
         return productService.softDeleteProduct(productId);
     }
 
     @Operation(summary = "Get all products in trash")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/trash")
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getTrash(@RequestParam String lang) {
         return productService.getTrash(lang);
     }
 
     @Operation(summary = "Restore a trashed product back to active")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:delete') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/{productId}/restore")
     public ResponseEntity<ApiResponse<ProductResponse>> restoreProduct(
             @PathVariable UUID productId,
@@ -154,6 +164,7 @@ public class AdminProductController {
 
     @Operation(summary = "Manually trigger Elasticsearch reindexing for all products",
             description = "Deletes the existing index and rebuilds it from the database. Use this if search results are out of sync.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:reindex') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/reindex")
     public ResponseEntity<ApiResponse<Void>> reindex() {
         return productService.reindexElasticsearch();

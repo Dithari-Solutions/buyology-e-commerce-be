@@ -50,7 +50,7 @@ public class ProductCategoryController {
                     + "or a subcategory when a valid parentId is supplied. "
                     + "Translations in Azerbaijani, English, and Arabic are all required. "
                     + "Slugs must be globally unique per language.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:category:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping
     public ResponseEntity<ApiResponse<CategoryResponse>> createCategory(
             @RequestBody @Valid CreateCategoryRequest request) {
@@ -67,7 +67,7 @@ public class ProductCategoryController {
     @Operation(summary = "Update a category",
             description = "Partially updates a category. All fields are optional — only provided fields are applied. "
                     + "If translations are provided, only the supplied language fields are updated.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:category:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<CategoryResponse>> updateCategory(
             @PathVariable UUID id,
@@ -77,7 +77,7 @@ public class ProductCategoryController {
 
     @Operation(summary = "Delete (deactivate) a category",
             description = "Soft-deletes the category by setting its status to INACTIVE.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:category:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteCategory(@PathVariable UUID id) {
         return categoryService.deleteCategory(id);

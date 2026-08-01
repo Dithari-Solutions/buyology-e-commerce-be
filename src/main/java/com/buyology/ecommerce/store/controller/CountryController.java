@@ -35,7 +35,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Create a country")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('country:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping
     public ResponseEntity<ApiResponse<CountryResponse>> createCountry(
             @RequestBody @Valid CreateCountryRequest request) {
@@ -67,7 +67,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Update a country")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('country:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<CountryResponse>> updateCountry(
             @PathVariable UUID id,
@@ -76,7 +76,7 @@ public class CountryController {
     }
 
     @Operation(summary = "Deactivate a country")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('country:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteCountry(@PathVariable UUID id) {
         return countryService.deleteCountry(id);

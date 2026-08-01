@@ -58,7 +58,7 @@ public class StoreLocationController {
 
     @Operation(summary = "Add a location (branch) to a store",
             description = "When isPrimary=true the existing primary branch is automatically demoted.")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storeId}/locations")
     public ResponseEntity<ApiResponse<StoreLocationResponse>> createLocation(
             @PathVariable UUID storeId,
@@ -67,6 +67,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Get all locations for a store")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{storeId}/locations")
     public ResponseEntity<ApiResponse<List<StoreLocationResponse>>> getLocationsByStore(
             @PathVariable UUID storeId) {
@@ -74,6 +75,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Get a location by ID")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/locations/{locationId}")
     public ResponseEntity<ApiResponse<StoreLocationResponse>> getLocationById(
             @PathVariable UUID locationId) {
@@ -81,7 +83,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Update a store location")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/locations/{locationId}")
     public ResponseEntity<ApiResponse<StoreLocationResponse>> updateLocation(
             @PathVariable UUID locationId,
@@ -90,7 +92,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Deactivate a store location")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/locations/{locationId}")
     public ResponseEntity<ApiResponse<Void>> deleteLocation(@PathVariable UUID locationId) {
         return locationService.deleteLocation(locationId);
@@ -99,7 +101,7 @@ public class StoreLocationController {
     // ── Operating hours sub-resource ─────────────────────────────────────────
 
     @Operation(summary = "Set operating hours for a day at a location")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/locations/{locationId}/hours")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> createHours(
             @PathVariable UUID locationId,
@@ -108,6 +110,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Get all operating hours for a location")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/locations/{locationId}/hours")
     public ResponseEntity<ApiResponse<List<OperatingHoursResponse>>> getHoursByLocation(
             @PathVariable UUID locationId) {
@@ -115,6 +118,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Get a specific operating hours entry by ID")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/hours/{hoursId}")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> getHoursById(
             @PathVariable UUID hoursId) {
@@ -122,7 +126,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Update an operating hours entry")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/hours/{hoursId}")
     public ResponseEntity<ApiResponse<OperatingHoursResponse>> updateHours(
             @PathVariable UUID hoursId,
@@ -131,7 +135,7 @@ public class StoreLocationController {
     }
 
     @Operation(summary = "Delete an operating hours entry")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERADMIN', 'STORE_ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:location:update') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/hours/{hoursId}")
     public ResponseEntity<ApiResponse<Void>> deleteHours(@PathVariable UUID hoursId) {
         return hoursService.deleteHours(hoursId);

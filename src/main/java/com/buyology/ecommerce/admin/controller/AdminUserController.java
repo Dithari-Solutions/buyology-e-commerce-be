@@ -20,7 +20,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/users")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin – Users", description = "Admin access to user management")
 public class AdminUserController {
 
@@ -78,6 +77,7 @@ public class AdminUserController {
     }
 
     @Operation(summary = "List all users (paginated)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<AdminUserListResponse>> listUsers(
             @RequestParam(defaultValue = "0") int page,
@@ -87,6 +87,7 @@ public class AdminUserController {
     }
 
     @Operation(summary = "Get full user detail by authCredentialId — includes profile, favorites, and active cart")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{authCredentialId}")
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> getUserDetail(
             @PathVariable UUID authCredentialId) {
@@ -95,6 +96,7 @@ public class AdminUserController {
 
     @Operation(summary = "Block a user manually",
                description = "Sets the user's status to SUSPENDED and revokes all their active sessions")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:block') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{userId}/block")
     public ResponseEntity<ApiResponse<String>> blockUser(@PathVariable UUID userId) {
         return adminInactivityService.blockUser(userId);
@@ -102,6 +104,7 @@ public class AdminUserController {
 
     @Operation(summary = "Unblock a user",
                description = "Restores the user's status to ACTIVE")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:block') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{userId}/unblock")
     public ResponseEntity<ApiResponse<String>> unblockUser(@PathVariable UUID userId) {
         return adminInactivityService.unblockUser(userId);
@@ -110,6 +113,7 @@ public class AdminUserController {
     @Operation(summary = "Trigger inactive-user blocking manually",
                description = "Immediately runs the inactivity check and suspends all users " +
                               "who have exceeded the configured inactivity threshold")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:block') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/block-inactive")
     public ResponseEntity<ApiResponse<String>> blockInactiveUsers() {
         return adminInactivityService.triggerInactivityBlock();

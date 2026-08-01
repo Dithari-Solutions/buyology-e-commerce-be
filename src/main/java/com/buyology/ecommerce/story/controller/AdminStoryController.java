@@ -24,7 +24,6 @@ import com.buyology.ecommerce.story.dto.StorySummaryResponse;
 
 @RestController
 @RequestMapping("/api/admin/story")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Story", description = "Admin APIs for story management")
 public class AdminStoryController {
 
@@ -37,6 +36,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Get all stories with status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getStories(
             @RequestParam Language language) {
@@ -44,6 +44,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Get story details with status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{storyId}")
     public ResponseEntity<ApiResponse<StoryResponse>> getStoryDetails(
             @RequestParam Language language,
@@ -60,6 +61,7 @@ public class AdminStoryController {
             encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
         )
     )
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<StoryResponse>> createStory(
             @org.springframework.web.bind.annotation.RequestPart("request") String requestJson,
@@ -74,6 +76,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Get a presigned URL to upload a story media file directly to storage")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/presign-upload")
     public ResponseEntity<ApiResponse<com.buyology.ecommerce.story.dto.PresignUploadResponse>> presignUpload(
             @jakarta.validation.Valid @RequestBody com.buyology.ecommerce.story.dto.PresignUploadRequest request) {
@@ -81,6 +84,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Create a story from already-uploaded media keys (direct-to-storage upload)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/create-direct")
     public ResponseEntity<ApiResponse<StoryResponse>> createStoryDirect(
             @jakarta.validation.Valid @RequestBody com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest request) {
@@ -91,6 +95,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Add media files to an existing story")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping(value = "/{storyId}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<Void>> addMediaToStory(
             @PathVariable UUID storyId,
@@ -100,6 +105,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Activate a story")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:moderate') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storyId}/activate")
     public ResponseEntity<ApiResponse<Void>> activateStory(@PathVariable UUID storyId) {
         storyService.activateStory(storyId);
@@ -107,6 +113,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Deactivate a story")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:moderate') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{storyId}/deactivate")
     public ResponseEntity<ApiResponse<Void>> deActivateStory(@PathVariable UUID storyId) {
         storyService.deActivateStory(storyId);
@@ -114,6 +121,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Set the display order of a story (lower is shown first)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{storyId}/display-order")
     public ResponseEntity<ApiResponse<Void>> setDisplayOrder(
             @PathVariable UUID storyId,
@@ -123,6 +131,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Delete a story with all its translations and media")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{storyId}")
     public ResponseEntity<ApiResponse<Void>> deleteStory(@PathVariable UUID storyId) {
         storyService.deleteStory(storyId);
@@ -130,6 +139,7 @@ public class AdminStoryController {
     }
 
     @Operation(summary = "Delete a specific media file from a story")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('story:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{storyId}/media/{mediaId}")
     public ResponseEntity<ApiResponse<Void>> deleteMedia(
             @PathVariable UUID storyId,

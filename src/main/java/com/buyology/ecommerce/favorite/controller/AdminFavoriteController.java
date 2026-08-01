@@ -14,7 +14,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/favorites")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin – Favorites", description = "Admin access to user favorites")
 public class AdminFavoriteController {
 
@@ -25,6 +24,7 @@ public class AdminFavoriteController {
     }
 
     @Operation(summary = "List all favorites across all users (paginated)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:favorite:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<AdminFavoritePageResponse>> getAllFavorites(
             @RequestParam(defaultValue = "0") int page,
@@ -33,6 +33,7 @@ public class AdminFavoriteController {
     }
 
     @Operation(summary = "Get favorites for a specific user")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('user:favorite:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/users/{authCredentialId}")
     public ResponseEntity<ApiResponse<FavoriteListResponse>> getUserFavorites(
             @PathVariable UUID authCredentialId) {

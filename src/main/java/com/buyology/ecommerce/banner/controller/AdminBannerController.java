@@ -28,7 +28,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/banner")
-@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Banner", description = "Admin APIs for promo banner management")
 public class AdminBannerController {
 
@@ -41,6 +40,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "List all banners (admin), optionally filtered by platform")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<BannerAdminResponse>>> list(
             @RequestParam(required = false) BannerPlatform platform) {
@@ -48,6 +48,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "Get one banner by id")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<BannerAdminResponse>> getOne(@PathVariable UUID id) {
         return ApiResponse.success(bannerService.getAdminById(id), "Banner fetched successfully");
@@ -62,6 +63,7 @@ public class AdminBannerController {
                     encoding = @Encoding(name = "request", contentType = MediaType.APPLICATION_JSON_VALUE)
             )
     )
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<BannerAdminResponse>> create(
             @RequestPart("request") String requestJson,
@@ -73,6 +75,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "Update a banner")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<BannerAdminResponse>> update(
             @PathVariable UUID id,
@@ -84,6 +87,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "Set banner status")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:moderate') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<Void>> setStatus(
             @PathVariable UUID id,
@@ -93,6 +97,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "Set banner sort order")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:update') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{id}/sort-order")
     public ResponseEntity<ApiResponse<Void>> setSortOrder(
             @PathVariable UUID id,
@@ -102,6 +107,7 @@ public class AdminBannerController {
     }
 
     @Operation(summary = "Delete a banner")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('banner:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
         bannerService.deleteBanner(id);

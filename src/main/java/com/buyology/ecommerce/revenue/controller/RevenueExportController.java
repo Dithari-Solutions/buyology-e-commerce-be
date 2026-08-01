@@ -21,7 +21,6 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/admin/revenue/exports")
-@PreAuthorize("hasRole('SUPERADMIN')")
 public class RevenueExportController {
 
     private final RevenueExportService exportService;
@@ -31,6 +30,7 @@ public class RevenueExportController {
     }
 
     /** Generate a revenue export (PLATFORM or SUPPLIER_ALL), archive it, return its download URL. */
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<RevenueExportResponse>> create(
             @RequestParam(defaultValue = "PLATFORM") RevenueExportType type,
@@ -52,6 +52,7 @@ public class RevenueExportController {
     }
 
     /** Export history — who exported what, with fresh download links. */
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<RevenueExportResponse>>> list() {
         return ApiResponse.success(exportService.listExports(), "Revenue exports");

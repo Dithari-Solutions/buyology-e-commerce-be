@@ -17,7 +17,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/permissions")
-@PreAuthorize("hasRole('SUPERADMIN')")
 @Tag(name = "Permissions", description = "Admin APIs for managing permissions")
 public class PermissionController {
 
@@ -28,18 +27,21 @@ public class PermissionController {
     }
 
     @Operation(summary = "Get all permissions")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<PermissionResponse>>> getAllPermissions() {
         return permissionService.getAllPermissions();
     }
 
     @Operation(summary = "Get permission by ID")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<PermissionResponse>> getPermissionById(@PathVariable UUID id) {
         return permissionService.getPermissionById(id);
     }
 
     @Operation(summary = "Create a new permission")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping
     public ResponseEntity<ApiResponse<PermissionResponse>> createPermission(
             @Valid @RequestBody CreatePermissionRequest request) {
@@ -47,6 +49,7 @@ public class PermissionController {
     }
 
     @Operation(summary = "Update a permission")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<PermissionResponse>> updatePermission(
             @PathVariable UUID id,
@@ -55,6 +58,7 @@ public class PermissionController {
     }
 
     @Operation(summary = "Delete a permission")
+    @PreAuthorize("hasRole('SUPERADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deletePermission(@PathVariable UUID id) {
         return permissionService.deletePermission(id);

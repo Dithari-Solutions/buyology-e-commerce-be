@@ -17,7 +17,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/reviews")
-@PreAuthorize("hasRole('SUPERADMIN') or hasRole('CUSTOMER_SUPPORT') or hasRole('ADMIN')")
 @Tag(name = "Reviews (Admin)", description = "Admin APIs for moderating reviews and managing admin replies")
 public class ReviewAdminController {
 
@@ -29,6 +28,7 @@ public class ReviewAdminController {
 
     @Operation(summary = "List all reviews",
             description = "Filter by status: PENDING, APPROVED, REJECTED. Omit status to get all non-deleted reviews.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<ReviewResponse>>> getAllReviews(
             @RequestParam(required = false) ModerationStatus status,
@@ -38,6 +38,7 @@ public class ReviewAdminController {
     }
 
     @Operation(summary = "Get a review by ID (includes deleted records)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<ReviewResponse>> getReviewById(
             @PathVariable UUID reviewId) {
@@ -46,6 +47,7 @@ public class ReviewAdminController {
 
     @Operation(summary = "Approve or reject a review",
             description = "Set status to APPROVED or REJECTED. Rejection requires a rejectionReason.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:moderate') or @rbacPolicy.legacyAdmin()")
     @PatchMapping("/{reviewId}/moderate")
     public ResponseEntity<ApiResponse<ReviewResponse>> moderateReview(
             @PathVariable UUID reviewId,
@@ -55,6 +57,7 @@ public class ReviewAdminController {
     }
 
     @Operation(summary = "Delete a review (soft-delete)")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{reviewId}")
     public ResponseEntity<ApiResponse<Void>> deleteReview(
             @PathVariable UUID reviewId) {
@@ -63,6 +66,7 @@ public class ReviewAdminController {
 
     @Operation(summary = "Add an admin reply to a review",
             description = "Only one reply per review is allowed. Use PUT to update an existing reply.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:reply:create') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{reviewId}/reply")
     public ResponseEntity<ApiResponse<ReviewResponse>> addReply(
             @PathVariable UUID reviewId,
@@ -72,6 +76,7 @@ public class ReviewAdminController {
     }
 
     @Operation(summary = "Update the admin reply on a review")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:reply:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/{reviewId}/reply")
     public ResponseEntity<ApiResponse<ReviewResponse>> updateReply(
             @PathVariable UUID reviewId,
@@ -80,6 +85,7 @@ public class ReviewAdminController {
     }
 
     @Operation(summary = "Delete the admin reply on a review")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('review:reply:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{reviewId}/reply")
     public ResponseEntity<ApiResponse<Void>> deleteReply(
             @PathVariable UUID reviewId) {

@@ -52,7 +52,7 @@ public class NewsletterController {
     // ── Admin endpoints ──────────────────────────────────────────────────────
 
     @PostMapping("/api/admin/news")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:create') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<NewsArticleResponse>> createArticle(
             @AuthenticationPrincipal UUID adminId,
             @Valid @RequestPart("request") CreateNewsArticleRequest req,
@@ -61,19 +61,19 @@ public class NewsletterController {
     }
 
     @GetMapping("/api/admin/news")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<NewsArticleResponse>>> listAll() {
         return ApiResponse.success(newsletterService.listAllArticles(), "Articles fetched");
     }
 
     @GetMapping("/api/admin/newsletter/stats")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:subscriber:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Map<String, Long>>> stats() {
         return ApiResponse.success(Map.of("subscriberCount", newsletterService.countSubscribers()), "Stats fetched");
     }
 
     @PutMapping("/api/admin/news/{id}/publish")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:moderate') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<Void>> publish(
             @PathVariable UUID id,
             @RequestParam(defaultValue = "true") boolean sendToSubscribers) {

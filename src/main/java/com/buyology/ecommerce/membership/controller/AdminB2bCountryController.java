@@ -15,7 +15,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/b2b/countries")
-@PreAuthorize("hasRole('ADMIN') or hasRole('SUPERADMIN')")
 public class AdminB2bCountryController {
 
     private final B2bCountryRepository repo;
@@ -24,6 +23,7 @@ public class AdminB2bCountryController {
         this.repo = repo;
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:country:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<B2bCountry>>> list() {
         return ApiResponse.success(repo.findAll(), "B2B countries");
@@ -36,6 +36,7 @@ public class AdminB2bCountryController {
             Boolean enabled,
             java.math.BigDecimal minOrderAmount) {}
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:country:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping
     public ResponseEntity<ApiResponse<B2bCountry>> upsert(@org.springframework.web.bind.annotation.RequestBody CountryRequest req) {
         String code = req.countryCode().toUpperCase();
@@ -48,6 +49,7 @@ public class AdminB2bCountryController {
         return ApiResponse.success(repo.save(country), "Saved");
     }
 
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('b2b:country:delete') or @rbacPolicy.legacyAdmin()")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable UUID id) {
         if (!repo.existsById(id)) return ApiResponse.failure(HttpStatus.NOT_FOUND, "Not found");
