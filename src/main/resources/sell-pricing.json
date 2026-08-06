@@ -1,0 +1,69 @@
+{
+  "_comment": [
+    "Buy-back (trade-in) pricing policy for the AI valuation on sell requests.",
+    "Unlike repair-pricing.json — a literal price list per service — a trade-in has no fixed",
+    "sheet: what a used device is worth depends on its model and the current UAE second-hand",
+    "market. So this file encodes the POLICY the model must apply on top of the market price it",
+    "estimates: how much we deduct for condition and age, what margin we need to resell it, and",
+    "the hard limits we never quote outside of.",
+    "Tune these numbers on the server via the sell.pricing.path property — no redeploy needed."
+  ],
+  "currency": "AED",
+
+  "margin": {
+    "_comment": "Fraction of the estimated resale (retail-refurbished) price we keep. offer = resale x (1 - target_margin), then condition + age multipliers are applied.",
+    "target_margin": 0.35,
+    "min_margin": 0.25
+  },
+
+  "condition_multiplier": {
+    "_comment": "Applied to the market value of the same model in good used condition.",
+    "LIKE_NEW": 1.0,
+    "GOOD": 0.85,
+    "FAIR": 0.65,
+    "POOR": 0.35
+  },
+
+  "age_multiplier": {
+    "_comment": "By age since purchase. Use the closest bracket; interpolate when the purchase date is known precisely. If no purchase date is given, assume 2-3 years and lower confidence.",
+    "under_1_year": 1.0,
+    "1_to_2_years": 0.8,
+    "2_to_3_years": 0.62,
+    "3_to_5_years": 0.42,
+    "over_5_years": 0.25
+  },
+
+  "category_floor_aed": {
+    "_comment": "Below these we don't buy at all — say so plainly instead of quoting a token amount.",
+    "phone": 120,
+    "laptop": 200,
+    "tablet": 100,
+    "smartwatch": 60,
+    "accessory": 30,
+    "other": 50
+  },
+
+  "deductions_aed": {
+    "_comment": "Flat deductions stacked on top of the multipliers, for defects visible in the photos or stated by the customer.",
+    "cracked_screen": 200,
+    "cracked_back_glass": 100,
+    "dented_or_bent_chassis": 150,
+    "battery_service_needed": 120,
+    "does_not_power_on": 400,
+    "water_damage_indicator": 350,
+    "missing_charger": 30,
+    "no_original_box": 20
+  },
+
+  "hard_rules": {
+    "_comment": "Non-negotiable. Breaking any of these makes the valuation useless to procurement.",
+    "never_buy": [
+      "devices that are iCloud / Google account locked",
+      "devices reported lost or stolen",
+      "devices with no working display AND no power"
+    ],
+    "max_offer_share_of_resale": 0.75,
+    "range_width_min_share": 0.1,
+    "range_width_max_share": 0.4
+  }
+}

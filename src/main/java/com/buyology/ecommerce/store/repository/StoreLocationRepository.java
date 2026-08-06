@@ -17,6 +17,9 @@ public interface StoreLocationRepository extends JpaRepository<StoreLocation, UU
 
     List<StoreLocation> findAllByStoreIdAndIsActive(UUID storeId, Boolean isActive);
 
+    /** Active store branches in a country (alpha-3 code) — drives the repair drop-off picker. */
+    List<StoreLocation> findAllByCountryAndIsActive(String country, Boolean isActive);
+
     Optional<StoreLocation> findByStoreIdAndIsPrimary(UUID storeId, Boolean isPrimary);
 
     boolean existsByStoreIdAndIsPrimary(UUID storeId, Boolean isPrimary);

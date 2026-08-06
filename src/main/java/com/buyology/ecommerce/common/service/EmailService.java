@@ -582,18 +582,28 @@ public class EmailService {
         }
     }
 
-    /** Member notification: procurement has priced their quote and it awaits acceptance. */
+    /**
+     * Member notification: procurement has priced their quote and it awaits acceptance.
+     * Detailed email — per-item image + SKU + description + qty + lead time + prices,
+     * payment terms, terms &amp; conditions, and the member's company details.
+     */
     @Async
     public void sendB2bQuoteReadyEmail(String toEmail, String memberName, String quoteRef,
-                                       String total, String currency, String validUntil, String quoteUrl) {
+                                       String currency, String total, java.util.List<B2bOrderLine> lines,
+                                       String paymentTerms, String termsAndConditions,
+                                       String buyerCompany, String buyerWebsite, String buyerEmail,
+                                       String validUntil, String quoteUrl) {
         try {
             String body = "<p>Hi " + safeName(memberName) + ",</p>"
-                    + "<p>Your quote request <strong>" + nullToEmpty(quoteRef) + "</strong> has been priced by our "
-                    + "procurement team.</p>"
-                    + "<p><strong>Total:</strong> " + nullToEmpty(currency) + " " + nullToEmpty(total)
-                    + (validUntil != null && !validUntil.isBlank() ? "<br/><strong>Valid until:</strong> " + validUntil : "")
-                    + "</p>"
-                    + "<p>Review the quoted prices and accept to proceed to checkout"
+                    + "<p>Your quote request <strong>" + escapeHtml(nullToEmpty(quoteRef)) + "</strong> has been "
+                    + "priced by our procurement team. The details are below.</p>"
+                    + (validUntil != null && !validUntil.isBlank()
+                        ? "<p style=\"font-size:13px;color:#6b6b6b;\"><strong>Valid until:</strong> " + escapeHtml(validUntil) + "</p>" : "")
+                    + "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Quote summary</p>"
+                    + b2bItemsTableHtml(currency, total, lines)
+                    + b2bTermsHtml(paymentTerms, termsAndConditions)
+                    + b2bPartiesHtml(buyerCompany, buyerWebsite, buyerEmail)
+                    + "<p style=\"margin-top:20px;\">Review the quoted prices and accept to proceed to checkout"
                     + (quoteUrl != null && !quoteUrl.isBlank()
                         ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
             send(toEmail, "Your Buyology B2B quote is ready", accountEmailHtml("Your quote is ready", body));
@@ -661,6 +671,154 @@ public class EmailService {
         }
     }
 
+    /** One priced line on a B2B quote/order, for the detailed emails (incl. SKU + image). */
+    public record B2bOrderLine(String name, String description, int quantity,
+                               String unitPrice, String lineTotal, String leadTime,
+                               String sku, String imageUrl) {}
+
+    // ── Shared B2B quote/order email fragments ──────────────────────────────────
+
+    /** Item table: image, name + description + SKU, qty, lead time, unit price, line total. */
+    private String b2bItemsTableHtml(String currency, String total, java.util.List<B2bOrderLine> lines) {
+        String ccy = nullToEmpty(currency);
+        String cell = "padding:10px 8px;border-bottom:1px solid #eee;vertical-align:top;";
+        StringBuilder rows = new StringBuilder();
+        if (lines != null) {
+            for (B2bOrderLine l : lines) {
+                String img = l.imageUrl() != null && !l.imageUrl().isBlank()
+                        ? "<img src=\"" + l.imageUrl() + "\" width=\"56\" height=\"56\" alt=\"\" style=\"width:56px;height:56px;object-fit:contain;border-radius:8px;background:#f4f2fb;border:1px solid #eee;\" />"
+                        : "<div style=\"width:56px;height:56px;border-radius:8px;background:#f4f2fb;border:1px solid #eee;\"></div>";
+                String desc = l.description() != null && !l.description().isBlank()
+                        ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">" + escapeHtml(l.description()) + "</span>" : "";
+                String sku = l.sku() != null && !l.sku().isBlank()
+                        ? "<br/><span style=\"color:#8a8a8a;font-size:12px;\">SKU: <span style=\"font-family:monospace;color:#4a4a4a;\">" + escapeHtml(l.sku()) + "</span></span>" : "";
+                String lead = l.leadTime() != null && !l.leadTime().isBlank() ? escapeHtml(l.leadTime()) : "—";
+                rows.append("<tr>")
+                    .append("<td style=\"").append(cell).append("width:64px;\">").append(img).append("</td>")
+                    .append("<td style=\"").append(cell).append("\"><strong>").append(escapeHtml(nullToEmpty(l.name()))).append("</strong>").append(desc).append(sku).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:center;\">").append(l.quantity()).append("</td>")
+                    .append("<td style=\"").append(cell).append("\">").append(lead).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.unitPrice())).append("</td>")
+                    .append("<td style=\"").append(cell).append("text-align:right;\">").append(ccy).append(" ").append(nullToEmpty(l.lineTotal())).append("</td>")
+                    .append("</tr>");
+            }
+        }
+        String head = "padding:9px 8px;text-align:left;font-size:12px;text-transform:uppercase;color:#6b6b6b;border-bottom:2px solid #e5e1f2;";
+        return "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:8px 0 4px;font-family:Arial,sans-serif;font-size:13px;\">"
+                + "<thead><tr>"
+                + "<th style=\"" + head + "\">Image</th>"
+                + "<th style=\"" + head + "\">Item</th>"
+                + "<th style=\"" + head + "text-align:center;\">Qty</th>"
+                + "<th style=\"" + head + "\">Lead time</th>"
+                + "<th style=\"" + head + "text-align:right;\">Unit price</th>"
+                + "<th style=\"" + head + "text-align:right;\">Line total</th>"
+                + "</tr></thead><tbody>" + rows + "</tbody>"
+                + "<tfoot><tr>"
+                + "<td colspan=\"5\" style=\"padding:11px 8px;text-align:right;font-weight:bold;\">Total</td>"
+                + "<td style=\"padding:11px 8px;text-align:right;font-weight:bold;\">" + ccy + " " + nullToEmpty(total) + "</td>"
+                + "</tr></tfoot></table>";
+    }
+
+    /** Payment-terms + terms &amp; conditions blocks (each omitted when blank). */
+    private String b2bTermsHtml(String paymentTerms, String termsAndConditions) {
+        String block = "background:#faf9fd;border:1px solid #efecf8;border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.6;color:#4a4a4a;";
+        String out = "";
+        if (paymentTerms != null && !paymentTerms.isBlank()) {
+            out += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Payment terms</p>"
+                    + "<div style=\"" + block + "\">" + escapeHtml(paymentTerms).replace("\n", "<br/>") + "</div>";
+        }
+        if (termsAndConditions != null && !termsAndConditions.isBlank()) {
+            out += "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Terms &amp; conditions</p>"
+                    + "<div style=\"" + block + "\">" + escapeHtml(termsAndConditions).replace("\n", "<br/>") + "</div>";
+        }
+        return out;
+    }
+
+    /** Buyer (B2B member company / website / email) + Seller (Buyology) blocks, side by side. */
+    private String b2bPartiesHtml(String buyerCompany, String buyerWebsite, String buyerEmail) {
+        String buyerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Buyer</p>"
+                + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                + escapeHtml(nullToEmpty(buyerCompany))
+                + (buyerWebsite != null && !buyerWebsite.isBlank() ? "<br/>" + escapeHtml(buyerWebsite) : "")
+                + (buyerEmail != null && !buyerEmail.isBlank() ? "<br/>" + escapeHtml(buyerEmail) : "")
+                + "</p>";
+        String sellerBlock = "<p style=\"margin:0;font-weight:bold;color:#1f1b3a;\">Seller</p>"
+                + "<p style=\"margin:2px 0 0;color:#4a4a4a;font-size:13px;line-height:1.6;\">"
+                + "Buyology<br/>https://buyology.online<br/>support@buyology.com</p>";
+        return "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:18px;\"><tr>"
+                + "<td width=\"50%\" style=\"vertical-align:top;padding-right:8px;\">" + buyerBlock + "</td>"
+                + "<td width=\"50%\" style=\"vertical-align:top;padding-left:8px;\">" + sellerBlock + "</td>"
+                + "</tr></table>";
+    }
+
+    /** Internal notification to procurement: a member uploaded a bank-transfer proof to validate. */
+    @Async
+    public void sendB2bBankTransferSubmittedNotification(String procurementEmail, String companyName,
+                                                         String quoteRef, String reviewUrl) {
+        try {
+            String body = "<p>A B2B member has paid by bank transfer and uploaded a proof of payment for validation.</p>"
+                    + "<p><strong>Company:</strong> " + escapeHtml(nullToEmpty(companyName)) + "<br/>"
+                    + "<strong>Quote:</strong> " + escapeHtml(nullToEmpty(quoteRef)) + "</p>"
+                    + "<p>Review the proof and validate the payment in Procurement → Quotes"
+                    + (reviewUrl != null && !reviewUrl.isBlank()
+                        ? ": <a href=\"" + reviewUrl + "\">" + reviewUrl + "</a>" : ".") + "</p>";
+            send(procurementEmail, "B2B bank-transfer proof to validate — " + nullToEmpty(companyName),
+                    accountEmailHtml("Bank-transfer proof uploaded", body));
+            log.info("B2B bank-transfer notification sent to {}", procurementEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B bank-transfer notification to {}: {}", procurementEmail, e.getMessage());
+        }
+    }
+
+    /** Member notification: their bank-transfer proof was not accepted; please re-submit. */
+    @Async
+    public void sendB2bBankTransferRejectedEmail(String toEmail, String memberName, String quoteRef,
+                                                 String reason, String quoteUrl) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>We were unable to validate the bank-transfer proof for your quote <strong>"
+                    + escapeHtml(nullToEmpty(quoteRef)) + "</strong>"
+                    + (reason != null && !reason.isBlank() ? " — " + escapeHtml(reason) : "") + ".</p>"
+                    + "<p>Please re-submit a valid proof of payment from your quote page"
+                    + (quoteUrl != null && !quoteUrl.isBlank()
+                        ? ": <a href=\"" + quoteUrl + "\">" + quoteUrl + "</a>" : ".") + "</p>";
+            send(toEmail, "Action needed: bank-transfer proof for your Buyology B2B order",
+                    accountEmailHtml("Proof of payment not accepted", body));
+            log.info("B2B bank-transfer-rejected email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B bank-transfer-rejected email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Member confirmation: their bank-transfer proof was validated and the order placed.
+     * Includes every line (name, description, qty, lead time, unit price, line total), the
+     * payment terms, the terms &amp; conditions, and both the seller (Buyology) and buyer
+     * (B2B member) company details.
+     */
+    @Async
+    public void sendB2bOrderPlacedEmail(String toEmail, String memberName, String quoteRef, String orderRef,
+                                        String currency, String total, java.util.List<B2bOrderLine> lines,
+                                        String paymentTerms, String termsAndConditions,
+                                        String buyerCompany, String buyerWebsite, String buyerEmail) {
+        try {
+            String body = "<p>Hi " + safeName(memberName) + ",</p>"
+                    + "<p>Your bank-transfer payment has been validated and your order is now placed. "
+                    + "Thank you for your business.</p>"
+                    + "<p style=\"font-size:13px;color:#6b6b6b;\"><strong>Order:</strong> " + escapeHtml(nullToEmpty(orderRef))
+                    + " &nbsp;·&nbsp; <strong>Quote:</strong> " + escapeHtml(nullToEmpty(quoteRef)) + "</p>"
+                    + "<p style=\"margin:16px 0 4px;font-weight:bold;color:#1f1b3a;\">Order summary</p>"
+                    + b2bItemsTableHtml(currency, total, lines)
+                    + b2bTermsHtml(paymentTerms, termsAndConditions)
+                    + b2bPartiesHtml(buyerCompany, buyerWebsite, buyerEmail);
+
+            send(toEmail, "Your Buyology B2B order is placed", accountEmailHtml("Order placed", body));
+            log.info("B2B order-placed email sent to {}", toEmail);
+        } catch (IOException e) {
+            log.warn("Could not send B2B order-placed email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── B2B product-sourcing requests ──────────────────────────────────────────
 
     /** Member confirmation: their product-sourcing request was received. */
@@ -719,6 +877,171 @@ public class EmailService {
             log.info("B2B product-request status email ({}) sent to {}", stageLabel, toEmail);
         } catch (Exception e) {
             log.warn("Could not send B2B product-request status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    // ── Device repair requests ─────────────────────────────────────────────────
+
+    /** Customer confirmation: their repair request was received. */
+    @Async
+    public void sendRepairReceivedEmail(String toEmail, String customerName, String requestRef, String productName) {
+        try {
+            String html = loadTemplate("static/repair-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)));
+            send(toEmail, "We received your repair request", html);
+            log.info("Repair received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Internal notification to the repair team: a customer submitted a repair request. */
+    @Async
+    public void sendRepairTeamNotificationEmail(String teamEmail, String customerName, String requestRef,
+                                                String productName, String brand, String model,
+                                                String description, String reviewUrl) {
+        try {
+            String html = loadTemplate("static/repair-request-notification.html")
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(nullToEmpty(customerName)))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{BRAND}}", escapeHtml(nullToEmpty(brand)))
+                    .replace("{{MODEL}}", escapeHtml(nullToEmpty(model)))
+                    .replace("{{DESCRIPTION}}", escapeHtml(nullToEmpty(description)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(teamEmail, "New repair request: " + nullToEmpty(productName), html);
+            log.info("Repair team notification sent to {}", teamEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair team notification to {}: {}", teamEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Customer notification for a repair-status change (with a stage label + optional note).
+     * Silently swallows failures.
+     */
+    @Async
+    public void sendRepairStatusEmail(String toEmail, String customerName, String requestRef,
+                                      String productName, String stageLabel, String note) {
+        try {
+            String html = loadTemplate("static/repair-status-update.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{STAGE_LABEL}}", escapeHtml(nullToEmpty(stageLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your repair: " + nullToEmpty(productName), html);
+            log.info("Repair status email ({}) sent to {}", stageLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Customer notification: the repair team quoted a fixing price awaiting their approval. */
+    @Async
+    public void sendRepairPriceEmail(String toEmail, String customerName, String requestRef,
+                                     String productName, String currency, BigDecimal price,
+                                     String estimatedTime, String note) {
+        try {
+            String html = loadTemplate("static/repair-price-estimate.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{PRICE}}", escapeHtml(money(currency, price)))
+                    .replace("{{ESTIMATED_TIME}}", escapeHtml(nullToEmpty(estimatedTime)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Your repair estimate is ready: " + nullToEmpty(productName), html);
+            log.info("Repair price email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send repair price email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    // ── Sell (trade-in) requests ───────────────────────────────────────────────
+    // Mirrors the repair emails above. Each one no-ops on a blank recipient so callers don't have
+    // to null-check a contact address that was snapshotted at submit time.
+
+    /** Customer confirmation: their sell request was received. */
+    @Async
+    public void sendSellReceivedEmail(String toEmail, String customerName, String requestRef, String productName) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)));
+            send(toEmail, "We received your sell request", html);
+            log.info("Sell received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Internal notification to procurement: a customer wants to sell a device. */
+    @Async
+    public void sendSellTeamNotificationEmail(String teamEmail, String customerName, String requestRef,
+                                              String productName, String brand, String model,
+                                              String condition, String description, String reviewUrl) {
+        if (teamEmail == null || teamEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-request-notification.html")
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(nullToEmpty(customerName)))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{BRAND}}", escapeHtml(nullToEmpty(brand)))
+                    .replace("{{MODEL}}", escapeHtml(nullToEmpty(model)))
+                    .replace("{{CONDITION}}", escapeHtml(nullToEmpty(condition)))
+                    .replace("{{DESCRIPTION}}", escapeHtml(nullToEmpty(description)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(teamEmail, "New sell request: " + nullToEmpty(productName), html);
+            log.info("Sell team notification sent to {}", teamEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell team notification to {}: {}", teamEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Customer notification for a sell-request status change (with a stage label + optional note).
+     * Silently swallows failures.
+     */
+    @Async
+    public void sendSellStatusEmail(String toEmail, String customerName, String requestRef,
+                                    String productName, String stageLabel, String note) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-status-update.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{STAGE_LABEL}}", escapeHtml(nullToEmpty(stageLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your sell request: " + nullToEmpty(productName), html);
+            log.info("Sell status email ({}) sent to {}", stageLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Customer notification: procurement quoted what Buyology will pay, awaiting their approval. */
+    @Async
+    public void sendSellOfferEmail(String toEmail, String customerName, String requestRef,
+                                   String productName, String currency, BigDecimal price,
+                                   String validFor, String note) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        try {
+            String html = loadTemplate("static/sell-offer.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{PRODUCT_NAME}}", escapeHtml(nullToEmpty(productName)))
+                    .replace("{{PRICE}}", escapeHtml(money(currency, price)))
+                    .replace("{{VALID_FOR}}", escapeHtml(nullToEmpty(validFor)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Your Buyology offer is ready: " + nullToEmpty(productName), html);
+            log.info("Sell offer email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send sell offer email to {}: {}", toEmail, e.getMessage());
         }
     }
 

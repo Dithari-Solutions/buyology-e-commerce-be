@@ -32,4 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 .env
+# Local env files (keep the *.example templates tracked)
+.env.*
+!.env.example
+!.env.dev.example
 src/main/resources/application.properties

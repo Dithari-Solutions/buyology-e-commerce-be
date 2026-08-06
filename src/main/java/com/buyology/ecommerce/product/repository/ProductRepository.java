@@ -59,6 +59,8 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 
     boolean existsBySku(String sku);
 
+    java.util.Optional<Product> findBySku(String sku);
+
     List<Product> findByStatusAndIsSuperDeal(String status, Boolean isSuperDeal);
 
     List<Product> findByStatusAndIsLimitedStock(String status, Boolean isLimitedStock);

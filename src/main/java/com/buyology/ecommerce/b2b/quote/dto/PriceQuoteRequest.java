@@ -23,6 +23,12 @@ public class PriceQuoteRequest {
 
     private String procurementNote;
 
+    /** Payment terms shown to the member and on the order email (e.g. "50% advance…"). */
+    private String paymentTerms;
+
+    /** Terms & conditions shown to the member and on the order email. */
+    private String termsAndConditions;
+
     public List<LinePrice> getItems() { return items; }
     public void setItems(List<LinePrice> items) { this.items = items; }
 
@@ -32,7 +38,13 @@ public class PriceQuoteRequest {
     public String getProcurementNote() { return procurementNote; }
     public void setProcurementNote(String procurementNote) { this.procurementNote = procurementNote; }
 
-    /** Per-line price entry: which item, at what unit price. */
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+
+    public String getTermsAndConditions() { return termsAndConditions; }
+    public void setTermsAndConditions(String termsAndConditions) { this.termsAndConditions = termsAndConditions; }
+
+    /** Per-line price entry: which item, at what unit price, with an optional lead time / description. */
     public static class LinePrice {
         @NotNull
         private UUID itemId;
@@ -41,10 +53,20 @@ public class PriceQuoteRequest {
         @DecimalMin("0.00")
         private BigDecimal unitPrice;
 
+        private String leadTime;
+
+        private String description;
+
         public UUID getItemId() { return itemId; }
         public void setItemId(UUID itemId) { this.itemId = itemId; }
 
         public BigDecimal getUnitPrice() { return unitPrice; }
         public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+
+        public String getLeadTime() { return leadTime; }
+        public void setLeadTime(String leadTime) { this.leadTime = leadTime; }
+
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
     }
 }

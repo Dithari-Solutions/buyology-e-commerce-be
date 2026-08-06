@@ -12,4 +12,7 @@ public interface BrandTranslationRepository extends JpaRepository<BrandTranslati
     List<BrandTranslation> findAllByBrand_Id(UUID brandId);
 
     Optional<BrandTranslation> findByBrand_IdAndLanguageIgnoreCase(UUID brandId, String language);
+
+    /** Resolve a brand by its name in a given language — used by the ERPNext catalog import. */
+    Optional<BrandTranslation> findFirstByLanguageIgnoreCaseAndNameIgnoreCase(String language, String name);
 }

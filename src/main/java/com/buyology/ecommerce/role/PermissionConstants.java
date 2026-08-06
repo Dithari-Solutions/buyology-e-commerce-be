@@ -82,6 +82,10 @@ public final class PermissionConstants {
     // Respond to a B2B quote request by setting its prices or rejecting it.
     public static final String B2B_QUOTE_MODERATE = "b2b:quote:moderate";
 
+    // Approve or reject the proof-of-payment a buyer uploaded for a bank-transfer quote.
+    // Separate from :moderate because it releases the order against money we believe has landed.
+    public static final String B2B_QUOTE_PAYMENT_VERIFY = "b2b:quote:payment:verify";
+
     // View a B2B member's wallet balance and transaction history.
     public static final String B2B_WALLET_READ = "b2b:wallet:read";
 
@@ -168,6 +172,29 @@ public final class PermissionConstants {
     // ── Integrations ──────────────────────────────────────────────────────────────
     // View the ERPNext integration status and browse items pulled live from ERPNext.
     public static final String ERP_READ = "erp:read";
+
+    // Import ERPNext items into our product catalogue (preview + commit). Writes to the catalogue.
+    public static final String ERP_PRODUCT_IMPORT = "erp:product:import";
+
+    // View the per-order ERPNext sync status and manually re-push a failed order.
+    public static final String ERP_ORDER_SYNC = "erp:order:sync";
+
+    // Push a synthetic test order into ERPNext. Creates real documents in the connected ERP.
+    public static final String ERP_ORDER_MOCK = "erp:order:mock";
+
+    // ── Repair (customer device-repair requests) ──────────────────────────────────
+    // View incoming repair requests, their photos, status history and the unread badge count.
+    public static final String REPAIR_READ = "repair:read";
+
+    // Mark a repair device as received, price the repair and move it through its lifecycle.
+    public static final String REPAIR_UPDATE = "repair:update";
+
+    // ── Sell (customer trade-in requests) ─────────────────────────────────────────
+    // View incoming trade-in requests and their details.
+    public static final String SELL_READ = "sell:read";
+
+    // Make, revise or withdraw the buy-back offer on a trade-in request and advance its status.
+    public static final String SELL_UPDATE = "sell:update";
 
     // View the Quiqup integration config, sample payloads, test order details, labels and received
     // webhook events.

@@ -5,10 +5,12 @@ import com.buyology.ecommerce.b2b.quote.service.B2bQuoteService;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.payment.dto.PaymentInitiatedResponse;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -100,5 +102,21 @@ public class B2bQuoteController {
             @PathVariable UUID id,
             @Valid @RequestBody CheckoutQuoteRequest req) {
         return ApiResponse.created(quoteService.checkout(userId, id, req), "Checkout initiated");
+    }
+
+    /**
+     * Pay an accepted quote by bank transfer and upload proof of payment. Sent as
+     * multipart/form-data: a "data" JSON part (delivery target) + a "proof" file part.
+     * The order is created and the quote moves to AWAITING_PAYMENT_VERIFICATION until
+     * procurement validates the proof.
+     */
+    @PostMapping(value = "/{id}/bank-transfer", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<B2bQuoteResponse>> bankTransfer(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id,
+            @RequestPart("data") BankTransferCheckoutRequest req,
+            @RequestPart("proof") MultipartFile proof) {
+        return ApiResponse.success(quoteService.submitBankTransfer(userId, id, req, proof),
+                "Proof of payment submitted");
     }
 }

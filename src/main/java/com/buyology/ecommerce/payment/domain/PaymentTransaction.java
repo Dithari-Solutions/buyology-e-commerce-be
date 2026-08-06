@@ -62,6 +62,14 @@ public class PaymentTransaction {
     @Column(name = "refund_request_id")
     private UUID refundRequestId;
 
+    // When purpose == REPAIR_COURIER_FEE, the repair request this fee belongs to.
+    @Column(name = "repair_id")
+    private UUID repairId;
+
+    // When purpose == SELL_COURIER_FEE, the sell (trade-in) request this fee belongs to.
+    @Column(name = "sell_request_id")
+    private UUID sellRequestId;
+
     // FK to orders service — stored as plain UUID (cross-service boundary).
     @Column(name = "app_order_id")
     private UUID appOrderId;
@@ -165,6 +173,12 @@ public class PaymentTransaction {
 
     public UUID getRefundRequestId() { return refundRequestId; }
     public void setRefundRequestId(UUID refundRequestId) { this.refundRequestId = refundRequestId; }
+
+    public UUID getRepairId() { return repairId; }
+    public void setRepairId(UUID repairId) { this.repairId = repairId; }
+
+    public UUID getSellRequestId() { return sellRequestId; }
+    public void setSellRequestId(UUID sellRequestId) { this.sellRequestId = sellRequestId; }
 
     public UUID getAppOrderId() { return appOrderId; }
     public void setAppOrderId(UUID appOrderId) { this.appOrderId = appOrderId; }

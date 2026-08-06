@@ -1,0 +1,244 @@
+# ─── Self-contained DEV stack (single dev VPS) ────────────────────────────────
+# Runs the phase-2 backend PLUS its own Postgres / Redis / Elasticsearch / RabbitMQ,
+# all local to this one box. It shares NOTHING with production:
+#   • its own DB volume (never the prod buyology_production on 10.10.0.4)
+#   • its own secrets from .env.dev (dev JWT, Paymob SANDBOX keys, etc.)
+#   • its own domain + Paymob webhook/redirect URLs
+#
+# The app image is BUILT FROM SOURCE (the checked-out phase-2 branch) — no registry,
+# no CI, no Docker Hub needed. Bring it up with:
+#
+#   git checkout phase-2
+#   cp .env.dev.example .env.dev      # then fill in dev values
+#   docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+#
+# First boot only: keep HIBERNATE_DDL_AUTO=update in .env.dev so Hibernate creates the
+# full schema (incl. the phase-2 repair_requests table + payment_transactions.repair_id)
+# on the fresh, empty dev DB. There is no baseline Flyway migration; the V* patches are
+# to_regclass-guarded no-ops on an empty DB. You can leave it on `update` for dev.
+name: buyology-ecommerce-be-dev
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce-dev-postgres
+    environment:
+      POSTGRES_DB: ecommerce_db
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    networks: [dev-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ecommerce_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce-dev-redis
+    # Dev Redis is only reachable on the private compose network, so no auth is needed.
+    volumes:
+      - dev_redis_data:/data
+    networks: [dev-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: ecommerce-dev-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - dev_elasticsearch_data:/usr/share/elasticsearch/data
+    networks: [dev-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ecommerce-dev-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - dev_rabbitmq_data:/var/lib/rabbitmq
+    networks: [dev-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  app:
+    build: .                       # ← builds the phase-2 jar locally (Dockerfile)
+    image: ecommerce-app:dev
+    container_name: ecommerce-dev-app
+    dns: ["8.8.8.8", "1.1.1.1"]
+    # Bind to loopback by default so you front it with nginx/Caddy for TLS. Set
+    # APP_BIND=0.0.0.0 in .env.dev to expose it directly (HTTP only — see COOKIE_SECURE).
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    environment:
+      # Prod profile: env-driven cookie/CORS/web-base-url (needed for a real HTTPS SPA
+      # login flow). Swagger is off under prod; test via the dev frontend or curl.
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
+
+      # ── Postgres (local container — NEVER the prod DB) ──
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-update}
+
+      # ── Local data services ──
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: "/"
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_RABBITMQ_VIRTUAL_HOST: "/"
+
+      # ── Auth / security (DEV-ONLY values) ──
+      JWT_SECRET: ${JWT_SECRET}
+      MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY:-}
+      MFA_ENABLED: ${MFA_ENABLED:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+
+      # ── App config (point at DEV frontends only) ──
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      WEB_BASE_URL: ${WEB_BASE_URL}
+      DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-}
+      TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-true}
+
+      # ── Email / OTP (SendGrid) ──
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@buyology.online}
+
+      # ── OAuth (optional on dev — blank disables the provider) ──
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_KEY_ID: ${APPLE_KEY_ID:-}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
+      APPLE_REDIRECT_URI: ${APPLE_REDIRECT_URI:-}
+
+      # ── Paymob — MUST be SANDBOX/TEST keys, and the webhook/redirect URLs MUST
+      #    point at THIS dev host (never prod). This is what exercises the repair
+      #    courier-fee payment end-to-end. ──
+      PAYMOB_BASE_URL: ${PAYMOB_BASE_URL:-https://uae.paymob.com}
+      PAYMOB_API_KEY: ${PAYMOB_API_KEY}
+      PAYMOB_SECRET_KEY: ${PAYMOB_SECRET_KEY}
+      PAYMOB_PUBLIC_KEY: ${PAYMOB_PUBLIC_KEY}
+      PAYMOB_HMAC_SECRET: ${PAYMOB_HMAC_SECRET}
+      PAYMOB_NOTIFICATION_URL: ${PAYMOB_NOTIFICATION_URL}
+      PAYMOB_REDIRECTION_URL: ${PAYMOB_REDIRECTION_URL}
+      PAYMOB_CARD_INTEGRATION_ID: ${PAYMOB_CARD_INTEGRATION_ID}
+      PAYMOB_CARD_IFRAME_ID: ${PAYMOB_CARD_IFRAME_ID}
+      PAYMOB_TABBY_INTEGRATION_ID: ${PAYMOB_TABBY_INTEGRATION_ID:-}
+      PAYMOB_TAMARA_INTEGRATION_ID: ${PAYMOB_TAMARA_INTEGRATION_ID:-}
+
+      # ── Twilio (leave TWILIO_VERIFY_SERVICE_SID blank to skip phone OTP on dev) ──
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+      TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:-}
+
+      # ── Claude API — AI repair price estimate. Blank key = feature off (the repair
+      #    flow behaves exactly as before, just with no AI suggestion). ──
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      REPAIR_AI_ESTIMATE_ENABLED: ${REPAIR_AI_ESTIMATE_ENABLED:-true}
+      # Optional external price-list file (mounted into the container). Blank = bundled.
+      REPAIR_PRICING_PATH: ${REPAIR_PRICING_PATH:-}
+      # ── Claude API — AI sell (trade-in) valuation. Shares ANTHROPIC_API_KEY above;
+      #    blank key = feature off (the sell flow behaves exactly as before). ──
+      SELL_AI_ESTIMATE_ENABLED: ${SELL_AI_ESTIMATE_ENABLED:-true}
+      # Optional external buy-back policy file (mounted into the container). Blank = bundled.
+      SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
+
+      # ── Contabo S3 — use a SEPARATE dev bucket so dev uploads never land in prod ──
+      CONTABO_S3_ENDPOINT: ${CONTABO_S3_ENDPOINT}
+      CONTABO_S3_ACCESS_KEY: ${CONTABO_S3_ACCESS_KEY}
+      CONTABO_S3_SECRET_KEY: ${CONTABO_S3_SECRET_KEY}
+      CONTABO_S3_BUCKET_NAME: ${CONTABO_S3_BUCKET_NAME}
+      CONTABO_S3_PUBLIC_URL: ${CONTABO_S3_PUBLIC_URL}
+
+      # ── ERPNext (Frappe) integration — SHIPS INERT. Leave ERPNEXT_ENABLED blank/false
+      #    and the whole module (product listing, order push, catalog import) is off.
+      #    To test: set ERPNEXT_ENABLED=true + ERPNEXT_BASE_URL/API_KEY/API_SECRET in
+      #    .env.dev. Frappe token auth (Authorization: token <key>:<secret>). ──
+      ERPNEXT_ENABLED: ${ERPNEXT_ENABLED:-false}
+      ERPNEXT_BASE_URL: ${ERPNEXT_BASE_URL:-}
+      ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-}
+      ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-}
+      # Order push (PAID order → ERPNext Sales Order + Sales Invoice)
+      ERPNEXT_SYNC_ORDERS: ${ERPNEXT_SYNC_ORDERS:-true}
+      ERPNEXT_SUBMIT_DOCUMENTS: ${ERPNEXT_SUBMIT_DOCUMENTS:-true}
+      ERPNEXT_COMPANY: ${ERPNEXT_COMPANY:-}
+      ERPNEXT_AUTO_CREATE_CUSTOMER: ${ERPNEXT_AUTO_CREATE_CUSTOMER:-true}
+      ERPNEXT_AUTO_CREATE_ITEMS: ${ERPNEXT_AUTO_CREATE_ITEMS:-true}
+      ERPNEXT_DEFAULT_ITEM_GROUP: ${ERPNEXT_DEFAULT_ITEM_GROUP:-Products}
+      ERPNEXT_DEFAULT_UOM: ${ERPNEXT_DEFAULT_UOM:-Nos}
+      ERPNEXT_CUSTOMER_GROUP: ${ERPNEXT_CUSTOMER_GROUP:-All Customer Groups}
+      ERPNEXT_TERRITORY: ${ERPNEXT_TERRITORY:-All Territories}
+      ERPNEXT_SHIPPING_ACCOUNT_HEAD: ${ERPNEXT_SHIPPING_ACCOUNT_HEAD:-}
+      ERPNEXT_DEFAULT_WAREHOUSE: ${ERPNEXT_DEFAULT_WAREHOUSE:-}
+
+      # ── Courier service proxy (optional on dev) ──
+      COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY:-}
+
+      # ── Firebase off on dev (avoids needing the service-account file) ──
+      FIREBASE_ENABLED: "false"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    networks: [dev-net]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+networks:
+  dev-net:
+    driver: bridge
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  dev_elasticsearch_data:
+  dev_rabbitmq_data:

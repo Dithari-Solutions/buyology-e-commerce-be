@@ -36,6 +36,63 @@ public class ErpNextProperties {
     /** Timeout for outbound ERPNext calls, milliseconds. */
     private long timeoutMs = 10000;
 
+    // ── order → ERPNext push ──────────────────────────────────────────────────
+
+    /**
+     * Push a Sales Order + Sales Invoice to ERPNext when an order is PAID.
+     * Independent of {@link #enabled}: both must be true for anything to be sent.
+     */
+    private boolean syncOrders = true;
+
+    /**
+     * Submit the created documents ({@code docstatus=1}) instead of leaving them as drafts.
+     * Submitted invoices post GL entries; set false to review them in ERPNext first.
+     */
+    private boolean submitDocuments = true;
+
+    /** ERPNext Company the documents belong to. Blank = let ERPNext apply its default. */
+    private String company;
+
+    /**
+     * Create the ERPNext Customer on the fly when the buyer has no matching record.
+     * With this false, an order for an unknown customer fails the sync (and is recorded).
+     */
+    private boolean autoCreateCustomer = true;
+
+    /**
+     * Create a minimal ERPNext Item when an ordered SKU does not exist there yet.
+     * ERPNext rejects a Sales Order referencing an unknown item_code, so with this false
+     * any order containing a not-yet-synced product fails the sync.
+     */
+    private boolean autoCreateItems = true;
+
+    /** Item Group assigned to auto-created Items. Must exist in ERPNext. */
+    private String defaultItemGroup = "Products";
+
+    /** Unit of measure assigned to auto-created Items. Must exist in ERPNext. */
+    private String defaultUom = "Nos";
+
+    /** Customer Group assigned to auto-created Customers. Must exist in ERPNext. */
+    private String customerGroup = "All Customer Groups";
+
+    /** Territory assigned to auto-created Customers. Must exist in ERPNext. */
+    private String territory = "All Territories";
+
+    /**
+     * Account head used for the shipping charge row (e.g. {@code "Freight and Forwarding
+     * Charges - B"}). Blank = shipping is omitted from the ERPNext documents, in which case
+     * the ERPNext totals are the goods total only. Account names are company-specific.
+     */
+    private String shippingAccountHead;
+
+    /**
+     * Warehouse stamped on each Sales Order / Sales Invoice line. ERPNext requires a warehouse
+     * for stock items (every ERP Item here is a stock item), so this must be set for the order
+     * push to work. Must be a <b>leaf</b> warehouse (not a group like "All Warehouses - X")
+     * belonging to {@link #company}, e.g. {@code "FG Warehouse - DTL"}.
+     */
+    private String defaultWarehouse;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getBaseUrl() { return baseUrl; }
@@ -46,4 +103,27 @@ public class ErpNextProperties {
     public void setApiSecret(String apiSecret) { this.apiSecret = apiSecret; }
     public long getTimeoutMs() { return timeoutMs; }
     public void setTimeoutMs(long timeoutMs) { this.timeoutMs = timeoutMs; }
+
+    public boolean isSyncOrders() { return syncOrders; }
+    public void setSyncOrders(boolean syncOrders) { this.syncOrders = syncOrders; }
+    public boolean isSubmitDocuments() { return submitDocuments; }
+    public void setSubmitDocuments(boolean submitDocuments) { this.submitDocuments = submitDocuments; }
+    public String getCompany() { return company; }
+    public void setCompany(String company) { this.company = company; }
+    public boolean isAutoCreateCustomer() { return autoCreateCustomer; }
+    public void setAutoCreateCustomer(boolean autoCreateCustomer) { this.autoCreateCustomer = autoCreateCustomer; }
+    public boolean isAutoCreateItems() { return autoCreateItems; }
+    public void setAutoCreateItems(boolean autoCreateItems) { this.autoCreateItems = autoCreateItems; }
+    public String getDefaultItemGroup() { return defaultItemGroup; }
+    public void setDefaultItemGroup(String defaultItemGroup) { this.defaultItemGroup = defaultItemGroup; }
+    public String getDefaultUom() { return defaultUom; }
+    public void setDefaultUom(String defaultUom) { this.defaultUom = defaultUom; }
+    public String getCustomerGroup() { return customerGroup; }
+    public void setCustomerGroup(String customerGroup) { this.customerGroup = customerGroup; }
+    public String getTerritory() { return territory; }
+    public void setTerritory(String territory) { this.territory = territory; }
+    public String getShippingAccountHead() { return shippingAccountHead; }
+    public void setShippingAccountHead(String shippingAccountHead) { this.shippingAccountHead = shippingAccountHead; }
+    public String getDefaultWarehouse() { return defaultWarehouse; }
+    public void setDefaultWarehouse(String defaultWarehouse) { this.defaultWarehouse = defaultWarehouse; }
 }

@@ -17,6 +17,9 @@ public interface ProductCategoryTranslationRepository extends JpaRepository<Prod
 
     Optional<ProductCategoryTranslation> findByCategoryIdAndLanguage(UUID categoryId, String language);
 
+    /** Resolve a category by its name in a given language — used by the ERPNext catalog import. */
+    Optional<ProductCategoryTranslation> findFirstByLanguageIgnoreCaseAndNameIgnoreCase(String language, String name);
+
     List<ProductCategoryTranslation> findAllByCategoryId(UUID categoryId);
 
     /**

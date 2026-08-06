@@ -80,6 +80,7 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.B2B_PRODUCT_REQUEST_MODERATE,
             PermissionConstants.B2B_QUOTE_READ,
             PermissionConstants.B2B_QUOTE_MODERATE,
+            PermissionConstants.B2B_QUOTE_PAYMENT_VERIFY,
             PermissionConstants.B2B_WALLET_READ,
             PermissionConstants.B2B_WALLET_CREDIT,
             PermissionConstants.B2B_WALLET_ADJUST,
@@ -107,6 +108,13 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.COURIER_PROFILE_UPDATE,
             PermissionConstants.COURIER_PROFILE_DELETE,
             PermissionConstants.ERP_READ,
+            PermissionConstants.ERP_PRODUCT_IMPORT,
+            PermissionConstants.ERP_ORDER_SYNC,
+            PermissionConstants.ERP_ORDER_MOCK,
+            PermissionConstants.REPAIR_READ,
+            PermissionConstants.REPAIR_UPDATE,
+            PermissionConstants.SELL_READ,
+            PermissionConstants.SELL_UPDATE,
             PermissionConstants.QUIQUP_READ,
             PermissionConstants.QUIQUP_ORDER_CREATE,
             PermissionConstants.QUIQUP_ORDER_UPDATE,
@@ -252,9 +260,14 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.B2B_PRODUCT_REQUEST_MODERATE,
             PermissionConstants.B2B_QUOTE_READ,
             PermissionConstants.B2B_QUOTE_MODERATE,
+            PermissionConstants.B2B_QUOTE_PAYMENT_VERIFY,
             PermissionConstants.B2B_WALLET_READ,
             PermissionConstants.B2B_WALLET_CREDIT,
             PermissionConstants.B2B_WALLET_ADJUST,
+            PermissionConstants.REPAIR_READ,
+            PermissionConstants.REPAIR_UPDATE,
+            PermissionConstants.SELL_READ,
+            PermissionConstants.SELL_UPDATE,
             PermissionConstants.BANNER_READ,
             PermissionConstants.BANNER_CREATE,
             PermissionConstants.BANNER_UPDATE,
@@ -453,12 +466,22 @@ public class RoleDataInitializer implements ApplicationRunner {
     private static final List<String> PROCUREMENT_PERMISSIONS = List.of(
             PermissionConstants.B2B_QUOTE_READ,
             PermissionConstants.B2B_QUOTE_MODERATE,
+            PermissionConstants.B2B_QUOTE_PAYMENT_VERIFY,
             PermissionConstants.B2B_PRODUCT_REQUEST_READ,
             PermissionConstants.B2B_PRODUCT_REQUEST_UPDATE,
             PermissionConstants.B2B_PRODUCT_REQUEST_MODERATE,
             PermissionConstants.B2B_INQUIRY_READ,
             PermissionConstants.B2B_MEMBERSHIP_READ,
+            // Customer trade-in (sell) requests are priced by procurement, not by the repair desk.
+            PermissionConstants.SELL_READ,
+            PermissionConstants.SELL_UPDATE,
             PermissionConstants.PRODUCT_READ
+    );
+
+    /** Repair desk: handles customer device-repair requests end to end, and nothing else. */
+    private static final List<String> REPAIR_PERMISSIONS = List.of(
+            PermissionConstants.REPAIR_READ,
+            PermissionConstants.REPAIR_UPDATE
     );
 
     /** Third-party supplier: manages its own products and views its own analytics. */
@@ -503,6 +526,10 @@ public class RoleDataInitializer implements ApplicationRunner {
                     "PROCUREMENT",
                     "Prices B2B quote requests (RFQ) and handles product-sourcing requests",
                     PROCUREMENT_PERMISSIONS),
+            new RoleDefinition(
+                    "REPAIR",
+                    "Manages customer device-repair requests from the repair dashboard",
+                    REPAIR_PERMISSIONS),
             new RoleDefinition(
                     "SUPERADMIN",
                     "Full access to all modules and operations",
