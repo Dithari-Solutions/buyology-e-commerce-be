@@ -20,6 +20,10 @@ public final class PermissionConstants {
 
     private PermissionConstants() {}
 
+    // ── Analytics ─────────────────────────────────────────────────────────────────
+    // View website traffic: unique visitors, visits and page views on the dashboard home page.
+    public static final String ANALYTICS_VISITOR_READ = "analytics:visitor:read";
+
     // ── B2B & Procurement ─────────────────────────────────────────────────────────
     // View the countries B2B trading is enabled in, with their currency and minimum-order rules.
     public static final String B2B_COUNTRY_READ = "b2b:country:read";

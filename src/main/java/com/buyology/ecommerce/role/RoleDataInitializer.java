@@ -61,6 +61,7 @@ public class RoleDataInitializer implements ApplicationRunner {
      * editing, so it stays the recovery path for any permission mistake made in the console.
      */
     private static final List<String> ALL_PERMISSIONS = List.of(
+            PermissionConstants.ANALYTICS_VISITOR_READ,
             PermissionConstants.B2B_COUNTRY_READ,
             PermissionConstants.B2B_COUNTRY_UPDATE,
             PermissionConstants.B2B_COUNTRY_DELETE,
@@ -241,6 +242,7 @@ public class RoleDataInitializer implements ApplicationRunner {
      * creation, MFA reset, ERP, Quiqup and revenue exports — those stay SUPERADMIN-only.
      */
     private static final List<String> ADMIN_PERMISSIONS = List.of(
+            PermissionConstants.ANALYTICS_VISITOR_READ,
             PermissionConstants.B2B_COUNTRY_READ,
             PermissionConstants.B2B_COUNTRY_UPDATE,
             PermissionConstants.B2B_COUNTRY_DELETE,
@@ -434,6 +436,8 @@ public class RoleDataInitializer implements ApplicationRunner {
 
     /** Promotions and merchandising: promo codes, banners, stories, games and newsletters. */
     private static final List<String> MARKETING_PERMISSIONS = List.of(
+            // Campaign work is judged on traffic, so marketing gets the visitor counters.
+            PermissionConstants.ANALYTICS_VISITOR_READ,
             PermissionConstants.PROMO_READ,
             PermissionConstants.PROMO_CREATE,
             PermissionConstants.PROMO_UPDATE,

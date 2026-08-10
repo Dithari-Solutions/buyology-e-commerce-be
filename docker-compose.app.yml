@@ -130,6 +130,17 @@ services:
       SELL_AI_ESTIMATE_ENABLED: ${SELL_AI_ESTIMATE_ENABLED:-true}
       SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
 
+      # ── Website visitor analytics (storefront page-view beacon) ──
+      # ANALYTICS_ENABLED=false makes the public beacon a no-op without a code deploy; it is
+      # the only lever on the one unauthenticated write endpoint, so it has to be reachable here.
+      # ANALYTICS_IP_SALT blank stores no IP-derived value at all — set a long random string to
+      # make a flood of fake beacons traceable to one source.
+      ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-true}
+      ANALYTICS_RETENTION_DAYS: ${ANALYTICS_RETENTION_DAYS:-400}
+      ANALYTICS_METRICS_CACHE_SECONDS: ${ANALYTICS_METRICS_CACHE_SECONDS:-30}
+      ANALYTICS_ACTIVE_WINDOW_MINUTES: ${ANALYTICS_ACTIVE_WINDOW_MINUTES:-5}
+      ANALYTICS_IP_SALT: ${ANALYTICS_IP_SALT:-}
+
       # ── Twilio (phone OTP) ──
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}

@@ -120,6 +120,13 @@ public class SecurityConfig {
                         .requestMatchers("/api/story/**").permitAll()
                         // Newsletter subscribe/unsubscribe (unsubscribe is an emailed GET link)
                         .requestMatchers("/api/newsletter/**").permitAll()
+                        // Storefront visitor beacon — the whole point is to count visitors who are
+                        // not logged in, so it cannot require a JWT. Write-only (no data is
+                        // readable here) and throttled by the ANALYTICS_BEACON rate-limit tier
+                        // (240 req/min per IP, degrading to a per-instance bucket if Redis is down);
+                        // the counts are read back under /api/admin/analytics/**, which stays
+                        // authenticated and permission-guarded.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/analytics/visit").permitAll()
                         // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
                         // Contact verification (email/phone OTP) used by public supplier & B2B apply forms

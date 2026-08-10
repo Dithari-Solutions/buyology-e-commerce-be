@@ -87,7 +87,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // For auth-sensitive endpoints we must NOT fail open (that would disable
             // brute-force protection exactly when it matters most). Fall back to a
             // per-instance in-memory bucket so the limiter keeps working.
-            if (tier.isAuthSensitive()) {
+            if (tier.needsLocalFallback()) {
                 applyLocalFallback(bucketKey, tier, request, response, filterChain, path);
             } else {
                 // Non-sensitive tiers: keep failing open to preserve availability.
@@ -104,7 +104,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             log.warn("Rate limiting error on {} (Redis path): {}", path, e.getMessage());
             // Redis errored mid-request. Protect auth-sensitive endpoints with the
             // local fallback instead of waving the request through.
-            if (tier.isAuthSensitive()) {
+            if (tier.needsLocalFallback()) {
                 applyLocalFallback(bucketKey, tier, request, response, filterChain, path);
             } else {
                 filterChain.doFilter(request, response);
@@ -238,6 +238,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/admin/")) {
             return RateLimitTier.ADMIN;
         }
+        // The visitor beacon fires once per page view, so leaving it in the PUBLIC tier would make
+        // every page cost two tokens and roughly halve the browsing budget of a shared/NAT'd IP.
+        // Its own bucket keeps shoppers browsing freely while still capping beacon abuse.
+        if (path.startsWith("/api/analytics/")) {
+            return RateLimitTier.ANALYTICS_BEACON;
+        }
         return RateLimitTier.PUBLIC;
     }
 
@@ -273,6 +279,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         },
 
+        // 240 req/min — storefront page-view beacon. Higher than PUBLIC because it rides along with
+        // browsing rather than replacing it, and cheap to serve (one insert, no reads).
+        ANALYTICS_BEACON {
+
+            BucketConfiguration buildConfiguration() {
+                return BucketConfiguration.builder()
+                        .addLimit(Bandwidth.builder().capacity(240).refillGreedy(240, Duration.ofMinutes(1)).build())
+                        .build();
+            }
+        },
+
         // 100 req/min — public product/category/story browsing
         PUBLIC {
             
@@ -288,6 +305,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         /** Auth-sensitive tiers must not fail open when Redis is unavailable. */
         boolean isAuthSensitive() {
             return this == AUTH_SENSITIVE || this == AUTH_GENERAL;
+        }
+
+        /**
+         * Tiers that fall back to a per-instance in-memory bucket instead of failing open while
+         * Redis is down. Auth tiers, because brute-force protection matters most exactly then — and
+         * the visitor beacon, because it is unauthenticated and every accepted request is an INSERT,
+         * so failing open there means an anonymous caller can grow the table without limit. Reads
+         * (PUBLIC, ADMIN) keep failing open: throttling a page of products is not worth an outage.
+         */
+        boolean needsLocalFallback() {
+            return isAuthSensitive() || this == ANALYTICS_BEACON;
         }
     }
 }
