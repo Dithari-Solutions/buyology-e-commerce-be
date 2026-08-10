@@ -5,6 +5,7 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.BucketConfiguration;
 import io.github.bucket4j.ConsumptionProbe;
+import io.github.bucket4j.distributed.ExpirationAfterWriteStrategy;
 import io.github.bucket4j.redis.lettuce.Bucket4jLettuce;
 import io.github.bucket4j.redis.lettuce.cas.LettuceBasedProxyManager;
 import io.lettuce.core.RedisClient;
@@ -21,6 +22,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -57,14 +60,39 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     // Per-instance only — acceptable degraded mode until Redis recovers.
     private final ConcurrentHashMap<String, Bucket> localBuckets = new ConcurrentHashMap<>();
 
+    /**
+     * Per-minute ceiling for the ADMIN tier, overridable without a code deploy. The dashboard's real
+     * appetite is only knowable in production — this is the lever to turn when admins report 429s,
+     * rather than waiting on a release. 0 or less means "use the tier's built-in default".
+     */
+    private final int adminPerMinute;
+
     public RateLimitingFilter(LettuceConnectionFactory connectionFactory,
                               ObjectMapper objectMapper,
                               @Value("${app.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
-                              @Value("${app.rate-limit.bypass-key:}") String rateLimitBypassKey) {
+                              @Value("${app.rate-limit.bypass-key:}") String rateLimitBypassKey,
+                              @Value("${app.rate-limit.admin-per-minute:0}") int adminPerMinute) {
         this.connectionFactory = connectionFactory;
         this.objectMapper = objectMapper;
         this.trustForwardedHeaders = trustForwardedHeaders;
         this.rateLimitBypassKey = rateLimitBypassKey;
+        this.adminPerMinute = adminPerMinute;
+    }
+
+    /**
+     * The bucket shape for a tier, applying the ADMIN override when one is configured. Everything
+     * else uses the tier's own constant, so a bad value here can only affect admin traffic.
+     */
+    private BucketConfiguration configurationFor(RateLimitTier tier) {
+        if (tier == RateLimitTier.ADMIN && adminPerMinute > 0) {
+            return BucketConfiguration.builder()
+                    .addLimit(Bandwidth.builder()
+                            .capacity(adminPerMinute)
+                            .refillGreedy(adminPerMinute, Duration.ofMinutes(1))
+                            .build())
+                    .build();
+        }
+        return tier.buildConfiguration();
     }
 
     @Override
@@ -79,7 +107,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         String clientIp = resolveClientIp(request);
         RateLimitTier tier = determineTier(path);
-        String bucketKey = "rl:" + tier.name() + ":" + clientIp;
+        BucketConfiguration configuration = configurationFor(tier);
+        // The capacity is part of the key on purpose. Bucket4j stores a bucket's configuration
+        // alongside its state and only calls the supplier when the key does not exist yet, so an
+        // already-created bucket would keep its old capacity forever — and these keys have a TTL
+        // measured in minutes, not the lifetime of the deployment. Without this, changing
+        // app.rate-limit.admin-per-minute would look applied and do nothing.
+        String bucketKey = "rl:" + tier.name() + ":" + capacityOf(configuration) + ":"
+                + resolveBucketSubject(tier, clientIp);
 
         LettuceBasedProxyManager<String> pm = acquireProxyManager();
         if (pm == null) {
@@ -88,7 +123,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // brute-force protection exactly when it matters most). Fall back to a
             // per-instance in-memory bucket so the limiter keeps working.
             if (tier.needsLocalFallback()) {
-                applyLocalFallback(bucketKey, tier, request, response, filterChain, path);
+                applyLocalFallback(bucketKey, configuration, request, response, filterChain, path);
             } else {
                 // Non-sensitive tiers: keep failing open to preserve availability.
                 filterChain.doFilter(request, response);
@@ -97,7 +132,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
 
         try {
-            var bucket = pm.builder().build(bucketKey, tier::buildConfiguration);
+            var bucket = pm.builder().build(bucketKey, () -> configuration);
             ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
             handleProbe(probe, request, response, filterChain, path);
         } catch (Exception e) {
@@ -105,7 +140,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // Redis errored mid-request. Protect auth-sensitive endpoints with the
             // local fallback instead of waving the request through.
             if (tier.needsLocalFallback()) {
-                applyLocalFallback(bucketKey, tier, request, response, filterChain, path);
+                applyLocalFallback(bucketKey, configuration, request, response, filterChain, path);
             } else {
                 filterChain.doFilter(request, response);
             }
@@ -116,11 +151,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
      * Throttles using a per-instance in-memory bucket. Used for auth tiers when Redis
      * is unavailable so brute-force protection does not silently disappear.
      */
-    private void applyLocalFallback(String bucketKey, RateLimitTier tier, HttpServletRequest request,
-                                    HttpServletResponse response, FilterChain filterChain, String path)
+    private void applyLocalFallback(String bucketKey, BucketConfiguration configuration,
+                                    HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain, String path)
             throws ServletException, IOException {
         Bucket localBucket = localBuckets.computeIfAbsent(bucketKey,
-                k -> Bucket.builder().addLimit(tier.buildConfiguration().getBandwidths()[0]).build());
+                k -> Bucket.builder().addLimit(configuration.getBandwidths()[0]).build());
         ConsumptionProbe probe = localBucket.tryConsumeAndReturnRemaining(1);
         handleProbe(probe, request, response, filterChain, path);
     }
@@ -167,7 +203,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             try {
                 RedisClient redisClient = (RedisClient) connectionFactory.getNativeClient();
                 var connection = redisClient.connect(RedisCodec.of(StringCodec.UTF8, ByteArrayCodec.INSTANCE));
-                proxyManager = Bucket4jLettuce.<String>casBasedBuilder(connection).build();
+                // Without an expiration strategy every bucket key is written with no TTL, so Redis
+                // accumulated one permanent key per client IP for as long as the deployment lived.
+                // basedOnTimeForRefillingBucketUpToMax only expires a bucket once it would have
+                // refilled to full, at which point its state is indistinguishable from a fresh one —
+                // so nothing is forgotten that would have still been throttling.
+                proxyManager = Bucket4jLettuce.<String>casBasedBuilder(connection)
+                        .expirationAfterWrite(ExpirationAfterWriteStrategy
+                                .basedOnTimeForRefillingBucketUpToMax(Duration.ofMinutes(5)))
+                        .build();
                 log.info("Rate limiter connected to Redis");
             } catch (Exception e) {
                 log.warn("Redis unavailable — rate limiting disabled, retrying in {}s: {}",
@@ -201,6 +245,73 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 || path.startsWith("/js/")
                 || path.startsWith("/images/")
                 || path.startsWith("/actuator/");
+    }
+
+    /**
+     * Who the bucket belongs to.
+     *
+     * <p>Admin traffic is keyed on the authenticated admin rather than on the client IP. Every admin
+     * reaches the API through the same nginx load balancer, and with
+     * {@code app.trust-forwarded-headers=false} (the default) {@link HttpServletRequest#getRemoteAddr()}
+     * is the proxy's address — so a single IP-keyed bucket was shared by every admin, every browser
+     * tab and every background badge poll on the dashboard. One person's page navigation could
+     * therefore 429 someone else's.
+     *
+     * <p>This filter is an unordered {@code @Component}, so it runs after Spring Security's chain and
+     * the principal is populated by then. If it is ever absent — an unauthenticated request, or the
+     * filter order changing — this falls back to the IP and behaves exactly as it did before.
+     *
+     * <p>Every other tier stays IP-keyed. {@code AUTH_SENSITIVE} especially: brute force is a
+     * property of where the requests come from, not of whoever the caller claims to be.
+     *
+     * <p>A private bucket is given only to callers who hold an admin-side authority. {@code
+     * /api/admin/**} is merely {@code .authenticated()} in the filter chain — the role check is a
+     * method-level {@code @PreAuthorize} that runs in the DispatcherServlet, downstream of every
+     * servlet filter — so an ordinary customer's token reaches this limiter and would otherwise mint
+     * its own private budget on a path it can only ever be 403'd from. Those callers stay in the
+     * shared IP bucket, which is where they were before, so the per-account ceiling is raised only
+     * for people who can actually use the dashboard.
+     */
+    // Package-private so RateLimitingFilterSubjectTest can pin the tier-by-tier behaviour.
+    String resolveBucketSubject(RateLimitTier tier, String clientIp) {
+        if (tier != RateLimitTier.ADMIN) {
+            return clientIp;
+        }
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return clientIp;
+        }
+        String name = auth.getName();
+        if (name == null || name.isBlank() || "anonymousUser".equals(name)) {
+            return clientIp;
+        }
+        if (!isAdminSide(auth)) {
+            return clientIp;
+        }
+        return "u:" + name;
+    }
+
+    /**
+     * Whether the caller is a dashboard-side account rather than a shopper.
+     *
+     * <p>Keyed on {@code ROLE_ADMIN} / {@code ROLE_SUPERADMIN} rather than on the specific job roles
+     * (MARKETING, PROCUREMENT, REPAIR, STORE_ADMIN, …) because {@code JwtAuthenticationFilter} derives
+     * {@code ROLE_<USER_TYPE>} for every account, so every dashboard user carries {@code ROLE_ADMIN}
+     * whatever their role is, and a shopper carries {@code ROLE_CUSTOMER}. Enumerating job roles here
+     * would silently drop any role added later back into the shared bucket.
+     */
+    private static boolean isAdminSide(Authentication auth) {
+        for (var authority : auth.getAuthorities()) {
+            String value = authority.getAuthority();
+            if ("ROLE_ADMIN".equals(value) || "ROLE_SUPERADMIN".equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static long capacityOf(BucketConfiguration configuration) {
+        return configuration.getBandwidths()[0].getCapacity();
     }
 
     private String resolveClientIp(HttpServletRequest request) {
@@ -269,12 +380,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         },
 
-        // 30 req/min — admin operations
+        // 300 req/min per ADMIN — dashboard operations.
+        //
+        // Was 30, which the dashboard could not live inside. Its shell idles at ~10 req/min per open
+        // tab before anyone clicks anything (three Procurement badge counts, the Repair badge and the
+        // notification bell, each on a 30s timer), every page load fires several more in parallel
+        // (the home page alone makes five), and until this tier became per-admin every admin and
+        // every tab drew from the same bucket. Admins were being 429'd for using the dashboard
+        // normally.
+        //
+        // 300/min is ~5 req/s sustained per admin: comfortable for parallel page loads and badge
+        // polling, still low enough to stop a runaway client loop.
         ADMIN {
-            
+
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
-                        .addLimit(Bandwidth.builder().capacity(30).refillGreedy(30, Duration.ofMinutes(1)).build())
+                        .addLimit(Bandwidth.builder().capacity(300).refillGreedy(300, Duration.ofMinutes(1)).build())
                         .build();
             }
         },

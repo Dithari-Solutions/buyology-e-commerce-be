@@ -60,6 +60,8 @@ services:
       # Rate-limit bypass key for trusted server clients (n8n product integration).
       RATE_LIMIT_BYPASS_KEY: ${RATE_LIMIT_BYPASS_KEY:-}
       TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-false}
+      # Per-minute cap for ONE admin on /api/admin/** (0 = built-in 300). Bump if admins see 429s.
+      ADMIN_RATE_LIMIT_PER_MINUTE: ${ADMIN_RATE_LIMIT_PER_MINUTE:-0}
 
       # ── Email / OTP (SendGrid) ──
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
