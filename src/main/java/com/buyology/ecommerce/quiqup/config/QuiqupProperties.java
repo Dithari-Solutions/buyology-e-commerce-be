@@ -41,6 +41,17 @@ public class QuiqupProperties {
     /** Optional shared secret Quiqup signs webhooks with (HMAC), if configured. */
     private String webhookSecret;
 
+    /**
+     * Permit state-changing calls when {@link #baseUrl} is not Quiqup staging.
+     *
+     * <p>Quiqup issues no self-serve sandbox credential, so the key most accounts hold is a live
+     * one and production sits one environment variable away. Creating an order and marking it ready
+     * for collection dispatches a real courier to a real address, billed to the real account, and
+     * our cancel contract is still unverified — so the undo is not guaranteed. Reads are never
+     * blocked; only writes, and only off staging. Turning this on is the deliberate second key.
+     */
+    private boolean allowProductionWrites = false;
+
     /** Timeout for outbound Quiqup calls, milliseconds. */
     private long timeoutMs = 10000;
 
@@ -121,6 +132,8 @@ public class QuiqupProperties {
     public void setAccountId(String accountId) { this.accountId = accountId; }
     public String getWebhookSecret() { return webhookSecret; }
     public void setWebhookSecret(String webhookSecret) { this.webhookSecret = webhookSecret; }
+    public boolean isAllowProductionWrites() { return allowProductionWrites; }
+    public void setAllowProductionWrites(boolean allowProductionWrites) { this.allowProductionWrites = allowProductionWrites; }
     public long getTimeoutMs() { return timeoutMs; }
     public void setTimeoutMs(long timeoutMs) { this.timeoutMs = timeoutMs; }
     public Oauth getOauth() { return oauth; }

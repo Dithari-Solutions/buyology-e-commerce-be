@@ -42,11 +42,31 @@ public class QuiqupClient {
         this.props = props;
         this.objectMapper = objectMapper;
         this.webClient = WebClient.builder().baseUrl(props.getBaseUrl()).build();
+
+        if (props.isEnabled()) {
+            log.info("[QUIQUP] enabled — baseUrl={} authMode={} apiKey={} staging={} productionWrites={}",
+                    props.getBaseUrl(), props.getAuthMode(),
+                    props.getApiKey() == null || props.getApiKey().isBlank() ? "MISSING" : "present",
+                    isStagingBaseUrl(), props.isAllowProductionWrites());
+        }
     }
 
     /** Fill {@code {id}} placeholders in a path template. */
     public static String fillPath(String template, String id) {
         return template.replace("{id}", id == null ? "" : id);
+    }
+
+    /**
+     * Whether the configured base URL points at Quiqup's staging estate.
+     *
+     * <p>Quiqup issues no self-serve sandbox key, so the only credential most accounts hold is a
+     * live one and production is a single environment variable away. A create + ready_for_collection
+     * against production dispatches a real courier to a real address, billed to the real account —
+     * and our cancel contract is still unverified, so the undo is not guaranteed to work.
+     */
+    private boolean isStagingBaseUrl() {
+        String base = props.getBaseUrl();
+        return base != null && base.toLowerCase().contains("staging");
     }
 
     /**
@@ -56,6 +76,12 @@ public class QuiqupClient {
      */
     public QuiqupApiResult request(String method, String path, JsonNode body) {
         log.info("[QUIQUP] {} {}", method, path);
+
+        // Every caller — the admin endpoints and the raw tester alike — funnels through here, so
+        // this is the one place the guard has to hold.
+        QuiqupApiResult blocked = guardProductionWrite(method);
+        if (blocked != null) return blocked;
+
         try {
             HttpMethod httpMethod = HttpMethod.valueOf(method.toUpperCase());
             Map<String, String> authHeaders = authHeaders(); // may throw if creds missing
@@ -86,6 +112,30 @@ public class QuiqupClient {
             return new QuiqupApiResult(502, false,
                     "Quiqup call failed (" + props.getBaseUrl() + path + "): " + e.getMessage());
         }
+    }
+
+    /**
+     * Refuse anything that could mutate state on Quiqup's production estate.
+     *
+     * <p>Reads are always allowed — {@code GET /orders} is how you validate a token without side
+     * effects. Writes against a non-staging base URL are refused unless
+     * {@code QUIQUP_ALLOW_PRODUCTION_WRITES=true} is set as well, so going live is a deliberate
+     * two-variable decision rather than a single-variable slip.
+     *
+     * @return a 409-style result to relay to the UI, or {@code null} when the call may proceed.
+     */
+    private QuiqupApiResult guardProductionWrite(String method) {
+        boolean readOnly = "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+        if (readOnly || isStagingBaseUrl() || props.isAllowProductionWrites()) {
+            return null;
+        }
+        log.warn("[QUIQUP] BLOCKED {} against non-staging base URL {} — set QUIQUP_ALLOW_PRODUCTION_WRITES=true to permit.",
+                method, props.getBaseUrl());
+        return new QuiqupApiResult(409, false,
+                "Blocked: " + method + " is a write against a non-staging Quiqup base URL ("
+                        + props.getBaseUrl() + "). Creating or dispatching an order here sends a real "
+                        + "courier to a real address on the live account. Read-only calls (GET) are "
+                        + "allowed. To permit writes deliberately, set QUIQUP_ALLOW_PRODUCTION_WRITES=true.");
     }
 
     /**

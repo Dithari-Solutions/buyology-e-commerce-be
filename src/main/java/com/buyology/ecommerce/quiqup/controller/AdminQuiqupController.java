@@ -67,6 +67,12 @@ public class AdminQuiqupController {
         cfg.put("accountId", props.getAccountId());
         cfg.put("webhookSecretConfigured", props.getWebhookSecret() != null && !props.getWebhookSecret().isBlank());
         cfg.put("webhookPath", "/api/quiqup/webhook");
+        // Surfaced so the testing page can say plainly which estate it is pointed at, and whether a
+        // write would be refused, before anyone clicks Create Order.
+        boolean staging = props.getBaseUrl() != null && props.getBaseUrl().toLowerCase().contains("staging");
+        cfg.put("staging", staging);
+        cfg.put("allowProductionWrites", props.isAllowProductionWrites());
+        cfg.put("writesBlocked", !staging && !props.isAllowProductionWrites());
         Map<String, String> paths = new LinkedHashMap<>();
         paths.put("create", props.getPaths().getCreate());
         paths.put("get", props.getPaths().getGet());
