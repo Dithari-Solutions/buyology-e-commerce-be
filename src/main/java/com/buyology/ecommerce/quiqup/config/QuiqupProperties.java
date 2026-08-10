@@ -42,6 +42,19 @@ public class QuiqupProperties {
     private String webhookSecret;
 
     /**
+     * Shared secret sent back to us in a custom header on every webhook delivery, configured on the
+     * Quiqup subscription's "custom headers" field.
+     *
+     * <p>Independent of {@link #webhookSecret}: their HMAC scheme is undocumented (no header name,
+     * algorithm variant or encoding published), whereas a header we choose the value of is
+     * deterministic and verifiable today. Checked in addition to the HMAC, never instead of it.
+     */
+    private String webhookToken;
+
+    /** Header carrying {@link #webhookToken}. Must match what the Quiqup subscription sends. */
+    private String webhookTokenHeader = "X-Buyology-Webhook-Token";
+
+    /**
      * Permit state-changing calls when {@link #baseUrl} is not Quiqup staging.
      *
      * <p>Quiqup issues no self-serve sandbox credential, so the key most accounts hold is a live
@@ -52,8 +65,15 @@ public class QuiqupProperties {
      */
     private boolean allowProductionWrites = false;
 
-    /** Timeout for outbound Quiqup calls, milliseconds. */
-    private long timeoutMs = 10000;
+    /** Response timeout for outbound Quiqup calls, milliseconds — time to a reply once connected. */
+    private long timeoutMs = 20000;
+
+    /**
+     * TCP connect timeout, milliseconds. Deliberately much shorter than {@link #timeoutMs} so an
+     * unreachable host (blocked egress, DNS failure) fails fast and distinctly, instead of looking
+     * identical to a slow-but-reachable API.
+     */
+    private long connectTimeoutMs = 5000;
 
     private final Oauth oauth = new Oauth();
     private final Paths paths = new Paths();
@@ -132,10 +152,16 @@ public class QuiqupProperties {
     public void setAccountId(String accountId) { this.accountId = accountId; }
     public String getWebhookSecret() { return webhookSecret; }
     public void setWebhookSecret(String webhookSecret) { this.webhookSecret = webhookSecret; }
+    public String getWebhookToken() { return webhookToken; }
+    public void setWebhookToken(String webhookToken) { this.webhookToken = webhookToken; }
+    public String getWebhookTokenHeader() { return webhookTokenHeader; }
+    public void setWebhookTokenHeader(String webhookTokenHeader) { this.webhookTokenHeader = webhookTokenHeader; }
     public boolean isAllowProductionWrites() { return allowProductionWrites; }
     public void setAllowProductionWrites(boolean allowProductionWrites) { this.allowProductionWrites = allowProductionWrites; }
     public long getTimeoutMs() { return timeoutMs; }
     public void setTimeoutMs(long timeoutMs) { this.timeoutMs = timeoutMs; }
+    public long getConnectTimeoutMs() { return connectTimeoutMs; }
+    public void setConnectTimeoutMs(long connectTimeoutMs) { this.connectTimeoutMs = connectTimeoutMs; }
     public Oauth getOauth() { return oauth; }
     public Paths getPaths() { return paths; }
 }

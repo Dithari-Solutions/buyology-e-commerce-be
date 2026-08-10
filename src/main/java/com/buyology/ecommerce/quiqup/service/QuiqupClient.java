@@ -41,7 +41,18 @@ public class QuiqupClient {
     public QuiqupClient(QuiqupProperties props, ObjectMapper objectMapper) {
         this.props = props;
         this.objectMapper = objectMapper;
-        this.webClient = WebClient.builder().baseUrl(props.getBaseUrl()).build();
+        // A short connect timeout separates "cannot reach the host at all" (blocked egress, DNS)
+        // from "connected but Quiqup is slow to answer". Without it both surface as the same
+        // opaque TimeoutException and there is no way to tell which from the admin page.
+        reactor.netty.http.client.HttpClient httpClient = reactor.netty.http.client.HttpClient.create()
+                .option(io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS,
+                        (int) Math.min(props.getConnectTimeoutMs(), Integer.MAX_VALUE))
+                .responseTimeout(Duration.ofMillis(props.getTimeoutMs()));
+
+        this.webClient = WebClient.builder()
+                .baseUrl(props.getBaseUrl())
+                .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(httpClient))
+                .build();
 
         if (props.isEnabled()) {
             log.info("[QUIQUP] enabled — baseUrl={} authMode={} apiKey={} staging={} productionWrites={}",
@@ -108,10 +119,43 @@ public class QuiqupClient {
             }
             return result;
         } catch (Exception e) {
-            log.error("[QUIQUP] call failed {} {} — {}", method, path, e.getMessage());
-            return new QuiqupApiResult(502, false,
-                    "Quiqup call failed (" + props.getBaseUrl() + path + "): " + e.getMessage());
+            log.error("[QUIQUP] call failed {} {} — {}: {}", method, path,
+                    e.getClass().getSimpleName(), e.getMessage(), e);
+            return new QuiqupApiResult(502, false, describeFailure(method, path, e));
         }
+    }
+
+    /**
+     * Turn a transport failure into something that says what to check next.
+     *
+     * <p>A bare {@code TimeoutException} is the least actionable outcome the admin page can show —
+     * it looks identical whether the host is unreachable, the credentials are wrong, or Quiqup is
+     * simply slow. Walking the cause chain lets the message name which one it was.
+     */
+    private String describeFailure(String method, String path, Exception e) {
+        String url = props.getBaseUrl() + path;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String type = t.getClass().getName();
+            if (t instanceof java.net.UnknownHostException) {
+                return "Cannot resolve the Quiqup host for " + url
+                        + " — DNS failure from the app server. Check QUIQUP_BASE_URL and the server's resolver.";
+            }
+            if (type.contains("ConnectTimeout") || t instanceof java.net.ConnectException) {
+                return "Could not open a connection to " + url + " within "
+                        + props.getConnectTimeoutMs() + "ms. The app server most likely cannot reach "
+                        + "Quiqup — outbound egress blocked, or Quiqup staging restricts by IP. "
+                        + "Verify from the server itself: curl -sv " + url;
+            }
+        }
+        if (e instanceof java.util.concurrent.TimeoutException
+                || e.getCause() instanceof java.util.concurrent.TimeoutException) {
+            return "Connected to " + url + " but Quiqup sent no response within "
+                    + props.getTimeoutMs() + "ms. Raise QUIQUP_TIMEOUT_MS if their staging API is "
+                    + "just slow; if it never answers, the request is likely being dropped rather "
+                    + "than refused (an unauthenticated call to this URL normally returns 401 immediately).";
+        }
+        return "Quiqup call failed (" + method + " " + url + "): "
+                + e.getClass().getSimpleName() + ": " + e.getMessage();
     }
 
     /**

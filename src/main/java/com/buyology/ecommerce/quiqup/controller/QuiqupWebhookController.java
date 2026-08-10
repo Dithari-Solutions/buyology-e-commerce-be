@@ -70,6 +70,7 @@ public class QuiqupWebhookController {
         }
 
         Boolean hmacValid = verifyHmac(request, raw);
+        Boolean tokenValid = verifySharedToken(request);
 
         try {
             QuiqupTestEvent event = new QuiqupTestEvent();
@@ -80,13 +81,47 @@ public class QuiqupWebhookController {
             event.setHmacValid(hmacValid);
             event.setSourceIp(clientIp(request));
             eventRepository.save(event);
-            log.info("[QUIQUP-WEBHOOK] stored event={} hmacValid={}", eventType, hmacValid);
+            log.info("[QUIQUP-WEBHOOK] stored event={} hmacValid={} tokenValid={}",
+                    eventType, hmacValid, tokenValid);
         } catch (Exception e) {
             // Never fail the webhook on a storage error — just log it.
             log.error("[QUIQUP-WEBHOOK] failed to persist event: {}", e.getMessage(), e);
         }
 
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Check the shared secret we asked Quiqup to send back in a custom header.
+     *
+     * <p>Deliberately observe-only for now: the result is logged, and a mismatch does NOT reject the
+     * delivery. Quiqup's custom-header behaviour is unverified (whether it survives their retries,
+     * whether header case is preserved), and silently dropping real delivery events while we find
+     * that out would be worse than accepting an unauthenticated one into a log-only table that never
+     * touches an order. Turn this into a rejection once deliveries are observed carrying it
+     * reliably.
+     *
+     * @return {@code null} when no token is configured, otherwise whether the header matched.
+     */
+    private Boolean verifySharedToken(HttpServletRequest request) {
+        String expected = props.getWebhookToken();
+        if (expected == null || expected.isBlank()) return null;
+
+        String headerName = props.getWebhookTokenHeader();
+        String provided = headerName == null || headerName.isBlank()
+                ? null
+                : request.getHeader(headerName); // getHeader is case-insensitive per the servlet spec
+
+        if (provided == null || provided.isBlank()) {
+            log.warn("[QUIQUP-WEBHOOK] shared token expected in '{}' but the header was absent", headerName);
+            return false;
+        }
+        // Constant-time compare so a mismatch can't be narrowed down by timing.
+        boolean ok = java.security.MessageDigest.isEqual(
+                provided.trim().getBytes(StandardCharsets.UTF_8),
+                expected.trim().getBytes(StandardCharsets.UTF_8));
+        if (!ok) log.warn("[QUIQUP-WEBHOOK] shared token in '{}' did not match", headerName);
+        return ok;
     }
 
     /**
