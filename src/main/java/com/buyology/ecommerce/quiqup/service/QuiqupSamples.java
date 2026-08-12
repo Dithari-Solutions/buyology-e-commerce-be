@@ -2,10 +2,15 @@ package com.buyology.ecommerce.quiqup.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Best-guess MOCK payloads for a Dubai test delivery, used to pre-fill the admin UI.
@@ -108,10 +113,41 @@ public class QuiqupSamples {
 
     public Map<String, JsonNode> all() {
         Map<String, JsonNode> out = new LinkedHashMap<>();
-        out.put("onDemand", read(ON_DEMAND));
-        out.put("ecommerce", read(ECOMMERCE));
-        out.put("quote", read(QUOTE));
+        out.put("onDemand", withUniqueRef(read(ON_DEMAND), "TEST-OD"));
+        out.put("ecommerce", withUniqueRef(read(ECOMMERCE), "TEST-EC"));
+        out.put("quote", read(QUOTE)); // a quote is not an order and carries no partner reference
         return out;
+    }
+
+    /**
+     * Give each prefill a fresh {@code partner_order_id}.
+     *
+     * <p>It was a constant, so every order created from the page arrived at Quiqup with the same
+     * reference — four test orders on their dashboard all reading {@code TEST-OD-0001}, which is the
+     * one column that is supposed to tell them apart. {@code partner_order_id} is our side of the
+     * correlation: it is what identifies the order in <em>our</em> system when a webhook or an invoice
+     * line comes back, so duplicates make a delivery event ambiguous the moment more than one order
+     * is in flight.
+     *
+     * <p>When this module graduates to real deliveries, this field must carry the real order id
+     * rather than a generated one.
+     */
+    private JsonNode withUniqueRef(JsonNode sample, String prefix) {
+        if (sample instanceof ObjectNode object && object.has("partner_order_id")) {
+            object.put("partner_order_id", prefix + "-" + uniqueSuffix());
+        }
+        return sample;
+    }
+
+    /**
+     * A timestamp in the business zone plus a few random characters: readable next to Quiqup's own
+     * order dates, and still distinct if the button is clicked twice in the same second.
+     */
+    private static String uniqueSuffix() {
+        String stamp = LocalDateTime.now(ZoneId.of("Asia/Dubai"))
+                .format(DateTimeFormatter.ofPattern("yyMMdd-HHmmss"));
+        String random = Integer.toHexString(ThreadLocalRandom.current().nextInt(0x1000, 0x10000));
+        return stamp + "-" + random;
     }
 
     private JsonNode read(String json) {

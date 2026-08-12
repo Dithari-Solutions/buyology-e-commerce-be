@@ -38,8 +38,24 @@ public class QuiqupProperties {
     /** Optional account/partner identifier some payloads require. */
     private String accountId;
 
-    /** Optional shared secret Quiqup signs webhooks with (HMAC), if configured. */
+    /**
+     * Secret Quiqup signs webhooks with, from {@code GET /subscriptions/{id}/secret} on the
+     * subscription that fires the deliveries.
+     *
+     * <p>Per-environment: a staging subscription's secret will not verify production deliveries or
+     * vice versa, because the subscriptions themselves are per-environment.
+     */
     private String webhookSecret;
+
+    /**
+     * Reject a delivery whose signature does not verify, instead of only recording the result.
+     *
+     * <p>Defaults to false so signature verification can be observed against real deliveries before
+     * it is allowed to drop them. Flip it to true once the admin Webhooks tab shows deliveries
+     * arriving with a valid signature; until at least one has verified, a true here would silently
+     * discard every real event.
+     */
+    private boolean webhookRequireSignature = false;
 
     /**
      * Shared secret sent back to us in a custom header on every webhook delivery, configured on the
@@ -152,6 +168,10 @@ public class QuiqupProperties {
     public void setAccountId(String accountId) { this.accountId = accountId; }
     public String getWebhookSecret() { return webhookSecret; }
     public void setWebhookSecret(String webhookSecret) { this.webhookSecret = webhookSecret; }
+    public boolean isWebhookRequireSignature() { return webhookRequireSignature; }
+    public void setWebhookRequireSignature(boolean webhookRequireSignature) {
+        this.webhookRequireSignature = webhookRequireSignature;
+    }
     public String getWebhookToken() { return webhookToken; }
     public void setWebhookToken(String webhookToken) { this.webhookToken = webhookToken; }
     public String getWebhookTokenHeader() { return webhookTokenHeader; }
