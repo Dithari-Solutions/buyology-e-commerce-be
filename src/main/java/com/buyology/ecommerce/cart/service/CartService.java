@@ -2,6 +2,7 @@ package com.buyology.ecommerce.cart.service;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.order.service.DeliveryFeePolicy;
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.cart.domain.CartItemSpecSelection;
@@ -61,6 +62,7 @@ public class CartService {
     private final UserProfilesRepository userProfileRepo;
     private final AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
+    private final DeliveryFeePolicy deliveryFeePolicy;
 
     public CartService(
             CartRepository cartRepository,
@@ -76,7 +78,8 @@ public class CartService {
             StoreOperatingHoursRepository operatingHoursRepository,
             UserProfilesRepository userProfileRepo,
             AccountStatusValidator accountStatusValidator,
-            CurrencyExchangeService currencyExchangeService) {
+            CurrencyExchangeService currencyExchangeService,
+            DeliveryFeePolicy deliveryFeePolicy) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
@@ -91,6 +94,7 @@ public class CartService {
         this.userProfileRepo = userProfileRepo;
         this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
+        this.deliveryFeePolicy = deliveryFeePolicy;
     }
 
     // ─── Get or create active cart ────────────────────────────────────────────
@@ -524,8 +528,6 @@ public class CartService {
 
     // Pricing policy (same source-of-truth as OrderService).
     private static final String POLICY_BASE_CURRENCY = "AED";
-    private static final BigDecimal POLICY_FREE_SHIPPING_AED = new BigDecimal("100.00");
-    private static final BigDecimal POLICY_DELIVERY_FEE_AED = new BigDecimal("15.00");
 
     private CartResponse buildCartResponse(Cart cart, Set<UUID> nearbyStoreIds) {
         CartResponse response = new CartResponse();
@@ -538,21 +540,31 @@ public class CartService {
         response.setCreatedAt(cart.getCreatedAt());
         response.setUpdatedAt(cart.getUpdatedAt());
 
-        // Pricing policy snapshot in the cart's display currency.
-        // Rule: subtotal in AED-equivalent >= 100 AED -> free express delivery,
-        //       otherwise charge 15 AED converted to the cart currency.
+        // Pricing policy snapshot in the cart's display currency, read from the same
+        // DeliveryFeePolicy bean the order uses so the two cannot disagree.
+        //
+        // The cart shows the STANDARD delivery rate for the cart's country: no address has been
+        // chosen yet, so the delivery method is unknown, and only an address inside a store's
+        // 30-minute radius resolves to EXPRESS. An order that does qualify is recalculated at
+        // checkout, where the customer sees the final total before paying. The country matters
+        // because Quiqup's rate is only charged in the markets they serve.
         String displayCurrency = cart.getCurrency() != null ? cart.getCurrency() : POLICY_BASE_CURRENCY;
         try {
+            BigDecimal thresholdAed = deliveryFeePolicy.freeShippingThresholdAed();
             BigDecimal threshold = POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
-                    ? POLICY_FREE_SHIPPING_AED
-                    : currencyExchangeService.convert(POLICY_FREE_SHIPPING_AED, POLICY_BASE_CURRENCY, displayCurrency);
+                    ? thresholdAed
+                    : currencyExchangeService.convert(thresholdAed, POLICY_BASE_CURRENCY, displayCurrency);
             BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
             boolean qualifies = subtotal.compareTo(threshold) >= 0;
-            BigDecimal deliveryFee = qualifies
+            BigDecimal subtotalAed = POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
+                    ? subtotal
+                    : currencyExchangeService.convert(subtotal, displayCurrency, POLICY_BASE_CURRENCY);
+            BigDecimal feeAed = deliveryFeePolicy.cartPreviewFeeAed(cart.getCountryCode(), subtotalAed);
+            BigDecimal deliveryFee = feeAed.signum() == 0
                     ? BigDecimal.ZERO
                     : (POLICY_BASE_CURRENCY.equalsIgnoreCase(displayCurrency)
-                            ? POLICY_DELIVERY_FEE_AED
-                            : currencyExchangeService.convert(POLICY_DELIVERY_FEE_AED, POLICY_BASE_CURRENCY, displayCurrency));
+                            ? feeAed
+                            : currencyExchangeService.convert(feeAed, POLICY_BASE_CURRENCY, displayCurrency));
             response.setFreeShippingThreshold(threshold);
             response.setDeliveryFee(deliveryFee);
             response.setQualifiesForFreeShipping(qualifies);

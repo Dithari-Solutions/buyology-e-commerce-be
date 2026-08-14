@@ -3,6 +3,7 @@ package com.buyology.ecommerce.product.service;
 import com.buyology.ecommerce.common.enums.Language;
 import com.buyology.ecommerce.common.enums.SpecUnit;
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.order.service.DeliveryFeePolicy;
 import com.buyology.ecommerce.product.domain.Brand;
 import com.buyology.ecommerce.product.domain.GlobalSpecGroup;
 import com.buyology.ecommerce.product.domain.GlobalSpecGroupTranslation;
@@ -114,6 +115,7 @@ public class ProductService {
     private final StoreProductRepository storeProductRepository;
     private final CountryRepository countryRepository;
     private final CurrencyExchangeService currencyExchangeService;
+    private final DeliveryFeePolicy deliveryFeePolicy;
     private final StoreLocationRepository storeLocationRepository;
     private final ContaboObjectService contaboObjectService;
     private final ProductSearchService productSearchService;
@@ -140,6 +142,7 @@ public class ProductService {
             StoreProductRepository storeProductRepository,
             CountryRepository countryRepository,
             CurrencyExchangeService currencyExchangeService,
+            DeliveryFeePolicy deliveryFeePolicy,
             StoreLocationRepository storeLocationRepository,
             ContaboObjectService contaboObjectService,
             ProductSearchService productSearchService,
@@ -164,6 +167,7 @@ public class ProductService {
         this.storeProductRepository = storeProductRepository;
         this.countryRepository = countryRepository;
         this.currencyExchangeService = currencyExchangeService;
+        this.deliveryFeePolicy = deliveryFeePolicy;
         this.storeLocationRepository = storeLocationRepository;
         this.contaboObjectService = contaboObjectService;
         this.productSearchService = productSearchService;
@@ -724,7 +728,7 @@ public class ProductService {
         }
         ProductResponse response = toResponse(product, lang, false);
         applyCountryPricing(response, product.getId(), countryCode, currency, lat, lng);
-        applyDeliveryInfo(response);
+        applyDeliveryInfo(response, countryCode);
         applyRatingsSingle(response, product.getId());
         return ApiResponse.success(response, "Product fetched successfully");
     }
@@ -1823,31 +1827,34 @@ public class ProductService {
      */
     private static final double EXPRESS_RADIUS_KM = 12.5;
 
-    // Delivery display rule (mirrors OrderService): free once the price reaches the
-    // 100-AED-equivalent threshold, otherwise a 15-AED standard fee converted to the
-    // product's display currency.
-    private static final BigDecimal FREE_DELIVERY_THRESHOLD_AED = new BigDecimal("100.00");
-    private static final BigDecimal STANDARD_DELIVERY_FEE_AED = new BigDecimal("15.00");
+    // Delivery display values come from DeliveryFeePolicy, the same bean the cart and the order use.
+    // This used to be its own pair of constants "mirroring OrderService" — a third copy of the fee,
+    // aligned by comment. Once 30-minute and standard delivery were priced differently, that would
+    // have advertised one fee on the product page and charged another at checkout.
 
     /**
      * Populates freeDelivery + deliveryFee on a priced response. Call after storePrice +
      * currency are set (works for both the single and batch pricing paths).
      */
-    private void applyDeliveryInfo(ProductResponse resp) {
+    private void applyDeliveryInfo(ProductResponse resp, String countryCode) {
         BigDecimal price = resp.getStorePrice();
         String ccy = resp.getCurrency();
         if (price == null || ccy == null) return;
         BigDecimal priceAed = "AED".equalsIgnoreCase(ccy)
                 ? price
                 : currencyExchangeService.convert(price, ccy, "AED");
-        if (priceAed.compareTo(FREE_DELIVERY_THRESHOLD_AED) >= 0) {
+        // Standard-delivery rate for this country — the same figure the cart will show. A product
+        // page cannot know the delivery address, so it cannot know whether the order will resolve to
+        // 30-minute delivery; that is settled at checkout, where the customer sees the final total.
+        BigDecimal feeAed = deliveryFeePolicy.cartPreviewFeeAed(countryCode, priceAed);
+        if (feeAed.signum() == 0) {
             resp.setFreeDelivery(true);
             resp.setDeliveryFee(BigDecimal.ZERO);
         } else {
             resp.setFreeDelivery(false);
             resp.setDeliveryFee("AED".equalsIgnoreCase(ccy)
-                    ? STANDARD_DELIVERY_FEE_AED
-                    : currencyExchangeService.convert(STANDARD_DELIVERY_FEE_AED, "AED", ccy));
+                    ? feeAed
+                    : currencyExchangeService.convert(feeAed, "AED", ccy));
         }
     }
 
@@ -2111,7 +2118,7 @@ public class ProductService {
                     resp.setCurrency(finalTarget);
                 }
             }
-            if (includeExtras) applyDeliveryInfo(resp);
+            if (includeExtras) applyDeliveryInfo(resp, countryCode);
         }
         if (includeExtras) applyRatingsBatch(responses, products);
     }

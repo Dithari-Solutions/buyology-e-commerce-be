@@ -80,11 +80,9 @@ public class OrderService {
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final double THIRTY_MIN_RADIUS_KM = 12.5;
 
-    // Pricing constants (in AED, the base settlement currency).
-    // Express delivery: 15 AED if subtotal < 100 AED, free otherwise.
+    // Delivery pricing lives in DeliveryFeePolicy — the cart reads the same bean, so the fee quoted
+    // while shopping cannot drift from the fee charged at checkout.
     private static final String BASE_CURRENCY = "AED";
-    private static final BigDecimal EXPRESS_DELIVERY_FEE = new BigDecimal("15.00");
-    private static final BigDecimal FREE_SHIPPING_THRESHOLD = new BigDecimal("100.00");
     private static final String STOREFRONT_URL = "https://buyology.online";
 
     private final OrderRepository orderRepo;
@@ -103,6 +101,7 @@ public class OrderService {
     private final com.buyology.ecommerce.user.repository.UserRepository userRepo;
     private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
+    private final DeliveryFeePolicy deliveryFeePolicy;
     private final ObjectMapper objectMapper;
     private final CourierServiceClient courierServiceClient;
     private final SimpMessagingTemplate messagingTemplate;
@@ -136,6 +135,7 @@ public class OrderService {
                         com.buyology.ecommerce.user.repository.UserRepository userRepo,
                         com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator,
                         CurrencyExchangeService currencyExchangeService,
+                        DeliveryFeePolicy deliveryFeePolicy,
                         ObjectMapper objectMapper,
                         CourierServiceClient courierServiceClient,
                         SimpMessagingTemplate messagingTemplate,
@@ -166,6 +166,7 @@ public class OrderService {
         this.userRepo = userRepo;
         this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
+        this.deliveryFeePolicy = deliveryFeePolicy;
         this.objectMapper = objectMapper;
         this.courierServiceClient = courierServiceClient;
         this.messagingTemplate = messagingTemplate;
@@ -348,7 +349,8 @@ public class OrderService {
             } else {
                 method = resolveDeliveryMethod(cartItems, address);
             }
-            BigDecimal shippingFee = calculateShippingFee(cart.getTotalPrice(), cart.getCurrency());
+            BigDecimal shippingFee = calculateShippingFee(
+                    cart.getTotalPrice(), cart.getCurrency(), method, address.getCountry());
 
             order.setDeliveryMethod(method);
             order.setShippingFee(shippingFee);
@@ -920,18 +922,26 @@ public class OrderService {
         return allLocal ? DeliveryMethod.EXPRESS : DeliveryMethod.REGULAR;
     }
 
-    private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency) {
-        // Flat delivery policy — same source-of-truth as CartService, applied to every
-        // delivery method so the order total matches the fee shown in the cart:
-        // free once the subtotal (in AED equivalent) reaches the threshold, otherwise
-        // charge 15 AED converted to the cart's display currency.
+    /**
+     * The delivery fee for this order, in the cart's display currency.
+     *
+     * <p>Method- and country-dependent: 30-minute delivery (our own couriers) and standard delivery
+     * are priced differently, and Quiqup's rate applies only where Quiqup actually deliver. See
+     * {@link DeliveryFeePolicy}, which both this and the cart read so the fee quoted while shopping
+     * cannot drift from the fee charged.
+     */
+    private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency,
+                                            DeliveryMethod method, String deliveryCountry) {
         BigDecimal subtotalAed = BASE_CURRENCY.equalsIgnoreCase(currency)
                 ? subtotal
                 : currencyExchangeService.convert(subtotal, currency, BASE_CURRENCY);
-        if (subtotalAed.compareTo(FREE_SHIPPING_THRESHOLD) >= 0) {
+        BigDecimal feeAed = deliveryFeePolicy.feeAed(method, deliveryCountry, subtotalAed);
+        if (feeAed.signum() == 0) {
             return BigDecimal.ZERO;
         }
-        return currencyExchangeService.convert(EXPRESS_DELIVERY_FEE, BASE_CURRENCY, currency);
+        return BASE_CURRENCY.equalsIgnoreCase(currency)
+                ? feeAed
+                : currencyExchangeService.convert(feeAed, BASE_CURRENCY, currency);
     }
 
     private String estimateDeliveryTime(DeliveryMethod method) {

@@ -134,6 +134,16 @@ services:
       SELL_AI_ESTIMATE_ENABLED: ${SELL_AI_ESTIMATE_ENABLED:-true}
       SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
 
+      # ── Delivery pricing (AED) ──
+      # DELIVERY_QUIQUP_FEE_AED is the rate Quiqup bills us for a standard delivery, passed through
+      # to the customer on orders under the free-shipping threshold. Defaults to the previous 15.00.
+      DELIVERY_FREE_SHIPPING_THRESHOLD_AED: ${DELIVERY_FREE_SHIPPING_THRESHOLD_AED:-100.00}
+      DELIVERY_EXPRESS_FEE_AED: ${DELIVERY_EXPRESS_FEE_AED:-20.00}
+      DELIVERY_QUIQUP_FEE_AED: ${DELIVERY_QUIQUP_FEE_AED:-15.00}
+      DELIVERY_STANDARD_FEE_AED: ${DELIVERY_STANDARD_FEE_AED:-15.00}
+      # Quiqup is UAE-only; a standard order elsewhere is not theirs and keeps the flat rate.
+      DELIVERY_QUIQUP_COUNTRIES: ${DELIVERY_QUIQUP_COUNTRIES:-UAE}
+
       # ── Website visitor analytics (storefront page-view beacon) ──
       # ANALYTICS_ENABLED=false makes the public beacon a no-op without a code deploy; it is
       # the only lever on the one unauthenticated write endpoint, so it has to be reachable here.
