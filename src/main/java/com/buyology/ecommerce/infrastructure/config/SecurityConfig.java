@@ -219,8 +219,10 @@ public class SecurityConfig {
      * up the whole filter chain.
      */
     static List<String> resolveAllowedOrigins(String configuredCsv) {
-        List<String> configured = java.util.Arrays.stream(
-                        configuredCsv == null ? "" : configuredCsv.split(","))
+        // Normalise the null before splitting, not inside the split: a ternary whose branches are
+        // String and String[] resolves to their least upper bound, which Arrays.stream cannot take.
+        String csv = configuredCsv == null ? "" : configuredCsv;
+        List<String> configured = java.util.Arrays.stream(csv.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
