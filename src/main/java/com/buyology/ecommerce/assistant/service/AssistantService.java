@@ -4,6 +4,7 @@ import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.MessageCreateParams;
+import com.anthropic.models.messages.StructuredMessage;
 import com.anthropic.models.messages.StructuredMessageCreateParams;
 import com.anthropic.models.messages.TextBlockParam;
 import com.anthropic.models.messages.ThinkingConfigAdaptive;
@@ -81,13 +82,37 @@ public class AssistantService {
     private static final long MAX_TOKENS = 3_000L;
 
     /** Shown when the model call fails outright. Deliberately not an apology for a "system error". */
-    private static final String FALLBACK_REPLY =
+    // Package-private so the sanitiser tests can assert the fallback by identity.
+    static final String FALLBACK_REPLY =
             "Sorry — I couldn't look that up just now. Please try again in a moment, or contact our "
             + "support team and they'll help you straight away.";
 
     /** Matches a customer_message tag in any case or spacing, so the wrapper cannot be escaped. */
     private static final Pattern CUSTOMER_TAG = Pattern.compile("</?\\s*customer_message\\s*/?>",
             Pattern.CASE_INSENSITIVE);
+
+    /**
+     * A genuine HTML-ish tag: an angle bracket, a letter, then a matching close bracket.
+     *
+     * <p>Deliberately narrower than an HTML parser. The reply is prose about electronics, so it
+     * legitimately contains bare angle brackets — "screens &lt; 14 inch", "under &lt;AED 3000" — and a
+     * parser treats "&lt;AED" as an unterminated tag and drops everything after it. Requiring a
+     * closing bracket on the same span means a stray "&lt;" is text, which is what it is.
+     */
+    private static final Pattern HTML_TAG = Pattern.compile("</?[a-zA-Z][^<>]*>");
+
+    /**
+     * Markers that mean the model stopped answering and started emitting scaffolding: the
+     * elision brackets seen in the wild, and the names of our own prompt structures, which
+     * should never appear in something shown to a customer.
+     */
+    private static final Pattern DEGENERATE_TAIL = Pattern.compile(
+            "[\\x{27EA}\\x{27EB}]|customer_message|reply in json only|productIds is required"
+            + "|The customer has just typed",
+            Pattern.CASE_INSENSITIVE);
+
+    /** A real answer is two or three sentences; well past this, the model is no longer answering. */
+    private static final int MAX_REPLY_CHARS = 1200;
 
     private static final String SCOPE_RULES = """
             You are the customer-support assistant on the Buyology website, a consumer-electronics
@@ -210,15 +235,16 @@ public class AssistantService {
 
         List<ProductResponse> products = retrieveProducts(question, history, language, countryCode, currency);
 
-        AssistantAnswer answer;
+        ModelTurn turn;
         try {
-            answer = callClaude(question, history, products, language, countryCode, currency);
+            turn = callClaude(question, history, products, language, countryCode, currency);
         } catch (Exception e) {
             log.error("[ASSISTANT] Claude call failed for conversation {}.", conversation.getId(), e);
             store.recordAssistantTurn(conversation, FALLBACK_REPLY, true, List.of());
             return new AssistantChatResponse(conversation.getId(), FALLBACK_REPLY, true, true, List.of());
         }
 
+        AssistantAnswer answer = turn.answer();
         if (answer == null) {
             // The call returned but carried no parsable answer. Same outcome as a failure from the
             // customer's side, so it gets the same handling rather than an empty bubble.
@@ -231,7 +257,15 @@ public class AssistantService {
         // missing value as a refusal would silently suppress product cards on a perfectly good answer.
         boolean inScope = !Boolean.FALSE.equals(answer.inScope());
         boolean escalate = Boolean.TRUE.equals(answer.escalate());
-        String reply = cleanReply(answer.reply());
+
+        Sanitised sanitised = cleanReply(answer.reply());
+        String reply = sanitised.text();
+        if (sanitised.degenerate()) {
+            // The customer already got a clean answer; this is the record that lets the next
+            // occurrence be explained rather than guessed at.
+            log.warn("[ASSISTANT] Trimmed a degenerate reply on conversation {} ({}). Raw reply: {}",
+                    conversation.getId(), turn.diagnostics(), abbreviate(answer.reply()));
+        }
 
         // An off-topic turn gets no product cards, whatever the model listed: a declined question
         // has no products to show, and attaching some would undercut the refusal.
@@ -313,7 +347,7 @@ public class AssistantService {
     // Claude call
     // =========================================================================
 
-    private AssistantAnswer callClaude(String question, List<AssistantMessage> history,
+    private ModelTurn callClaude(String question, List<AssistantMessage> history,
                                        List<ProductResponse> products, String language,
                                        String countryCode, String currency) {
         MessageCreateParams.Builder builder = MessageCreateParams.builder()
@@ -343,11 +377,37 @@ public class AssistantService {
                 .outputConfig(AssistantAnswer.class)
                 .build();
 
-        Optional<AssistantAnswer> parsed = client.messages().create(params).content().stream()
+        // Keep the StructuredMessage, not just the parsed record. stopReason and usage are the
+        // only things that can tell a truncated answer (max_tokens) apart from one where the model
+        // simply kept generating — and the first report of a corrupted reply had neither available,
+        // which is why it could not be diagnosed from the transcript alone.
+        StructuredMessage<AssistantAnswer> message = client.messages().create(params);
+        Optional<AssistantAnswer> parsed = message.content().stream()
                 .flatMap(block -> block.text().stream())
                 .map(text -> text.text())
                 .findFirst();
-        return parsed.orElse(null);
+        return new ModelTurn(parsed.orElse(null), message);
+    }
+
+    /** One model turn plus the wire-level facts needed to explain a bad one. */
+    private record ModelTurn(AssistantAnswer answer, StructuredMessage<AssistantAnswer> raw) {
+
+        /** Compact description of how the turn ended, for the degenerate-reply log line. */
+        String diagnostics() {
+            String stop;
+            try {
+                stop = raw.stopReason().map(Object::toString).orElse("none");
+            } catch (Exception e) {
+                stop = "unavailable";
+            }
+            String usage;
+            try {
+                usage = String.valueOf(raw.usage());
+            } catch (Exception e) {
+                usage = "unavailable";
+            }
+            return "stopReason=" + stop + " usage=" + usage;
+        }
     }
 
     /** One replayable message: a role and the text to send under it. */
@@ -469,6 +529,13 @@ public class AssistantService {
     // Normalisation
     // =========================================================================
 
+    /** Bounds a raw reply for the log and keeps it on one line, so it cannot forge log entries. */
+    private static String abbreviate(String value) {
+        if (value == null) return "null";
+        String flat = value.replace('\n', ' ').replace('\r', ' ');
+        return flat.length() <= 2000 ? flat : flat.substring(0, 2000) + "…[truncated]";
+    }
+
     private static String normaliseQuestion(String message) {
         String cleaned = message == null ? "" : message.trim();
         if (cleaned.isEmpty()) {
@@ -477,17 +544,69 @@ public class AssistantService {
         return cleaned.length() <= 1000 ? cleaned : cleaned.substring(0, 1000);
     }
 
+    /** A reply after cleaning, and whether the model had gone off the rails producing it. */
+    record Sanitised(String text, boolean degenerate) {
+    }
+
     /**
-     * The reply is rendered into the page, and the storefront's CSP does not make an injected tag
-     * harmless in every embedding. Stripping markup costs nothing here — the assistant is instructed
-     * to write plain text anyway, so anything stripped was already a bug.
+     * Makes one reply safe to show a customer, without destroying it.
+     *
+     * <p>This deliberately does NOT use {@link HtmlSanitizer}. That runs the text through a real
+     * HTML parser, which is correct for the stored user-generated copy it was written for and wrong
+     * for this field in three ways: an unterminated "&lt;" — as in "under &lt;AED 3000" — makes the
+     * parser discard everything to the end of the string; removing a span joins the words either
+     * side of it with no separator, turning "Your&lt;x&gt;ticket" into "Yourticket"; and it
+     * re-serialises with pretty-printing on, collapsing the line breaks the chat bubble renders.
+     * The first corrupted reply reported from production had all three fingerprints on it, which
+     * made the underlying model output impossible to reconstruct.
+     *
+     * <p>What replaces it: strip only spans that are actually shaped like a tag, leave every other
+     * character and all whitespace alone, cut the reply at the first sign the model stopped
+     * answering, and bound its length. The reply is rendered as text by the widget — escaping is
+     * the renderer's job, and this is the belt to that braces.
      */
-    private static String cleanReply(String reply) {
+    // Package-private so AssistantReplySanitisingTest can pin what reaches a customer.
+    static Sanitised cleanReply(String reply) {
         if (reply == null || reply.isBlank()) {
-            return FALLBACK_REPLY;
+            return new Sanitised(FALLBACK_REPLY, false);
         }
-        String stripped = HtmlSanitizer.stripHtml(reply).trim();
-        return stripped.isEmpty() ? FALLBACK_REPLY : stripped;
+        // Order matters: scan for scaffolding BEFORE stripping tags. One of the markers is the
+        // name of our own wrapper, "customer_message", and it arrives as a tag — strip first and
+        // the detector never sees it, leaving whatever the model appended after it in the bubble.
+        boolean degenerate = false;
+        String text = reply;
+        java.util.regex.Matcher marker = DEGENERATE_TAIL.matcher(text);
+        if (marker.find()) {
+            degenerate = true;
+            // Cutting at "customer_message" lands just after the "<" or "</" that introduced it,
+            // so drop that orphan. Deliberately only the bracket itself — a broader trailing-tag
+            // rule would eat a legitimate "under <AED 3000" running to the end of the reply.
+            text = text.substring(0, marker.start()).replaceAll("</?$", "");
+        }
+
+        text = HTML_TAG.matcher(text).replaceAll("").strip();
+        if (text.length() > MAX_REPLY_CHARS) {
+            degenerate = true;
+            text = truncateAtSentence(text);
+        }
+        if (text.isEmpty()) {
+            return new Sanitised(FALLBACK_REPLY, degenerate);
+        }
+        return new Sanitised(text, degenerate);
+    }
+
+    /**
+     * Cuts an over-long reply at the last sentence that ends before the ceiling, so the customer
+     * gets a complete thought rather than a severed clause. Falls back to a hard cut when the text
+     * has no sentence break at all — which is itself a sign of a run-on generation.
+     */
+    private static String truncateAtSentence(String text) {
+        String head = text.substring(0, MAX_REPLY_CHARS);
+        int cut = Math.max(head.lastIndexOf(". "), Math.max(head.lastIndexOf("? "), head.lastIndexOf("! ")));
+        if (cut > MAX_REPLY_CHARS / 2) {
+            return head.substring(0, cut + 1).strip();
+        }
+        return head.strip();
     }
 
     // =========================================================================

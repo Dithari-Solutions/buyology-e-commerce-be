@@ -608,22 +608,31 @@ is a servlet filter that writes its response before controller advice ever runs.
 
 ## 10. Known issues
 
-### Open — degenerate tail in some replies
+### Contained, not yet cured — degenerate tail in some replies
 
-Intermittently the `reply` string continues past the real answer with corrupted scaffolding
-text. Observed once as:
+Intermittently the model continued past its real answer and appended its own scaffolding. First
+occurrence, as it reached the customer:
 
 ```
 …shopping for today?ك ⟪7 tokens⟫Yourticket has been escalated. reply in json only.
 productIds is required. ⟫UPDATE: The customer has just typed:
 ```
 
-Root-cause work is in progress. The leading explanation is that the prompt's trailing
-`<customer_message>` block invites the model to continue the transcript, and the server's HTML
-stripper then mangles what it produced.
+**The server now trims this before it is sent — no frontend workaround needed.** Replies are cut
+at the first scaffolding marker, bounded to 1200 characters at a sentence boundary, and every
+occurrence is logged with the model's `stopReason` and token usage.
 
-**Backend fix — no frontend change needed.** If you want to guard the UI meanwhile, cut the
-bubble at the first occurrence of `⟪`.
+Two things were wrong, and only one is fixed. The trimming is containment: it guarantees the
+customer sees a clean answer, but the model should not be generating that text at all, and the
+root cause is still open. An adversarial investigation refuted every hypothesis as unproven —
+the raw model output was never being captured, so nobody could tell a truncated answer apart
+from a run-on one. That instrumentation now exists, so the next occurrence will be diagnosable.
+
+The other half **was** confirmed and fixed: the reply was being run through an HTML parser
+(`HtmlSanitizer`), which is lossy for generated prose. A reply saying `under <AED 3000` had
+everything after the `<` silently discarded, removing a span joined the words either side of it
+(`Your<x>ticket` → `Yourticket`), and re-serialisation collapsed line breaks. That is why
+`white-space: pre-wrap` matters now — before the fix, the newlines never reached you.
 
 ### Not built yet
 
