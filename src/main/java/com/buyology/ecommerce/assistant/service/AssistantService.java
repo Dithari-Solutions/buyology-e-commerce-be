@@ -557,8 +557,10 @@ public class AssistantService {
      * parser discard everything to the end of the string; removing a span joins the words either
      * side of it with no separator, turning "Your&lt;x&gt;ticket" into "Yourticket"; and it
      * re-serialises with pretty-printing on, collapsing the line breaks the chat bubble renders.
-     * The first corrupted reply reported from production had all three fingerprints on it, which
-     * made the underlying model output impossible to reconstruct.
+     * None of that caused the corrupted reply first reported from production — that string passes
+     * through the parser byte-identical, so the model really did produce all of it. These are
+     * separate, reproducible defects that were sitting on the same line, and they destroy ordinary
+     * answers rather than broken ones, which is why they had never been noticed.
      *
      * <p>What replaces it: strip only spans that are actually shaped like a tag, leave every other
      * character and all whitespace alone, cut the reply at the first sign the model stopped
@@ -584,7 +586,7 @@ public class AssistantService {
             text = text.substring(0, marker.start()).replaceAll("</?$", "");
         }
 
-        text = HTML_TAG.matcher(text).replaceAll("").strip();
+        text = stripTags(text).strip();
         if (text.length() > MAX_REPLY_CHARS) {
             degenerate = true;
             text = truncateAtSentence(text);
@@ -593,6 +595,27 @@ public class AssistantService {
             return new Sanitised(FALLBACK_REPLY, degenerate);
         }
         return new Sanitised(text, degenerate);
+    }
+
+    /**
+     * Removes tag-shaped spans, repeatedly, until the text stops changing.
+     *
+     * <p>One pass is not enough, and the reason is the whole point of doing it this way: deleting a
+     * span can splice its neighbours into a NEW one. "&lt;&lt;script&gt;script&gt;alert(1)" contains
+     * exactly one match, and removing it leaves "&lt;script&gt;alert(1)" — a live tag manufactured by
+     * the sanitiser. Running to a fixed point closes that off. The iteration bound only stops a
+     * pathological input from spinning; real text settles on the first or second pass.
+     */
+    private static String stripTags(String value) {
+        String current = value;
+        for (int i = 0; i < 8; i++) {
+            String previous = current;
+            current = HTML_TAG.matcher(current).replaceAll("");
+            if (current.equals(previous)) {
+                break;
+            }
+        }
+        return current;
     }
 
     /**

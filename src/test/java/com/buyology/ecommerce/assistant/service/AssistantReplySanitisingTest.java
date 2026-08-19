@@ -15,9 +15,11 @@ import static org.junit.jupiter.api.Assertions.*;
  * reintroduces a parser here — the first one below is that exact regression.
  *
  * <p>They also pin the tail-trimming that was added after a live reply came back with the model's
- * own scaffolding appended to a perfectly good answer. Trimming is a containment measure, not a
- * cure — the model should not be producing that text at all — so the assertions describe what the
- * customer sees, and deliberately say nothing about why the model did it.
+ * own scaffolding appended to a perfectly good answer. That string is unaffected by the sanitiser
+ * either way — it was checked, and passes through byte-identical — so the two halves of this class
+ * cover two unrelated defects that happened to meet on one line. Trimming is a containment
+ * measure, not a cure: the model should not be producing that text at all, so the assertions
+ * describe what the customer sees and deliberately say nothing about why the model did it.
  */
 class AssistantReplySanitisingTest {
 
@@ -77,6 +79,16 @@ class AssistantReplySanitisingTest {
         assertFalse(out.text().contains("<script"));
         assertFalse(out.text().contains("</script>"));
         assertTrue(out.text().contains("Here are our laptops."));
+    }
+
+    @Test
+    void cannotBeMadeToManufactureATagByRemovingOne() {
+        // Removing the inner span splices its neighbours into a new one, so a single pass turns
+        // this into a live <script> tag. Verified against the real sanitiser before the fix.
+        AssistantService.Sanitised out = AssistantService.cleanReply("<<script>script>alert(1)");
+
+        assertFalse(out.text().contains("<script"), "stripping must not manufacture a tag");
+        assertFalse(out.text().contains(">"), "no tag may survive any number of splices");
     }
 
     // ── Degenerate-tail containment ──────────────────────────────────────────
