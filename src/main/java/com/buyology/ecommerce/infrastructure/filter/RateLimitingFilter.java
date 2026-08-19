@@ -355,6 +355,16 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/analytics/")) {
             return RateLimitTier.ANALYTICS_BEACON;
         }
+        // Every accepted assistant message is a paid model call, so this endpoint is the only one
+        // where throttling protects the bill and not just the servers. Its own tier keeps that
+        // ceiling well below PUBLIC without making the storefront feel slow around it.
+        //
+        // Only /chat — not the whole /api/assistant/ prefix. The widget probes /status on every page
+        // load to decide whether to render, so putting that in the same bucket would spend the
+        // customer's chat budget on browsing and 429 them before they had asked anything.
+        if (path.equals("/api/assistant/chat")) {
+            return RateLimitTier.ASSISTANT;
+        }
         return RateLimitTier.PUBLIC;
     }
 
@@ -411,6 +421,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         },
 
+        // 12 req/min — the storefront AI assistant.
+        //
+        // Sized on how fast a person actually types, not on what the servers could take: a customer
+        // in a real conversation sends a message every few seconds at most, so 12/min is generous
+        // for them and cuts off a script immediately. It is deliberately far below PUBLIC because
+        // every request here costs money at the model provider — this is the one endpoint where the
+        // limiter is a spend control, and where failing open would be writing a blank cheque.
+        ASSISTANT {
+
+            BucketConfiguration buildConfiguration() {
+                return BucketConfiguration.builder()
+                        .addLimit(Bandwidth.builder().capacity(12).refillGreedy(12, Duration.ofMinutes(1)).build())
+                        .build();
+            }
+        },
+
         // 100 req/min — public product/category/story browsing
         PUBLIC {
             
@@ -430,13 +456,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         /**
          * Tiers that fall back to a per-instance in-memory bucket instead of failing open while
-         * Redis is down. Auth tiers, because brute-force protection matters most exactly then — and
-         * the visitor beacon, because it is unauthenticated and every accepted request is an INSERT,
-         * so failing open there means an anonymous caller can grow the table without limit. Reads
-         * (PUBLIC, ADMIN) keep failing open: throttling a page of products is not worth an outage.
+         * Redis is down. Auth tiers, because brute-force protection matters most exactly then — the
+         * visitor beacon, because it is unauthenticated and every accepted request is an INSERT, so
+         * failing open there means an anonymous caller can grow the table without limit — and the
+         * assistant, because failing open on it means an anonymous caller can spend money at the
+         * model provider for as long as Redis stays down. Reads (PUBLIC, ADMIN) keep failing open:
+         * throttling a page of products is not worth an outage.
          */
         boolean needsLocalFallback() {
-            return isAuthSensitive() || this == ANALYTICS_BEACON;
+            return isAuthSensitive() || this == ANALYTICS_BEACON || this == ASSISTANT;
         }
     }
 }

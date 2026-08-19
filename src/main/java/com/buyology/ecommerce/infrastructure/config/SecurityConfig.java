@@ -127,6 +127,17 @@ public class SecurityConfig {
                         // the counts are read back under /api/admin/analytics/**, which stays
                         // authenticated and permission-guarded.
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/analytics/visit").permitAll()
+                        // Storefront AI assistant. Public for the same reason the beacon is: the
+                        // shoppers most likely to ask "do you have this in stock?" are not logged
+                        // in, and a login wall would leave the assistant answering only the
+                        // customers who least need it. The caller controls nothing but their own
+                        // question — no history, no prompt, no model — because the transcript and
+                        // the prompt are both built server-side. Spend is bounded by the ASSISTANT
+                        // rate-limit tier (per IP), the per-conversation message ceiling and the
+                        // per-visitor daily conversation cap. Transcripts are read back under
+                        // /api/admin/assistant/**, which stays authenticated and permission-guarded.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/assistant/chat").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/assistant/status").permitAll()
                         // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
                         // Contact verification (email/phone OTP) used by public supplier & B2B apply forms
