@@ -211,6 +211,37 @@ services:
       ERPNEXT_SHIPPING_ACCOUNT_HEAD: ${ERPNEXT_SHIPPING_ACCOUNT_HEAD:-}
       ERPNEXT_DEFAULT_WAREHOUSE: ${ERPNEXT_DEFAULT_WAREHOUSE:-}
 
+      # ── Quiqup delivery ──
+      # The dev stack is where Quiqup's STAGING estate belongs. Without these the dev app cannot
+      # talk to Quiqup at all, which is why the module ended up being exercised from production
+      # against their test API — one deployment doing two jobs, and the reason a single
+      # QUIQUP_BASE_URL had to be right for both at once.
+      QUIQUP_ENABLED: ${QUIQUP_ENABLED:-false}
+      QUIQUP_BASE_URL: ${QUIQUP_BASE_URL:-https://api.staging.quiqup.com}
+      QUIQUP_AUTH_MODE: ${QUIQUP_AUTH_MODE:-apikey}
+      QUIQUP_API_KEY: ${QUIQUP_API_KEY:-}
+      QUIQUP_API_KEY_HEADER: ${QUIQUP_API_KEY_HEADER:-Authorization}
+      QUIQUP_API_KEY_PREFIX: ${QUIQUP_API_KEY_PREFIX:-Bearer}
+      QUIQUP_ACCOUNT_ID: ${QUIQUP_ACCOUNT_ID:-}
+      QUIQUP_WEBHOOK_SECRET: ${QUIQUP_WEBHOOK_SECRET:-}
+      QUIQUP_WEBHOOK_REQUIRE_SIGNATURE: ${QUIQUP_WEBHOOK_REQUIRE_SIGNATURE:-false}
+      QUIQUP_WEBHOOK_TOKEN: ${QUIQUP_WEBHOOK_TOKEN:-}
+      QUIQUP_WEBHOOK_TOKEN_HEADER: ${QUIQUP_WEBHOOK_TOKEN_HEADER:-X-Buyology-Webhook-Token}
+      # Staging is where writes are meant to happen, so this may safely be true here. It is the
+      # deliberate second key on production and nowhere else.
+      QUIQUP_ALLOW_PRODUCTION_WRITES: ${QUIQUP_ALLOW_PRODUCTION_WRITES:-false}
+      QUIQUP_TIMEOUT_MS: ${QUIQUP_TIMEOUT_MS:-20000}
+      QUIQUP_CONNECT_TIMEOUT_MS: ${QUIQUP_CONNECT_TIMEOUT_MS:-5000}
+      # Automatic dispatch. Turning this on HERE is how the paid-order path gets exercised without
+      # a real courier and without touching a real customer's order.
+      QUIQUP_DISPATCH_ENABLED: ${QUIQUP_DISPATCH_ENABLED:-false}
+      QUIQUP_DISPATCH_KIND: ${QUIQUP_DISPATCH_KIND:-partner_next_day}
+      QUIQUP_DISPATCH_AUTO_READY: ${QUIQUP_DISPATCH_AUTO_READY:-false}
+      QUIQUP_DISPATCH_RETRY_AFTER_MINUTES: ${QUIQUP_DISPATCH_RETRY_AFTER_MINUTES:-10}
+      QUIQUP_DISPATCH_MAX_ATTEMPTS: ${QUIQUP_DISPATCH_MAX_ATTEMPTS:-5}
+      QUIQUP_DISPATCH_RETRY_HORIZON_HOURS: ${QUIQUP_DISPATCH_RETRY_HORIZON_HOURS:-48}
+      QUIQUP_DISPATCH_RETRY_INTERVAL_MS: ${QUIQUP_DISPATCH_RETRY_INTERVAL_MS:-300000}
+
       # ── Courier service proxy (optional on dev) ──
       COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY:-}
 
