@@ -2207,6 +2207,11 @@ public class OrderService {
             res.setStoreId(o.getItems().get(0).getStoreId());
         }
 
+        // Dispatch state is admin-only: whether the order reached Quiqup, and why it did not.
+        res.setQuiqupOrderId(o.getQuiqupOrderId());
+        res.setQuiqupStatus(o.getQuiqupStatus());
+        res.setQuiqupDispatchedAt(o.getQuiqupDispatchedAt());
+        res.setQuiqupDispatchError(o.getQuiqupDispatchError());
         return res;
     }
 
