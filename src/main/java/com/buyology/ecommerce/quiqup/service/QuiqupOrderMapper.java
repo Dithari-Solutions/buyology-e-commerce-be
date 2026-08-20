@@ -31,6 +31,10 @@ public class QuiqupOrderMapper {
      * class and reads as unremarkable at a glance. In Dubai the two values are close enough
      * (55.27, 25.19) that a transposed pair is still a plausible-looking coordinate — it is simply
      * in the wrong country, and nothing downstream would reject it.
+     *
+     * <p>Confirmed by round-trip against Quiqup staging, not merely from their samples: a job sent
+     * with {@code "coords": [55.2744, 25.1972]} came back as
+     * {@code "coordinates": {"lat": 25.1972, "lng": 55.2744}}. Index 0 is longitude.
      */
     private static ArrayNode coords(ObjectMapper mapper, double longitude, double latitude) {
         ArrayNode node = mapper.createArrayNode();
@@ -119,6 +123,8 @@ public class QuiqupOrderMapper {
         address.put("postcode", blankToDash(order.getPostalCode()));
         address.set("coords", coords(objectMapper,
                 order.getDeliveryLongitude(), order.getDeliveryLatitude()));
+        // Order.country is alpha-3 ("UAE"). Confirmed accepted: Quiqup normalise it to "AE" on
+        // their side, so no mapping table is needed here.
         address.put("country", blankToDash(order.getCountry()));
         address.put("town", blankToDash(order.getCity()));
         node.set("address", address);
