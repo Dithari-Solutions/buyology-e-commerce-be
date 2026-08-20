@@ -216,7 +216,7 @@ public class QuiqupDispatchService {
                 return reason;
             }
 
-            recordSuccess(orderId, quiqupId);
+            recordSuccess(orderId, quiqupId, extractTrackingUrl(result));
             log.info("[QUIQUP] Order {} dispatched as Quiqup order {}", orderId, quiqupId);
 
             if (props.getDispatch().isAutoReadyForCollection()) {
@@ -400,13 +400,20 @@ public class QuiqupDispatchService {
         }
     }
 
-    private void recordSuccess(UUID orderId, String quiqupOrderId) {
+    private void recordSuccess(UUID orderId, String quiqupOrderId, String trackingUrl) {
         txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
             o.setQuiqupOrderId(quiqupOrderId);
             o.setQuiqupDispatchedAt(Instant.now());
             o.setQuiqupDispatchError(null);
             o.setCarrierName("Quiqup");
-            o.setTrackingCode(quiqupOrderId);
+            // trackingCode is surfaced to the customer on OrderResponse, so it holds the thing a
+            // customer can actually use. Quiqup's numeric job id is not that — it means nothing
+            // outside their dashboard — and it is already kept on quiqupOrderId for our own lookups.
+            if (trackingUrl != null && trackingUrl.length() <= 100) {
+                o.setTrackingCode(trackingUrl);
+            } else {
+                o.setTrackingCode(quiqupOrderId);
+            }
             orderRepo.save(o);
         }));
     }
@@ -457,6 +464,24 @@ public class QuiqupDispatchService {
             }
         }
         return null;
+    }
+
+    /**
+     * Pulls the customer-facing tracking link out of a create response.
+     *
+     * <p>Quiqup mint one per job and share it with the customer themselves, and it is the only live
+     * tracking this channel has — our own WebSocket tracking follows our courier fleet, which is not
+     * who is carrying this parcel. Storing it means a customer asking "where is it" has an answer
+     * that does not involve anyone opening the Quiqup dashboard.
+     */
+    static String extractTrackingUrl(QuiqupApiResult result) {
+        if (result == null || !(result.body() instanceof JsonNode node)) {
+            return null;
+        }
+        JsonNode order = node.get("order");
+        JsonNode source = order != null && order.isObject() ? order : node;
+        JsonNode url = source.get("tracking_url");
+        return url == null || url.isNull() || url.asText().isBlank() ? null : url.asText();
     }
 
     /** The order plus everything needed to describe its collection, detached from the session. */
