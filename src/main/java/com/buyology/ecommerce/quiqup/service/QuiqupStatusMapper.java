@@ -40,31 +40,62 @@ public final class QuiqupStatusMapper {
         }
         String s = quiqupStatus.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
 
-        // Failure outcomes first: they must win even when a string also contains a happier word
-        // (a "delivery_failed" event mentions delivery but is the opposite of one).
+        // Their documented vocabulary, matched EXACTLY. Substring matching was doing the work here
+        // and it is not safe on these names, because several of them contain the word for a
+        // different stage than the one they mean:
+        //
+        //   ready_for_collection  contains "collection" — nothing has been collected; the parcel is
+        //                         packed and waiting, and calling it collected tells a customer a
+        //                         courier holds their order when none does
+        //   out_for_collection    contains "out_for"    — the courier is driving TO THE SHOP, not to
+        //                         the customer; reading it as in-transit skips a whole leg
+        //   out_for_delivery      contains "delivery"   — still in the van, not delivered
+        //   delivery_failed       contains "delivery"   — the opposite of a delivery
+        //
+        // An exact table cannot be fooled by any of that.
+        OrderStatus known = switch (s) {
+            case "pending", "picking_started", "ready_for_collection",
+                 "at_depot", "received_at_depot"          -> null;
+            case "out_for_collection", "collected"        -> OrderStatus.IN_COURIER;
+            case "in_transit", "out_for_delivery"         -> OrderStatus.IN_TRANSIT;
+            case "delivery_complete", "delivered"         -> OrderStatus.DELIVERED;
+            case "delivery_failed", "collection_failed"   -> OrderStatus.FAILED;
+            case "out_for_return", "returned_to_origin"   -> OrderStatus.FAILED;
+            case "cancelled", "canceled"                  -> OrderStatus.CANCELLED;
+            default                                       -> UNKNOWN;
+        };
+        if (known != UNKNOWN) {
+            return known;
+        }
+
+        // Unknown to us. Quiqup can add a state without telling us, so fall back to heuristics —
+        // but only the ones that cannot be misread. Ordering is load-bearing: failure words beat
+        // everything, and the in-flight phrases that contain "deliver" are tested before "deliver"
+        // itself, or "out_for_delivery"-shaped names mark an order DELIVERED, which is terminal and
+        // is never corrected.
         if (s.contains("cancel")) return OrderStatus.CANCELLED;
         if (s.contains("fail") || s.contains("reject") || s.contains("return")) return OrderStatus.FAILED;
-
-        // In-flight BEFORE the bare "deliver" test, because the most common way of saying a parcel
-        // is still in the van — "out_for_delivery" — contains the word "delivery". Testing for
-        // delivery first reads perfectly naturally and marks those orders DELIVERED, which is
-        // terminal: nothing later corrects it, and the customer is told their order arrived while
-        // the courier is still driving. This ordering is load-bearing, not stylistic.
+        if (s.contains("out_for_collection") || s.contains("ready_for")) return null;
         if (s.contains("transit") || s.contains("on_the_way") || s.contains("out_for")
                 || s.contains("dropoff") || s.contains("arriv")) {
             return OrderStatus.IN_TRANSIT;
         }
-
         if (s.contains("deliver")) return OrderStatus.DELIVERED;
-        if (s.contains("collect") || s.contains("picked") || s.contains("pickup")
+        // "pickup"/"picked" are safe where a bare "collect" is not: no documented state contains
+        // them, whereas "collection" appears in ready_for_collection, which means the opposite.
+        if (s.contains("collected") || s.contains("picked") || s.contains("pickup")
                 || s.contains("accept") || s.contains("assign") || s.contains("courier")) {
             return OrderStatus.IN_COURIER;
         }
-
-        // "pending", "created", "scheduled" and anything unknown: recorded, not acted on. The job
-        // existing at Quiqup is not itself a change to the customer's order.
         return null;
     }
+
+    /**
+     * Distinguishes "the table says this state changes nothing" from "the table has never heard of
+     * this state". Both would otherwise be null, and they call for opposite handling: the first is
+     * an answer, the second means fall through to the heuristics.
+     */
+    private static final OrderStatus UNKNOWN = OrderStatus.PENDING_PAYMENT;
 
     /** A short line for the order's tracking history, so support can see where a status came from. */
     public static String trackingNote(String quiqupStatus) {
