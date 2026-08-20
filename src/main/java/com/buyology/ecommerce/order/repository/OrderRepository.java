@@ -6,6 +6,7 @@ import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -79,6 +80,38 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     List<Order> findUndispatchedQuiqupOrders(@Param("olderThan") Instant olderThan,
                                              @Param("horizon") Instant horizon,
                                              org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Claims one order for dispatch, atomically. Returns 1 to the single winner, 0 to everyone else.
+     *
+     * <p>This is the whole cluster-safety story for dispatch. The condition and the write happen in
+     * one statement, so two replicas racing the same order cannot both pass it — the database
+     * serialises them and the loser sees 0 rows affected and stops. Checking a field and then
+     * writing it would leave exactly the gap this closes, and that gap is the width of an HTTP call
+     * to Quiqup.
+     *
+     * <p>A claim older than {@code staleBefore} is reclaimable so an instance that died mid-call
+     * does not strand the order; the window must exceed the Quiqup request timeout, or a slow call
+     * could be dispatched twice by the very mechanism meant to prevent it.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Order o SET o.quiqupDispatchClaimedAt = :now
+            WHERE o.id = :orderId
+              AND o.quiqupOrderId IS NULL
+              AND (o.quiqupDispatchClaimedAt IS NULL OR o.quiqupDispatchClaimedAt < :staleBefore)
+            """)
+    int claimForQuiqupDispatch(@Param("orderId") UUID orderId,
+                               @Param("now") Instant now,
+                               @Param("staleBefore") Instant staleBefore);
+
+    /**
+     * Releases a claim after a failed attempt, so the retry job can pick the order up immediately
+     * rather than waiting out the stale window.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Order o SET o.quiqupDispatchClaimedAt = NULL WHERE o.id = :orderId AND o.quiqupOrderId IS NULL")
+    int releaseQuiqupDispatchClaim(@Param("orderId") UUID orderId);
 
     /** Resolve an inbound Quiqup webhook back to the order it concerns. */
     Optional<Order> findByQuiqupOrderId(String quiqupOrderId);

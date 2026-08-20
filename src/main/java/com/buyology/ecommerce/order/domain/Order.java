@@ -276,6 +276,18 @@ public class Order {
     @Column(name = "quiqup_dispatch_error", length = 1000)
     private String quiqupDispatchError;
 
+    /**
+     * When an instance claimed this order and began calling Quiqup.
+     *
+     * <p>Production runs two app replicas, and nothing about the dispatch path is cluster-guarded.
+     * Without a claim both can read the same order, both see no Quiqup id, and both create a job —
+     * two couriers dispatched and billed for one parcel, with nothing downstream noticing. A claim
+     * older than the stale window is reclaimable, so an instance that died mid-call does not strand
+     * the order forever.
+     */
+    @Column(name = "quiqup_dispatch_claimed_at")
+    private Instant quiqupDispatchClaimedAt;
+
     // ── Relations ─────────────────────────────────────────────────────────────
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -476,6 +488,9 @@ public class Order {
 
     public Instant getQuiqupDispatchedAt() { return quiqupDispatchedAt; }
     public void setQuiqupDispatchedAt(Instant quiqupDispatchedAt) { this.quiqupDispatchedAt = quiqupDispatchedAt; }
+
+    public Instant getQuiqupDispatchClaimedAt() { return quiqupDispatchClaimedAt; }
+    public void setQuiqupDispatchClaimedAt(Instant v) { this.quiqupDispatchClaimedAt = v; }
 
     public String getQuiqupDispatchError() { return quiqupDispatchError; }
     public void setQuiqupDispatchError(String quiqupDispatchError) { this.quiqupDispatchError = quiqupDispatchError; }

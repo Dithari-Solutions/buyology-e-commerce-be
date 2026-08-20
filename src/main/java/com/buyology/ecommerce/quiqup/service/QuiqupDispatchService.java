@@ -24,6 +24,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -141,6 +142,16 @@ public class QuiqupDispatchService {
                 return refusal;
             }
 
+            // Claim before calling, never after. Production runs two app replicas and neither the
+            // event listener nor the retry job is cluster-guarded, so the check above is not by
+            // itself protection: both instances can pass it, and the gap between passing it and
+            // recording a Quiqup id is exactly as wide as the HTTP call. Losing this race must mean
+            // doing nothing, because winning it twice means two couriers for one parcel.
+            if (!claim(orderId)) {
+                log.info("[QUIQUP] Order {} already claimed by another instance; standing down", orderId);
+                return "Already being dispatched by another instance";
+            }
+
             ObjectNode payload = mapper.toCreatePayload(
                     snap.order, snap.origin, snap.originPhone, snap.items);
 
@@ -148,6 +159,7 @@ public class QuiqupDispatchService {
             if (result == null || !result.ok()) {
                 String reason = "Quiqup rejected the job: "
                         + (result == null ? "no response" : result.status() + " " + result.body());
+                releaseClaim(orderId);
                 recordFailure(orderId, reason);
                 log.error("[QUIQUP] Dispatch failed for order {} — {}", orderId, reason);
                 return reason;
@@ -158,6 +170,9 @@ public class QuiqupDispatchService {
                 // Accepted but unidentifiable. Recording a failure would let the retry create a
                 // SECOND job for the same parcel, which is worse than a stuck order — so this is
                 // recorded as needing a human, not as retryable.
+                // Deliberately NOT released: Quiqup may well have created the job, and freeing the
+                // claim would let the retry book a second courier for the same parcel. The claim
+                // staying put is what keeps this in a human's hands.
                 String reason = "Quiqup accepted the job but returned no id; check for a duplicate "
                         + "before retrying. Response: " + result.body();
                 recordFailure(orderId, reason);
@@ -175,6 +190,7 @@ public class QuiqupDispatchService {
 
         } catch (Exception e) {
             String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
+            releaseClaim(orderId);
             recordFailure(orderId, reason);
             log.error("[QUIQUP] Dispatch failed for order {}", orderId, e);
             return reason;
@@ -278,6 +294,35 @@ public class QuiqupDispatchService {
             originPhone = storeRepo.findById(storeId).map(Store::getContactPhone).orElse(null);
         }
         return new Snapshot(order, items, storeIds.size(), origin, originPhone, order.getQuiqupOrderId());
+    }
+
+    /**
+     * How long a claim may sit before another instance may take it.
+     *
+     * <p>Must comfortably exceed the Quiqup request timeout: if a claim expired while the original
+     * call was still in flight, the reclaim would dispatch the same parcel a second time — the
+     * exact outcome the claim exists to prevent, caused by the claim itself.
+     */
+    private Duration staleClaimWindow() {
+        return Duration.ofMillis(props.getTimeoutMs()).plus(Duration.ofMinutes(5));
+    }
+
+    /** True when this instance won the right to dispatch this order. */
+    private boolean claim(UUID orderId) {
+        Instant now = Instant.now();
+        Instant staleBefore = now.minus(staleClaimWindow());
+        Integer claimed = txTemplate.execute(status ->
+                orderRepo.claimForQuiqupDispatch(orderId, now, staleBefore));
+        return claimed != null && claimed > 0;
+    }
+
+    /** Hands the claim back after a failure, so the retry does not wait out the stale window. */
+    private void releaseClaim(UUID orderId) {
+        try {
+            txTemplate.executeWithoutResult(status -> orderRepo.releaseQuiqupDispatchClaim(orderId));
+        } catch (Exception e) {
+            log.warn("[QUIQUP] Could not release dispatch claim on order {}: {}", orderId, e.getMessage());
+        }
     }
 
     private void recordSuccess(UUID orderId, String quiqupOrderId) {

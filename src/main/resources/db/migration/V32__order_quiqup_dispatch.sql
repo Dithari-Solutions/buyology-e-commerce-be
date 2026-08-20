@@ -23,6 +23,12 @@ BEGIN
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS quiqup_status         VARCHAR(60);
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS quiqup_dispatched_at  TIMESTAMPTZ;
         ALTER TABLE orders ADD COLUMN IF NOT EXISTS quiqup_dispatch_error VARCHAR(1000);
+        -- Claimed by one instance that is about to call Quiqup. Production runs two app replicas
+        -- and neither the event listener nor the retry job is cluster-guarded, so without this both
+        -- can read the same undispatched order, both see a null quiqup_order_id, and both create a
+        -- job: two couriers, two charges, one parcel. The claim is what makes that a race one
+        -- instance loses rather than one both win.
+        ALTER TABLE orders ADD COLUMN IF NOT EXISTS quiqup_dispatch_claimed_at TIMESTAMPTZ;
 
         -- The retry job's lookup: paid orders that Quiqup has not accepted yet. Partial, because
         -- the rows it needs are the rare ones — every successfully dispatched order is excluded.
