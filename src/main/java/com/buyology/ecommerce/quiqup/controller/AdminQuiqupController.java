@@ -36,14 +36,17 @@ public class AdminQuiqupController {
     private final QuiqupSamples samples;
     private final QuiqupTestEventRepository eventRepository;
     private final ObjectMapper objectMapper;
+    private final com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService;
 
     public AdminQuiqupController(QuiqupProperties props, QuiqupClient client, QuiqupSamples samples,
-                                 QuiqupTestEventRepository eventRepository, ObjectMapper objectMapper) {
+                                 QuiqupTestEventRepository eventRepository, ObjectMapper objectMapper,
+                                 com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService) {
         this.props = props;
         this.client = client;
         this.samples = samples;
         this.eventRepository = eventRepository;
         this.objectMapper = objectMapper;
+        this.dispatchService = dispatchService;
     }
 
     public record RawRequest(String method, String path, JsonNode body) {}
@@ -157,6 +160,47 @@ public class AdminQuiqupController {
         }
         String method = req.method() == null || req.method().isBlank() ? "GET" : req.method();
         return ApiResponse.success(client.request(method, req.path(), req.body()), "Sent");
+    }
+
+    // ── Dispatching one of OUR orders ────────────────────────────────────────
+    // Separate from the /orders endpoints above, which take a hand-written body and know nothing
+    // about our orders. These two take an order id and build the payload from it, which is the
+    // path a paid order actually travels.
+
+    /**
+     * Shows exactly what would be sent for one of our orders, and sends nothing.
+     *
+     * <p>This exists because the costly errors in a delivery payload do not announce themselves. A
+     * transposed coordinate is still a valid coordinate; an origin and destination the wrong way
+     * round is still a well-formed job. Nothing rejects either, and the first report is a courier at
+     * the wrong address. Reading the real payload for a real order costs nothing and catches both.
+     */
+    @GetMapping("/dispatch/{orderId}/preview")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:read')")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.quiqup.service.QuiqupDispatchService.DispatchPreview>>
+            previewDispatch(@PathVariable java.util.UUID orderId) {
+        return ApiResponse.success(dispatchService.preview(orderId), "Dispatch preview");
+    }
+
+    /**
+     * Dispatches exactly one of our orders, on demand.
+     *
+     * <p>Deliberately independent of {@code quiqup.dispatch.enabled}. That flag is all-or-nothing:
+     * switching it on starts dispatching every qualifying paid order, which is not a thing anyone
+     * should have to do to test one. This dispatches the order named in the URL and nothing else,
+     * so a first live delivery can be a chosen order rather than whichever customer happens to
+     * check out next.
+     *
+     * <p>Idempotent for the same reason the automatic path is: an order that already carries a
+     * Quiqup id is left alone, and the claim means two admins pressing this at once produce one job.
+     */
+    @PostMapping("/dispatch/{orderId}")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:create')")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> dispatchOrder(
+            @PathVariable java.util.UUID orderId) {
+        String outcome = dispatchService.dispatch(orderId);
+        return ApiResponse.success(java.util.Map.of("orderId", orderId.toString(), "outcome", outcome),
+                "Dispatch attempted");
     }
 
     // ── received webhooks ───────────────────────────────────────────────────────

@@ -234,6 +234,45 @@ public class QuiqupDispatchService {
     }
 
     /**
+     * What would be sent for this order, without sending it.
+     *
+     * <p>The point of a dry run is that the expensive mistakes in this payload are the ones that
+     * look fine. A transposed coordinate is a valid coordinate, a swapped origin and destination is
+     * a well-formed job, and neither produces an error anywhere — the first report is a courier at
+     * the wrong door. Being able to read the exact payload for a REAL order, before any of it
+     * reaches a carrier, is the only cheap way to catch those.
+     *
+     * <p>Runs every eligibility check the real dispatch runs, so a refusal here is the refusal you
+     * would get, not an approximation of it.
+     */
+    public DispatchPreview preview(UUID orderId) {
+        Snapshot snap = txTemplate.execute(status -> loadSnapshot(orderId));
+        if (snap == null) {
+            return new DispatchPreview(false, "Order not found", null, null);
+        }
+        if (snap.quiqupOrderId != null && !snap.quiqupOrderId.isBlank()) {
+            return new DispatchPreview(false, "Already dispatched", null, snap.quiqupOrderId);
+        }
+        String refusal = refuseReason(snap);
+        if (refusal != null) {
+            return new DispatchPreview(false, refusal, null, null);
+        }
+        return new DispatchPreview(true, null,
+                mapper.toCreatePayload(snap.order, snap.origin, snap.originPhone, snap.items), null);
+    }
+
+    /**
+     * @param dispatchable  whether this order would be sent
+     * @param reason        why not, when it would not
+     * @param payload       exactly what would be POSTed to Quiqup
+     * @param quiqupOrderId the existing job id, when the order has already been dispatched
+     */
+    public record DispatchPreview(boolean dispatchable, String reason,
+                                  com.fasterxml.jackson.databind.JsonNode payload,
+                                  String quiqupOrderId) {
+    }
+
+    /**
      * Tells Quiqup the parcel is packed and ready, which is what actually summons a courier.
      *
      * <p>Separate from {@link #dispatch} because it is the irreversible half: creating a job is a
