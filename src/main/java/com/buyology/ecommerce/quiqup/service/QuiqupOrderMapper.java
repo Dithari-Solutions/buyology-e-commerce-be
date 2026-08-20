@@ -68,7 +68,9 @@ public class QuiqupOrderMapper {
         root.put("payment_mode", "pre_paid");
         root.put("payment_amount", 0);
 
-        root.set("origin", originNode(origin, originContactPhone));
+        root.set("origin", originNode(origin, originContactPhone,
+                "Collect 1 parcel for Buyology order " + partnerOrderId(order)
+                        + ". Contents: " + contentsSummary(items)));
         root.set("destination", destinationNode(order));
         root.set("items", itemsNode(items));
         return root;
@@ -85,15 +87,16 @@ public class QuiqupOrderMapper {
         return "BUY-" + order.getId().toString().substring(0, 8).toUpperCase();
     }
 
-    private ObjectNode originNode(StoreLocation origin, String contactPhone) {
+    private ObjectNode originNode(StoreLocation origin, String contactPhone, String collectionNote) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("contact_name", blankToDash(origin.getBranchName()));
         node.put("contact_phone", blankToDash(contactPhone));
-        node.put("notes", "Collect the parcel for a Buyology online order.");
+        node.put("notes", collectionNote);
 
         ObjectNode address = objectMapper.createObjectNode();
         address.put("address1", blankToDash(origin.getAddress()));
         address.put("address2", blankToDash(origin.getCity()));
+        address.put("postcode", blankToDash(origin.getPostalCode()));
         address.set("coords", coords(objectMapper, origin.getLongitude(), origin.getLatitude()));
         address.put("country", blankToDash(origin.getCountry()));
         address.put("town", blankToDash(origin.getCity()));
@@ -113,6 +116,7 @@ public class QuiqupOrderMapper {
         ObjectNode address = objectMapper.createObjectNode();
         address.put("address1", blankToDash(order.getAddressLine1()));
         address.put("address2", blankToDash(order.getAddressLine2()));
+        address.put("postcode", blankToDash(order.getPostalCode()));
         address.set("coords", coords(objectMapper,
                 order.getDeliveryLongitude(), order.getDeliveryLatitude()));
         address.put("country", blankToDash(order.getCountry()));
@@ -122,31 +126,60 @@ public class QuiqupOrderMapper {
     }
 
     /**
-     * One parcel line per order item.
+     * ONE parcel for the whole order.
      *
-     * <p>Quiqup only need something a courier can count and recognise, so this carries the SKU
-     * rather than the product title: titles are translated per language and would describe the
-     * same parcel differently depending on who placed the order.
+     * <p>Quiqup's {@code items} array is the list of physical packages a courier must collect, not
+     * a list of what is inside them — their dashboard shows each entry as a numbered parcel with
+     * its own dimensions, alongside a separate and unrelated "Products" section. Emitting one entry
+     * per order line therefore tells them to expect that many packages: the courier arrives for
+     * three, the shop hands over one box, and the disagreement happens at the counter with the
+     * customer's parcel in the middle of it.
+     *
+     * <p>A single order is packed as a single parcel here, so that is what is declared. An order
+     * genuinely shipped as several boxes would need the packing step to tell us how many, which is
+     * information this service does not have and must not invent.
+     *
+     * <p>What is in the box goes in {@link #contentsSummary} on the notes instead, where it helps
+     * whoever hands the parcel over without being mistaken for a package count.
      */
     private ArrayNode itemsNode(List<OrderItem> items) {
         ArrayNode array = objectMapper.createArrayNode();
+        ObjectNode parcel = objectMapper.createObjectNode();
+        parcel.put("name", "Parcel");
+        parcel.put("quantity", 1);
+        array.add(parcel);
+        return array;
+    }
+
+    /**
+     * A short description of the contents, for the collection note.
+     *
+     * <p>Carries SKUs rather than product titles: titles are translated per language and would
+     * describe the same parcel differently depending on who placed the order, which is exactly
+     * wrong for something a warehouse reads while finding it.
+     */
+    static String contentsSummary(List<OrderItem> items) {
         if (items == null || items.isEmpty()) {
-            ObjectNode fallback = objectMapper.createObjectNode();
-            fallback.put("name", "Parcel");
-            fallback.put("quantity", 1);
-            array.add(fallback);
-            return array;
+            return "1 parcel";
         }
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
         for (OrderItem item : items) {
-            ObjectNode node = objectMapper.createObjectNode();
+            if (shown == 3) {
+                sb.append(", +").append(items.size() - shown).append(" more");
+                break;
+            }
             String sku = item.getVariantSku() != null && !item.getVariantSku().isBlank()
                     ? item.getVariantSku()
                     : item.getProductSku();
-            node.put("name", sku == null || sku.isBlank() ? "Parcel" : sku);
-            node.put("quantity", item.getQuantity() == null ? 1 : item.getQuantity());
-            array.add(node);
+            if (sku == null || sku.isBlank()) continue;
+            if (shown > 0) sb.append(", ");
+            sb.append(sku);
+            int qty = item.getQuantity() == null ? 1 : item.getQuantity();
+            if (qty > 1) sb.append(" x").append(qty);
+            shown++;
         }
-        return array;
+        return sb.length() == 0 ? "1 parcel" : sb.toString();
     }
 
     private static String recipientName(Order order) {

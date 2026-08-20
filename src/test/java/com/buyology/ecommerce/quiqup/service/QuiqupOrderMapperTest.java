@@ -137,26 +137,59 @@ class QuiqupOrderMapperTest {
     }
 
     @Test
-    void oneParcelLinePerItem() {
+    void declaresExactlyOneParcelHoweverManyLinesTheOrderHas() {
+        // items[] is the list of PHYSICAL PACKAGES a courier must collect — confirmed against a real
+        // staging job, whose dashboard showed one entry becoming one numbered parcel with its own
+        // dimensions, next to a separate and empty "Products" section. One entry per order line
+        // would send a courier to collect three packages from a shop holding one box.
         ObjectNode payload = mapper.toCreatePayload(order(), origin(), "+971500000001",
-                List.of(item("SKU-A", 2), item("SKU-B", 1)));
+                List.of(item("SKU-A", 2), item("SKU-B", 1), item("SKU-C", 4)));
 
         var items = payload.get("items");
-        assertEquals(2, items.size());
-        assertEquals("SKU-A", items.get(0).get("name").asText());
-        assertEquals(2, items.get(0).get("quantity").asInt());
-        assertEquals("SKU-B", items.get(1).get("name").asText());
+        assertEquals(1, items.size(), "a three-line order is still one box");
+        assertEquals(1, items.get(0).get("quantity").asInt());
     }
 
     @Test
-    void stillDescribesAParcelWhenItemsAreMissing() {
+    void stillDeclaresAParcelWhenItemsAreMissing() {
         // Quiqup reject a job with no items, and an order with no readable items is still a real
         // parcel sitting on a shelf.
         ObjectNode payload = mapper.toCreatePayload(order(), origin(), "+971500000001", List.of());
 
         assertEquals(1, payload.get("items").size());
-        assertEquals("Parcel", payload.get("items").get(0).get("name").asText());
         assertEquals(1, payload.get("items").get(0).get("quantity").asInt());
+    }
+
+    @Test
+    void whatIsInTheBoxGoesOnTheCollectionNote() {
+        // The contents still have to reach whoever hands the parcel over — just not as a package
+        // count. SKUs rather than titles: a title is translated per language and would describe the
+        // same parcel differently depending on who placed the order.
+        ObjectNode payload = mapper.toCreatePayload(order(), origin(), "+971500000001",
+                List.of(item("SKU-A", 2), item("SKU-B", 1)));
+
+        String note = payload.get("origin").get("notes").asText();
+        assertTrue(note.contains("SKU-A"), note);
+        assertTrue(note.contains("x2"), "quantities matter to whoever is packing: " + note);
+        assertTrue(note.contains("SKU-B"), note);
+        assertTrue(note.contains("BUY-3F2A1B4C"), "the note must name the order: " + note);
+    }
+
+    @Test
+    void theCollectionNoteStaysShortOnALargeOrder() {
+        var many = List.of(item("A", 1), item("B", 1), item("C", 1), item("D", 1), item("E", 1));
+        assertTrue(QuiqupOrderMapper.contentsSummary(many).contains("+2 more"),
+                QuiqupOrderMapper.contentsSummary(many));
+    }
+
+    @Test
+    void sendsAPostcodeFieldEvenWhenWeHaveNone() {
+        // The staging dashboard showed "Post Code: N/A" on both ends because we never sent the
+        // field at all. It is present now, and absent-but-present beats missing.
+        ObjectNode payload = mapper.toCreatePayload(order(), origin(), "+971500000001", List.of());
+
+        assertTrue(payload.get("origin").get("address").has("postcode"));
+        assertTrue(payload.get("destination").get("address").has("postcode"));
     }
 
     @Test
