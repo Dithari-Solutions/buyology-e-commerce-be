@@ -1708,6 +1708,69 @@ public class OrderService {
     }
 
     /**
+     * Applies a status a third-party delivery partner reported, under the same guards the courier
+     * flow uses.
+     *
+     * <p>A sibling of {@link #syncStatusFromCourier} rather than a caller of it: that method speaks
+     * our own courier service's vocabulary and lands on the deprecated {@code COURIER_ASSIGNED} /
+     * {@code PICKED_UP} statuses kept for historical data. A partner integration should map onto
+     * the current ones, so it passes the target status in already resolved and this method only
+     * decides whether the move is allowed.
+     *
+     * <p>The guards matter more here than for our own couriers, because webhook deliveries arrive
+     * over the public internet, are retried by the sender, and carry no ordering promise: the same
+     * event can land twice, and a later one can overtake an earlier one. Terminal states are never
+     * moved out of, and nothing may move an order backwards.
+     *
+     * @param orderId the order the partner is delivering
+     * @param target  the status their update implies, already mapped to our vocabulary
+     * @param note    what to record on the order's tracking history
+     * @return true when the order actually moved
+     */
+    @Transactional
+    public boolean syncStatusFromDeliveryPartner(UUID orderId, OrderStatus target, String note) {
+        if (target == null) {
+            return false;
+        }
+        Order order = orderRepo.findById(orderId).orElse(null);
+        if (order == null) {
+            return false;
+        }
+        if (order.getStatus() == target) {
+            return false;
+        }
+        if (order.getStatus() == OrderStatus.DELIVERED
+                || order.getStatus() == OrderStatus.CANCELLED
+                || order.getStatus() == OrderStatus.FAILED) {
+            log.warn("[QUIQUP] Ignoring {} for order {} — already terminal at {}",
+                    target, orderId, order.getStatus());
+            return false;
+        }
+
+        boolean terminalOutcome = target == OrderStatus.FAILED || target == OrderStatus.CANCELLED;
+        if (!terminalOutcome && courierStatusRank(target) <= courierStatusRank(order.getStatus())) {
+            log.warn("[QUIQUP] Ignoring out-of-order status for order {}: {} -> {}",
+                    orderId, order.getStatus(), target);
+            return false;
+        }
+
+        applyMilestoneTimestamp(order, target);
+        order.setStatus(target);
+        appendTrackingEvent(order, target, note, null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+        Order saved = orderRepo.save(order);
+        log.info("[QUIQUP] Order {} moved to {} by the delivery partner", orderId, target);
+
+        // Same shape as the courier flow: tell the customer only once the move is committed, so a
+        // rolled-back transaction cannot leave them holding a notification for a delivery that did
+        // not happen.
+        runAfterCommit(() -> {
+            broadcastStatusUpdate(saved, null);
+            notifyCustomerStatus(saved);
+        });
+        return true;
+    }
+
+    /**
      * Broadcasts a real-time status update to the customer via WebSocket.
      * Topic: /topic/orders/{orderId}/status
      */

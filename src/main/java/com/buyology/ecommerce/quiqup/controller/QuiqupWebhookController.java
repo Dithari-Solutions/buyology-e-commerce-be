@@ -3,6 +3,7 @@ package com.buyology.ecommerce.quiqup.controller;
 import com.buyology.ecommerce.quiqup.config.QuiqupProperties;
 import com.buyology.ecommerce.quiqup.domain.QuiqupTestEvent;
 import com.buyology.ecommerce.quiqup.repository.QuiqupTestEventRepository;
+import com.buyology.ecommerce.quiqup.service.QuiqupDeliveryStatusService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,12 +40,15 @@ public class QuiqupWebhookController {
     private final QuiqupProperties props;
     private final QuiqupTestEventRepository eventRepository;
     private final ObjectMapper objectMapper;
+    private final QuiqupDeliveryStatusService deliveryStatusService;
 
     public QuiqupWebhookController(QuiqupProperties props, QuiqupTestEventRepository eventRepository,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   QuiqupDeliveryStatusService deliveryStatusService) {
         this.props = props;
         this.eventRepository = eventRepository;
         this.objectMapper = objectMapper;
+        this.deliveryStatusService = deliveryStatusService;
     }
 
     @PostMapping("/webhook")
@@ -105,6 +109,20 @@ public class QuiqupWebhookController {
         // which is false for null. So switching enforcement on while the secret was missing accepted
         // every forged event with a 200 while the config page reported enforcement as on: the one
         // configuration where an operator is most certain they are protected.
+        // Applying the event comes after storing and after the signature decision, never before
+        // either: an unverified event must not be able to move a customer's order, and an event that
+        // moved an order must be in the log that explains why it moved.
+        if (root != null && !(props.isWebhookRequireSignature() && !Boolean.TRUE.equals(hmacValid))) {
+            try {
+                deliveryStatusService.apply(root, eventType);
+            } catch (Exception e) {
+                // A delivery we could not apply is still a delivery Quiqup sent. Answering non-200
+                // would make them retry it, and a retry cannot fix a mapping bug — so this is
+                // recorded and swallowed, and the stored event is the evidence.
+                log.error("[QUIQUP-WEBHOOK] failed to apply event={}: {}", eventType, e.getMessage(), e);
+            }
+        }
+
         if (props.isWebhookRequireSignature() && !Boolean.TRUE.equals(hmacValid)) {
             log.warn("[QUIQUP-WEBHOOK] rejected event={} — signature {} and "
                     + "quiqup.webhook-require-signature is on", eventType,

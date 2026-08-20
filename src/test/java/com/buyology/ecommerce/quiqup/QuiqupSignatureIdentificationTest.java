@@ -39,7 +39,7 @@ class QuiqupSignatureIdentificationTest {
     private QuiqupWebhookController controller() {
         props.setWebhookSecret(SECRET);
         return new QuiqupWebhookController(
-                props, mock(QuiqupTestEventRepository.class), new ObjectMapper());
+                props, mock(QuiqupTestEventRepository.class), new ObjectMapper(), inertDispatch());
     }
 
     /** {@code identifySignature} is private — invoked reflectively so production stays unexported. */
@@ -130,10 +130,22 @@ class QuiqupSignatureIdentificationTest {
         props.setWebhookSecret("");
 
         QuiqupWebhookController noSecret = new QuiqupWebhookController(
-                props, mock(QuiqupTestEventRepository.class), new ObjectMapper());
+                props, mock(QuiqupTestEventRepository.class), new ObjectMapper(), inertDispatch());
         Object match = ReflectionTestUtils.invokeMethod(
                 noSecret, "identifySignature", webhook("X-Quiqup-Signature", signature), BODY);
 
         assertNull(match, "with no secret there is nothing to verify against");
+    }
+
+    /**
+     * A delivery-status service that does nothing.
+     *
+     * <p>These tests are about signature verification, not about orders. Dispatch is off by
+     * default, and {@code apply} returns before touching anything when it is — so the null
+     * collaborators are unreachable rather than merely unused.
+     */
+    private static com.buyology.ecommerce.quiqup.service.QuiqupDeliveryStatusService inertDispatch() {
+        return new com.buyology.ecommerce.quiqup.service.QuiqupDeliveryStatusService(
+                new QuiqupProperties(), null, null);
     }
 }

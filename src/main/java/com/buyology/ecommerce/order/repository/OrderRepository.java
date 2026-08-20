@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import java.time.Instant;
 public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Page<Order> findAllByUserId(UUID userId, Pageable pageable);
@@ -54,4 +55,42 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Page<Order> findBySupplierId(@Param("supplierId") UUID supplierId,
                                  @Param("status") OrderStatus status,
                                  Pageable pageable);
+
+    // ── Quiqup delivery dispatch ─────────────────────────────────────────────
+
+    /**
+     * Paid orders Quiqup never accepted: no quiqup_order_id, paid long enough ago that an in-flight
+     * attempt has had its chance, and recent enough to still be worth delivering.
+     *
+     * <p>The horizon matters. Without it a permanently unmappable order — one spanning two stores,
+     * say — is retried every five minutes forever, and the log noise buries the orders a retry
+     * could actually save.
+     */
+    @Query("""
+            SELECT o FROM Order o
+            WHERE o.quiqupOrderId IS NULL
+              AND o.status IN (com.buyology.ecommerce.order.domain.enums.OrderStatus.PAID,
+                               com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING)
+              AND o.deliveryMethod = com.buyology.ecommerce.order.domain.enums.DeliveryMethod.REGULAR
+              AND o.createdAt < :olderThan
+              AND o.createdAt > :horizon
+            ORDER BY o.createdAt ASC
+            """)
+    List<Order> findUndispatchedQuiqupOrders(@Param("olderThan") Instant olderThan,
+                                             @Param("horizon") Instant horizon,
+                                             org.springframework.data.domain.Pageable pageable);
+
+    /** Resolve an inbound Quiqup webhook back to the order it concerns. */
+    Optional<Order> findByQuiqupOrderId(String quiqupOrderId);
+
+    /**
+     * Orders whose id starts with the given lowercase hex prefix.
+     *
+     * <p>Only for resolving the "BUY-XXXXXXXX" reference we hand Quiqup, which carries the first
+     * eight characters of the order id. Native because the cast is Postgres-specific, and returning
+     * a list rather than one row on purpose: the caller treats an ambiguous prefix as no match
+     * instead of moving whichever order happened to sort first.
+     */
+    @Query(value = "SELECT * FROM orders WHERE CAST(id AS text) LIKE :prefix || '%'", nativeQuery = true)
+    List<Order> findByIdPrefix(@Param("prefix") String prefix);
 }

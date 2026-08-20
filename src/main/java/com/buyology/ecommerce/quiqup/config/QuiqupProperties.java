@@ -31,6 +31,14 @@ public class QuiqupProperties {
      */
     @jakarta.annotation.PostConstruct
     void validate() {
+        if (enabled && dispatch.isEnabled() && !isStagingBase() && !allowProductionWrites) {
+            throw new IllegalStateException(
+                    "quiqup.dispatch.enabled is true against a non-staging base URL (" + baseUrl
+                    + ") while quiqup.allow-production-writes is false. Every dispatch is a write, "
+                    + "so dispatch would fail on every order and paid orders would silently pile up "
+                    + "undelivered. Set QUIQUP_ALLOW_PRODUCTION_WRITES=true to dispatch for real, or "
+                    + "QUIQUP_DISPATCH_ENABLED=false to leave dispatch off.");
+        }
         if (enabled && webhookRequireSignature && (webhookSecret == null || webhookSecret.isBlank())) {
             throw new IllegalStateException(
                     "quiqup.webhook-require-signature is true but quiqup.webhook-secret is blank. "
@@ -114,6 +122,67 @@ public class QuiqupProperties {
 
     private final Oauth oauth = new Oauth();
     private final Paths paths = new Paths();
+    private final Dispatch dispatch = new Dispatch();
+
+    /**
+     * Automatic dispatch of paid orders to Quiqup.
+     *
+     * <p>Separate from {@link QuiqupProperties#enabled} on purpose. The module being on means an
+     * admin may drive the API by hand; dispatch being on means paid customer orders leave for a
+     * real courier without anyone watching. Those are different decisions and want different
+     * switches — turning the module on to check connectivity should not start dispatching.
+     */
+    public static class Dispatch {
+
+        /** Master switch for automatic dispatch. Off by default; the module ships inert. */
+        private boolean enabled = false;
+
+        /**
+         * Quiqup service level for a standard delivery. "partner_next_day" matches the ecommerce
+         * preset; "partner_4hr" is the on-demand service. Configurable because it is a commercial
+         * choice, not a technical one.
+         */
+        private String kind = "partner_next_day";
+
+        /**
+         * Whether to mark the job ready for collection immediately after creating it.
+         *
+         * <p>Off by default, and the default is the safe one: ready-for-collection is what actually
+         * sends a courier to the shop. Leaving it off means jobs queue at Quiqup for a human to
+         * release once the parcel is physically packed, which is the correct sequence for a
+         * warehouse that has not yet picked the items.
+         */
+        private boolean autoReadyForCollection = false;
+
+        /** How long a paid order may go undispatched before the retry job picks it up, minutes. */
+        private int retryAfterMinutes = 10;
+
+        /** Give up after this many attempts, so a permanently unmappable order stops being retried. */
+        private int maxAttempts = 5;
+
+        /** Orders paid longer ago than this are never auto-dispatched — see the retry job. */
+        private int retryHorizonHours = 48;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getKind() { return kind; }
+        public void setKind(String kind) { this.kind = kind; }
+        public boolean isAutoReadyForCollection() { return autoReadyForCollection; }
+        public void setAutoReadyForCollection(boolean v) { this.autoReadyForCollection = v; }
+        public int getRetryAfterMinutes() { return retryAfterMinutes; }
+        public void setRetryAfterMinutes(int v) { this.retryAfterMinutes = v; }
+        public int getMaxAttempts() { return maxAttempts; }
+        public void setMaxAttempts(int v) { this.maxAttempts = v; }
+        public int getRetryHorizonHours() { return retryHorizonHours; }
+        public void setRetryHorizonHours(int v) { this.retryHorizonHours = v; }
+    }
+
+    public Dispatch getDispatch() { return dispatch; }
+
+    /** Whether {@link #baseUrl} points at Quiqup staging. Mirrors the client's own check. */
+    public boolean isStagingBase() {
+        return baseUrl != null && baseUrl.toLowerCase(java.util.Locale.ROOT).contains("staging");
+    }
 
     /** OAuth settings (used only when authMode=oauth). */
     public static class Oauth {

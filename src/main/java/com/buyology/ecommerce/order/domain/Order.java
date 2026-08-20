@@ -247,6 +247,35 @@ public class Order {
     @Column(name = "erp_sync_error", length = 1000)
     private String erpSyncError;
 
+    // ── Quiqup delivery ───────────────────────────────────────────────────────
+    // Mirrors the ERP quartet above, and for the same reason: a dispatch that already carries a
+    // Quiqup job id is skipped on retry, and the admin page can show per-order dispatch state.
+    //
+    // Deliberately NOT reusing deliveryOrderId — that column is a UUID and belongs to our own
+    // courier service, whereas Quiqup issues its own opaque string id. Overloading it would make
+    // "which carrier holds this parcel" unanswerable.
+
+    /** Quiqup's own order id, once a job has been created for this order. Null = never dispatched. */
+    @Column(name = "quiqup_order_id", length = 100)
+    private String quiqupOrderId;
+
+    /** The last delivery status Quiqup reported, verbatim, for support and for debugging mappings. */
+    @Column(name = "quiqup_status", length = 60)
+    private String quiqupStatus;
+
+    @Column(name = "quiqup_dispatched_at")
+    private Instant quiqupDispatchedAt;
+
+    /**
+     * Why the last dispatch attempt failed, or null after a success.
+     *
+     * <p>A failure never changes the order's status: the customer has paid and the order is still
+     * valid, it simply has no courier yet. The retry job reads this column, and an order whose
+     * dispatch keeps failing is visible to an admin rather than silently stuck.
+     */
+    @Column(name = "quiqup_dispatch_error", length = 1000)
+    private String quiqupDispatchError;
+
     // ── Relations ─────────────────────────────────────────────────────────────
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -438,6 +467,18 @@ public class Order {
 
     public Instant getErpSyncedAt() { return erpSyncedAt; }
     public void setErpSyncedAt(Instant erpSyncedAt) { this.erpSyncedAt = erpSyncedAt; }
+
+    public String getQuiqupOrderId() { return quiqupOrderId; }
+    public void setQuiqupOrderId(String quiqupOrderId) { this.quiqupOrderId = quiqupOrderId; }
+
+    public String getQuiqupStatus() { return quiqupStatus; }
+    public void setQuiqupStatus(String quiqupStatus) { this.quiqupStatus = quiqupStatus; }
+
+    public Instant getQuiqupDispatchedAt() { return quiqupDispatchedAt; }
+    public void setQuiqupDispatchedAt(Instant quiqupDispatchedAt) { this.quiqupDispatchedAt = quiqupDispatchedAt; }
+
+    public String getQuiqupDispatchError() { return quiqupDispatchError; }
+    public void setQuiqupDispatchError(String quiqupDispatchError) { this.quiqupDispatchError = quiqupDispatchError; }
 
     public String getErpSyncError() { return erpSyncError; }
     public void setErpSyncError(String erpSyncError) { this.erpSyncError = erpSyncError; }

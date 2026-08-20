@@ -46,7 +46,7 @@ class QuiqupWebhookSignatureTest {
         props.setEnabled(true);
         props.setWebhookSecret(SECRET);
         return new QuiqupWebhookController(
-                props, mock(QuiqupTestEventRepository.class), new ObjectMapper());
+                props, mock(QuiqupTestEventRepository.class), new ObjectMapper(), inertDispatch());
     }
 
     /** Exactly their PHP: hash_hmac('sha256', $timestamp . '.' . $rawBody, $secret). */
@@ -126,7 +126,7 @@ class QuiqupWebhookSignatureTest {
         props.setWebhookSecret("");
 
         QuiqupWebhookController noSecret = new QuiqupWebhookController(
-                props, mock(QuiqupTestEventRepository.class), new ObjectMapper());
+                props, mock(QuiqupTestEventRepository.class), new ObjectMapper(), inertDispatch());
         Boolean result = noSecret.verifySignature(delivery(body, TIMESTAMP, signature), body, BODY);
 
         assertNull(result, "'not configured' must stay distinguishable from 'did not verify'");
@@ -174,7 +174,7 @@ class QuiqupWebhookSignatureTest {
 
         QuiqupTestEventRepository repository = mock(QuiqupTestEventRepository.class);
         QuiqupWebhookController controller =
-                new QuiqupWebhookController(props, repository, new ObjectMapper());
+                new QuiqupWebhookController(props, repository, new ObjectMapper(), inertDispatch());
 
         var response = controller.receive(delivery(body, TIMESTAMP, wrongSignature));
 
@@ -194,7 +194,7 @@ class QuiqupWebhookSignatureTest {
 
         QuiqupTestEventRepository repository = mock(QuiqupTestEventRepository.class);
         QuiqupWebhookController controller =
-                new QuiqupWebhookController(props, repository, new ObjectMapper());
+                new QuiqupWebhookController(props, repository, new ObjectMapper(), inertDispatch());
 
         var response = controller.receive(
                 delivery(body, TIMESTAMP, quiqupSignature(SECRET, TIMESTAMP, body)));
@@ -213,5 +213,17 @@ class QuiqupWebhookSignatureTest {
             offset += p.length;
         }
         return out;
+    }
+
+    /**
+     * A delivery-status service that does nothing.
+     *
+     * <p>These tests are about signature verification, not about orders. Dispatch is off by
+     * default, and {@code apply} returns before touching anything when it is — so the null
+     * collaborators are unreachable rather than merely unused.
+     */
+    private static com.buyology.ecommerce.quiqup.service.QuiqupDeliveryStatusService inertDispatch() {
+        return new com.buyology.ecommerce.quiqup.service.QuiqupDeliveryStatusService(
+                new QuiqupProperties(), null, null);
     }
 }
