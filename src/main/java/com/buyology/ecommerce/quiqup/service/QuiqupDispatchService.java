@@ -95,6 +95,42 @@ public class QuiqupDispatchService {
         return props.isEnabled() && props.getDispatch().isEnabled();
     }
 
+    /**
+     * Says once, at startup, what dispatch is about to do — and shouts if that is probably not what
+     * anyone intended.
+     *
+     * <p>The dangerous configuration is dispatch ON against Quiqup's STAGING estate. It passes every
+     * guard: the base URL is staging so the production-write check is satisfied, jobs are accepted,
+     * ids come back, and each order records a clean dispatch with no error. No courier is ever
+     * assigned, because the job only exists in a test environment. The order looks healthy on our
+     * side and the parcel never moves — silent, and invisible until a customer asks where it is.
+     *
+     * <p>Not a startup failure, because that same combination is exactly right on a staging
+     * deployment. It cannot be told apart from configuration alone, so this is as loud as it can
+     * honestly be.
+     */
+    @jakarta.annotation.PostConstruct
+    void announce() {
+        if (!enabled()) {
+            log.info("[QUIQUP] Automatic dispatch is OFF (quiqup.enabled={}, quiqup.dispatch.enabled={}).",
+                    props.isEnabled(), props.getDispatch().isEnabled());
+            return;
+        }
+        if (props.isStagingBase()) {
+            log.warn("[QUIQUP] ******************************************************************");
+            log.warn("[QUIQUP] DISPATCH IS ON AND POINTED AT QUIQUP STAGING ({}).", props.getBaseUrl());
+            log.warn("[QUIQUP] Real paid orders will be sent to a TEST environment. They will be");
+            log.warn("[QUIQUP] accepted, they will record a Quiqup id, and NO COURIER WILL COME.");
+            log.warn("[QUIQUP] Correct for a staging deployment. On production, set");
+            log.warn("[QUIQUP] QUIQUP_BASE_URL to the live estate or QUIQUP_DISPATCH_ENABLED=false.");
+            log.warn("[QUIQUP] ******************************************************************");
+            return;
+        }
+        log.warn("[QUIQUP] Automatic dispatch is ON against {} — paid orders will be sent to REAL "
+                + "couriers (autoReadyForCollection={}).", props.getBaseUrl(),
+                props.getDispatch().isAutoReadyForCollection());
+    }
+
     // =========================================================================
     // Entry points
     // =========================================================================
