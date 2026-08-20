@@ -100,6 +100,18 @@ public class DeliveryFeePolicy {
      * 30-minute radius resolves to EXPRESS. An order that does qualify is recalculated at checkout,
      * where the customer sees the final total before paying.
      */
+    /**
+     * The 30-minute delivery rate, for quoting it alongside the standard rate.
+     *
+     * <p>Free delivery still applies above the threshold, so this is what an order UNDER it pays;
+     * callers that quote it must respect {@link #qualifiesForFreeDelivery} exactly as
+     * {@link #feeAed} does. Exposed because the storefront has to be able to SHOW the 30-minute
+     * fee: it was previously derivable only by charging it.
+     */
+    public BigDecimal expressFeeAed() {
+        return expressFeeAed;
+    }
+
     public BigDecimal cartPreviewFeeAed(String countryCode, BigDecimal subtotalAed) {
         return feeAed(DeliveryMethod.REGULAR, countryCode, subtotalAed);
     }

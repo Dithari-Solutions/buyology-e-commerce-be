@@ -1856,6 +1856,20 @@ public class ProductService {
                     ? feeAed
                     : currencyExchangeService.convert(feeAed, "AED", ccy));
         }
+
+        // When this product IS within a store's 30-minute radius, the badge promising 30-minute
+        // delivery and the fee beside it used to disagree: the badge offered EXPRESS while the fee
+        // was the REGULAR rate, and checkout then charged the express rate. Quote the express fee
+        // too, so the number shown next to the badge is the number that will be charged. Free
+        // delivery applies to express exactly as it does to standard, hence the same zero check.
+        if (Boolean.TRUE.equals(resp.getExpressDelivery())) {
+            BigDecimal expressAed = deliveryFeePolicy.qualifiesForFreeDelivery(priceAed)
+                    ? BigDecimal.ZERO
+                    : deliveryFeePolicy.expressFeeAed();
+            resp.setExpressDeliveryFee("AED".equalsIgnoreCase(ccy)
+                    ? expressAed
+                    : currencyExchangeService.convert(expressAed, "AED", ccy));
+        }
     }
 
     /**

@@ -578,6 +578,34 @@ public class CartService {
             itemResponses.add(buildCartItemResponse(item, nearbyStoreIds));
         }
         response.setItems(itemResponses);
+
+        // 30-minute delivery is priced differently from standard, so a cart that can have it must
+        // say what it costs. The cart already knew this — every item carries quickDelivery — but the
+        // delivery figure above is the STANDARD rate regardless, so a customer who went on to
+        // choose 30-minute delivery saw one number in the cart and was charged another at checkout.
+        // Quoting both leaves the standard field untouched for clients that only read that.
+        boolean expressAvailable = itemResponses.stream()
+                .anyMatch(CartItemResponse::isQuickDelivery);
+        response.setExpressAvailable(expressAvailable);
+        if (expressAvailable) {
+            try {
+                BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
+                String ccy = cart.getCurrency() != null ? cart.getCurrency() : POLICY_BASE_CURRENCY;
+                BigDecimal subtotalAed = POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
+                        ? subtotal
+                        : currencyExchangeService.convert(subtotal, ccy, POLICY_BASE_CURRENCY);
+                BigDecimal expressAed = deliveryFeePolicy.qualifiesForFreeDelivery(subtotalAed)
+                        ? BigDecimal.ZERO
+                        : deliveryFeePolicy.expressFeeAed();
+                response.setExpressDeliveryFee(
+                        expressAed.signum() == 0 || POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
+                                ? expressAed
+                                : currencyExchangeService.convert(expressAed, POLICY_BASE_CURRENCY, ccy));
+            } catch (Exception ignored) {
+                // FX unavailable — leave the express fee null, same contract as the standard fee.
+            }
+        }
+
         return response;
     }
 

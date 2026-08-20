@@ -22,6 +22,19 @@ public class CartResponse {
     private BigDecimal deliveryFee;
     private Boolean qualifiesForFreeShipping;
 
+    /**
+     * Whether any item in the cart is held by a store within the customer's 30-minute radius, i.e.
+     * whether 30-minute delivery can be chosen at checkout at all.
+     */
+    private Boolean expressAvailable;
+
+    /**
+     * Fee for 30-minute delivery, in {@link #currency}. Present only when
+     * {@link #expressAvailable} is true. {@link #deliveryFee} remains the standard rate, so the two
+     * can be shown side by side and a client that ignores this field is unaffected.
+     */
+    private BigDecimal expressDeliveryFee;
+
     public CartResponse() {
     }
 
@@ -57,6 +70,12 @@ public class CartResponse {
 
     public BigDecimal getDeliveryFee() { return deliveryFee; }
     public void setDeliveryFee(BigDecimal deliveryFee) { this.deliveryFee = deliveryFee; }
+
+    public Boolean getExpressAvailable() { return expressAvailable; }
+    public void setExpressAvailable(Boolean expressAvailable) { this.expressAvailable = expressAvailable; }
+
+    public BigDecimal getExpressDeliveryFee() { return expressDeliveryFee; }
+    public void setExpressDeliveryFee(BigDecimal expressDeliveryFee) { this.expressDeliveryFee = expressDeliveryFee; }
 
     public Boolean getQualifiesForFreeShipping() { return qualifiesForFreeShipping; }
     public void setQualifiesForFreeShipping(Boolean qualifiesForFreeShipping) { this.qualifiesForFreeShipping = qualifiesForFreeShipping; }

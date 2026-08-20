@@ -96,6 +96,15 @@ public class ProductResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigDecimal deliveryFee;
 
+    /**
+     * Fee for 30-minute delivery, in {@link #currency}. Present only when {@link #expressDelivery}
+     * is true, i.e. when this product is actually within a stocking store's 30-minute radius for
+     * the supplied location. {@link #deliveryFee} stays the standard rate, so a client that ignores
+     * this field behaves exactly as before.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal expressDeliveryFee;
+
     /** Average review rating (0–5) computed from approved reviews. 0 when no reviews. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigDecimal averageRating;
@@ -370,6 +379,9 @@ public class ProductResponse {
     public void setExpressDelivery(Boolean expressDelivery) { this.expressDelivery = expressDelivery; }
     public Boolean getFreeDelivery() { return freeDelivery; }
     public void setFreeDelivery(Boolean freeDelivery) { this.freeDelivery = freeDelivery; }
+    public BigDecimal getExpressDeliveryFee() { return expressDeliveryFee; }
+    public void setExpressDeliveryFee(BigDecimal expressDeliveryFee) { this.expressDeliveryFee = expressDeliveryFee; }
+
     public BigDecimal getDeliveryFee() { return deliveryFee; }
     public void setDeliveryFee(BigDecimal deliveryFee) { this.deliveryFee = deliveryFee; }
     public BigDecimal getAverageRating() { return averageRating; }

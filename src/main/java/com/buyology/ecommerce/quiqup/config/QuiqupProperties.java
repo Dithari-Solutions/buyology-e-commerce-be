@@ -20,6 +20,27 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "quiqup")
 public class QuiqupProperties {
 
+    /**
+     * Refuse to start with signature enforcement switched on and no secret to enforce with.
+     *
+     * <p>That combination used to be the most dangerous configuration available: verification
+     * cannot run without a secret, so every delivery — forged ones included — was accepted, while
+     * the admin config page reported enforcement as on. Failing at startup makes the
+     * misconfiguration loud, in the same spirit as the JWT-secret and CORS-allowlist checks. Only
+     * checked when the module is enabled, so a deployment with Quiqup switched off is unaffected.
+     */
+    @jakarta.annotation.PostConstruct
+    void validate() {
+        if (enabled && webhookRequireSignature && (webhookSecret == null || webhookSecret.isBlank())) {
+            throw new IllegalStateException(
+                    "quiqup.webhook-require-signature is true but quiqup.webhook-secret is blank. "
+                    + "Signature verification cannot run without the secret, so enforcement would "
+                    + "silently accept every webhook. Set QUIQUP_WEBHOOK_SECRET (from GET "
+                    + "/subscriptions/{id}/secret on the subscription for THIS environment), or set "
+                    + "QUIQUP_WEBHOOK_REQUIRE_SIGNATURE=false until you have it.");
+        }
+    }
+
     /** Master switch. When false the module is inert (no outbound calls, webhooks ignored). */
     private boolean enabled = false;
 

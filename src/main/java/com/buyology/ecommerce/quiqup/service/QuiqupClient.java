@@ -89,7 +89,12 @@ public class QuiqupClient {
         log.info("[QUIQUP] {} {}", method, path);
 
         // Every caller — the admin endpoints and the raw tester alike — funnels through here, so
-        // this is the one place the guard has to hold.
+        // this is the one place the guards have to hold. Order matters: the path is checked first,
+        // because guardProductionWrite reasons about the CONFIGURED base URL and is meaningless
+        // until the path is known to be relative to it.
+        QuiqupApiResult offBase = guardRelativePath(path);
+        if (offBase != null) return offBase;
+
         QuiqupApiResult blocked = guardProductionWrite(method);
         if (blocked != null) return blocked;
 
@@ -168,6 +173,39 @@ public class QuiqupClient {
      *
      * @return a 409-style result to relay to the UI, or {@code null} when the call may proceed.
      */
+    /**
+     * Refuse any path that is not relative to the configured base URL.
+     *
+     * <p>Without this the production guard below is decorative. {@code WebClient.uri(String)}
+     * ignores the configured base URL whenever the argument carries its own scheme and host, and
+     * {@link #guardProductionWrite} only ever inspects {@code props.getBaseUrl()} — so a caller
+     * passing an absolute URL reaches any host it likes while the guard, and the admin config page,
+     * both still report that we are safely pointed at staging. Two consequences, either one
+     * serious: a write against Quiqup production dispatches a real courier while
+     * {@code allowProductionWrites} is false, and every request carries {@link #authHeaders()}, so
+     * an arbitrary host is handed the Quiqup API key.
+     *
+     * <p>Protocol-relative paths ("//host/x") are rejected for the same reason: they name a host
+     * without naming a scheme, and resolve away from the base URL just as completely.
+     */
+    private QuiqupApiResult guardRelativePath(String path) {
+        String candidate = path == null ? "" : path.trim();
+        boolean relative = candidate.startsWith("/")
+                && !candidate.startsWith("//")
+                && !candidate.contains("://")
+                && !candidate.contains("\\");
+        if (relative) {
+            return null;
+        }
+        log.warn("[QUIQUP] BLOCKED non-relative path {} — the base URL is {} and only paths relative "
+                + "to it are permitted.", candidate, props.getBaseUrl());
+        return new QuiqupApiResult(400, false,
+                "Blocked: '" + candidate + "' is not a path relative to the configured Quiqup base "
+                        + "URL (" + props.getBaseUrl() + "). An absolute URL would bypass the "
+                        + "staging/production guard and would send the Quiqup API key to whatever "
+                        + "host it names. Use a leading-slash path such as /orders.");
+    }
+
     private QuiqupApiResult guardProductionWrite(String method) {
         boolean readOnly = "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
         if (readOnly || isStagingBaseUrl() || props.isAllowProductionWrites()) {

@@ -99,9 +99,16 @@ public class QuiqupWebhookController {
         // the one worth inspecting, and the admin Webhooks tab is where it is visible regardless of
         // which instance behind the load balancer received it. 401 rather than 200 so the rejection
         // also shows as a failure in Quiqup's delivery-logs and can be replayed from there.
-        if (Boolean.FALSE.equals(hmacValid) && props.isWebhookRequireSignature()) {
-            log.warn("[QUIQUP-WEBHOOK] rejected event={} — signature did not verify and "
-                    + "quiqup.webhook-require-signature is on", eventType);
+        // Enforcement means "accept only what verified", not "reject only what failed". hmacValid is
+        // null whenever verification could not run at all — no secret configured, or no signature
+        // header on the delivery — and the previous form tested Boolean.FALSE.equals(hmacValid),
+        // which is false for null. So switching enforcement on while the secret was missing accepted
+        // every forged event with a 200 while the config page reported enforcement as on: the one
+        // configuration where an operator is most certain they are protected.
+        if (props.isWebhookRequireSignature() && !Boolean.TRUE.equals(hmacValid)) {
+            log.warn("[QUIQUP-WEBHOOK] rejected event={} — signature {} and "
+                    + "quiqup.webhook-require-signature is on", eventType,
+                    hmacValid == null ? "could not be verified" : "did not verify");
             return ResponseEntity.status(401).build();
         }
 
