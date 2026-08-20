@@ -209,6 +209,11 @@ public class SecurityConfig {
      * not ours. Third-party or short-lived origins still belong in the env var.
      */
     static final List<String> BUILT_IN_ALLOWED_ORIGINS = List.of(
+            // The shop itself. Every browser call a customer makes — catalogue, cart, checkout —
+            // comes from here, so this is the origin whose loss is most expensive and the one the
+            // guarantee is really for.
+            "https://buyology.online",
+            // Carries the AI assistant widget. A separate site from the shop, and it stays.
             "https://v2.buyology.online");
 
     /**

@@ -22,13 +22,14 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SecurityConfigCorsTest {
 
-    private static final String STOREFRONT = "https://v2.buyology.online";
+    private static final String SHOP = "https://buyology.online";
+    private static final String ASSISTANT_SITE = "https://v2.buyology.online";
 
     @Test
     void storefrontIsAllowedEvenWhenTheEnvironmentForgetsIt() {
         List<String> allowed = SecurityConfig.resolveAllowedOrigins("https://admin.buyology.online");
 
-        assertTrue(allowed.contains(STOREFRONT),
+        assertTrue(allowed.contains(SHOP),
                 "the storefront must not depend on per-server configuration");
         assertTrue(allowed.contains("https://admin.buyology.online"),
                 "configured origins are kept, not replaced");
@@ -37,10 +38,10 @@ class SecurityConfigCorsTest {
     @Test
     void doesNotDuplicateAnOriginThatIsAlsoConfigured() {
         List<String> allowed = SecurityConfig.resolveAllowedOrigins(
-                "https://admin.buyology.online," + STOREFRONT);
+                "https://admin.buyology.online," + SHOP);
 
-        assertEquals(1, allowed.stream().filter(STOREFRONT::equals).count());
-        assertEquals(2, allowed.size());
+        assertEquals(1, allowed.stream().filter(SHOP::equals).count());
+        assertEquals(3, allowed.size(), "one configured origin plus both built-ins");
     }
 
     @Test
@@ -50,7 +51,8 @@ class SecurityConfigCorsTest {
 
         assertEquals("https://a.example.com", allowed.get(0));
         assertEquals("https://b.example.com", allowed.get(1));
-        assertEquals(STOREFRONT, allowed.get(2), "built-ins are appended, never inserted");
+        assertEquals(SHOP, allowed.get(2), "built-ins are appended, never inserted");
+        assertEquals(ASSISTANT_SITE, allowed.get(3));
     }
 
     @Test
