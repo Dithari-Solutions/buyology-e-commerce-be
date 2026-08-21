@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -230,10 +231,33 @@ public class PromoCodeService {
      */
     @Transactional
     public void releaseReservation(UUID orderId) {
+        releaseReservationInternal(orderId);
+    }
+
+    private void releaseReservationInternal(UUID orderId) {
         long released = usageRepo.deleteByOrderIdAndStatus(orderId, PromoCodeUsage.Status.RESERVED);
         if (released > 0) {
             log.info("[PROMO] Released {} promo reservation(s) held by order {}", released, orderId);
         }
+    }
+
+    /**
+     * Releases a hold in a transaction of its own.
+     *
+     * <p>For callers that run <em>after</em> the order's fate is already committed — the
+     * cancellation side effects, which Spring invokes from an after-commit callback. There the
+     * release cannot be atomic with the cancellation (that transaction is finished), and joining
+     * the caller would mean a failure here marks its transaction rollback-only and takes the rest
+     * of the side effects down with it.
+     *
+     * <p>{@link #releaseReservation} is the right one everywhere the order's new status is still
+     * uncommitted, because there the two genuinely must stand or fall together: an order left
+     * payable whose code has been handed back is the double-redemption this whole mechanism exists
+     * to prevent.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void releaseReservationIndependently(UUID orderId) {
+        releaseReservationInternal(orderId);
     }
 
     /**

@@ -253,6 +253,13 @@ public class OrderService {
                     cart.getId(), prior.getId(), priorSubtotal, currentSubtotal);
             prior.setStatus(OrderStatus.CANCELLED);
             orderRepo.save(prior);
+            // Hand back the promo code the stale order was holding. It is not paid and never will
+            // be, and the fresh order built below is about to ask for the same code — without this
+            // the customer's own abandoned order refuses it to them, the replacement silently
+            // loses the discount, and a single-use code is burned on an order nobody ever paid.
+            // Joins this transaction on purpose: if the cancellation rolls back, the stale order is
+            // payable again and must keep its claim.
+            promoCodeService.releaseReservation(prior.getId());
         }
 
         List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
@@ -859,12 +866,12 @@ public class OrderService {
                 // The order can never be paid now, so the code it was holding goes back. Without
                 // this a customer whose card was declined would have burned their own single-use
                 // code on an order that charged them nothing.
-                try {
-                    promoCodeService.releaseReservation(order.getId());
-                } catch (Exception e) {
-                    log.warn("[ORDER] Could not release the promo reservation held by failed order {}: {}",
-                            order.getId(), e.getMessage());
-                }
+                //
+                // Deliberately unguarded and in this transaction. If the release fails, the FAILED
+                // status must fail with it: an order still sitting at PENDING_PAYMENT has not
+                // finished, and one that is payable while its code has been given away is exactly
+                // the double redemption the reservation exists to prevent.
+                promoCodeService.releaseReservation(order.getId());
                 log.info("[ORDER] Order {} transitioned to FAILED.", order.getId());
             }
         });
@@ -1365,12 +1372,27 @@ public class OrderService {
         String refundCurrency = null;
 
         // The credit leg, which nothing used to return. See CreditReturnService.
-        creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
+        //
+        // Guarded because it can genuinely throw — WalletService.addCredit raises
+        // NoSuchElementException for a member with no wallet row — and unguarded it took the
+        // gateway refund and both customer emails down with it, silently, from inside an
+        // after-commit callback. A credit line needing a manual correction is a support ticket; a
+        // cancelled order that was never refunded is the customer's money.
+        try {
+            creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
+        } catch (Exception e) {
+            log.error("[ORDER] Could not return B2B credit for cancelled order {} — needs manual "
+                    + "correction: {}", order.getId(), e.getMessage(), e);
+        }
 
         // Give back a promo code this order was only holding. A code it actually spent stays spent:
         // that order was paid, the customer got the discount, and the refund settles it in money.
+        //
+        // The independent variant, because this runs after the cancellation has committed: joining
+        // would let a failure here mark the surrounding transaction rollback-only, and catching it
+        // would then surface as an UnexpectedRollbackException that mentions nothing about promos.
         try {
-            promoCodeService.releaseReservation(order.getId());
+            promoCodeService.releaseReservationIndependently(order.getId());
         } catch (Exception e) {
             log.warn("[ORDER] Could not release the promo reservation held by cancelled order {}: {}",
                     order.getId(), e.getMessage());

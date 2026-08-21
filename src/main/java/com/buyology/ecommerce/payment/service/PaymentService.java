@@ -920,66 +920,34 @@ public class PaymentService {
     // Refunds
     // =========================================================================
 
-    @Transactional
+    /**
+     * Refunds a payment.
+     *
+     * <p>Deliberately NOT @Transactional. It is orchestration over three steps that must not share
+     * one: claim the refund and commit it, call the gateway holding no transaction and no database
+     * connection at all, then record the outcome. Wrapping the whole thing again would put an HTTP
+     * call back inside a transaction — which is what made a rollback able to erase a refund that
+     * had already taken the customer's money.
+     */
     public RefundResponse initiateRefund(RefundRequest req) {
-        // Lock the transaction row so concurrent refunds serialize on the
-        // read-check-write of refund state (prevents two refunds both passing).
-        PaymentTransaction tx = transactionRepo.findWithLockById(req.getTransactionId())
-                .orElseThrow(() -> new NoSuchElementException("Transaction not found: " + req.getTransactionId()));
-
-        if (tx.getStatus() != PaymentStatus.SUCCESS && tx.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
-            throw new IllegalStateException("Refunds only allowed for SUCCESS or PARTIALLY_REFUNDED");
-        }
-
-        // Counts PENDING as well as SUCCESS: a PENDING row is a refund whose outcome we never
-        // learned, which is money that may already have left. Treating it as "nothing happened"
-        // is what lets a retry send it a second time.
-        BigDecimal alreadyRefunded = refundRepo.sumRefundedOrInFlight(tx);
-        if (alreadyRefunded.add(req.getAmount()).compareTo(tx.getAmount()) > 0) {
-            throw new IllegalArgumentException("Refund exceeds remaining amount");
-        }
-
-        PaymentProvider provider = tx.getMethodConfig().getProvider();
-        long refundCents = req.getAmount()
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(0, java.math.RoundingMode.HALF_UP)
-                .longValueExact();
-
-        // Claim the refund BEFORE calling the gateway, in its own committed transaction.
-        //
-        // The gateway call used to sit inside this method's transaction with the row written after
-        // it. Anything that rolled the transaction back once Paymob had taken the money — a
-        // timeout on the 10s read deadline, an optimistic-lock clash, a failure in a later step —
-        // erased the only evidence the refund happened, and the guard above then read zero and
-        // allowed it to be sent again. Committing first inverts that: the worst case becomes a
-        // refund recorded that did not happen, which blocks a retry and shows up as a support
-        // ticket, rather than one that happened and is invisible.
-        PaymentRefund refund = refundClaimStore.claimRefund(tx, req, refundCents);
+        // Locks the transaction, re-checks the refundable balance and writes the PENDING claim, in
+        // one transaction that commits before we go anywhere near the gateway. It returns plain
+        // values rather than entities because everything below runs with no session open.
+        RefundClaimStore.RefundClaim claim = refundClaimStore.lockCheckAndClaim(req);
 
         String providerRefundId;
         try {
             providerRefundId = paymobClient.refund(
-                    provider.getSecretKey(), provider.getBaseUrl(),
-                    tx.getPaymobTransactionId().toString(), refundCents);
+                    claim.secretKey(), claim.baseUrl(), claim.paymobTransactionId(), claim.refundCents());
         } catch (RuntimeException e) {
             // The gateway said no, or said nothing. Only a definite refusal may release the claim;
             // an ambiguous failure has to keep it, because the money may be gone.
-            refundClaimStore.releaseOrFailClaim(refund.getId(), e);
+            refundClaimStore.releaseOrFailClaim(claim.refundId(), e);
             throw e;
         }
-        refund.setStatus(RefundStatus.SUCCESS);
-        refund.setProviderRefundId(providerRefundId);
-        // Attribute the refund to the authenticated admin, not a client-supplied id.
-        refund.setRefundedBy(SecurityUtils.currentUserIdOrNull() != null
-                ? SecurityUtils.currentUserIdOrNull()
-                : req.getRefundedBy());
-        refund = refundRepo.save(refund);
 
-        BigDecimal totalRefunded = alreadyRefunded.add(req.getAmount());
-        tx.setStatus(totalRefunded.compareTo(tx.getAmount()) >= 0 ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED);
-        transactionRepo.save(tx);
-
-        return toRefundResponse(refund);
+        PaymentRefund refund = refundClaimStore.settleClaim(claim.refundId(), providerRefundId);
+        return toRefundResponse(refund, claim.transactionId());
     }
 
     // =========================================================================
@@ -1118,9 +1086,20 @@ public class PaymentService {
     }
 
     private RefundResponse toRefundResponse(PaymentRefund refund) {
+        return toRefundResponse(refund, refund.getTransaction().getId());
+    }
+
+    /**
+     * Maps a refund whose transaction id is already known.
+     *
+     * <p>{@code PaymentRefund.transaction} is LAZY, and {@link #initiateRefund} maps its result
+     * after every transaction has closed — reading the association there would throw rather than
+     * return a response.
+     */
+    private RefundResponse toRefundResponse(PaymentRefund refund, java.util.UUID transactionId) {
         RefundResponse res = new RefundResponse();
         res.setId(refund.getId());
-        res.setTransactionId(refund.getTransaction().getId());
+        res.setTransactionId(transactionId);
         res.setAmount(refund.getAmount());
         res.setAmountCents(refund.getAmountCents());
         res.setCurrency(refund.getCurrency());
