@@ -113,12 +113,25 @@ public class PromoCodeService {
                     "Minimum order amount of " + pc.getMinimumOrderAmount() + " required");
         }
 
-        if (pc.getMaxUsesTotal() != null && usageRepo.countByPromoCode(pc) >= pc.getMaxUsesTotal()) {
-            return ValidatePromoCodeResponse.invalid("Promo code has reached its maximum usage limit");
-        }
+        boolean atTotalLimit = pc.getMaxUsesTotal() != null
+                && usageRepo.countByPromoCode(pc) >= pc.getMaxUsesTotal();
+        boolean atCustomerLimit = pc.getMaxUsesPerCustomer() != null
+                && usageRepo.countByPromoCodeAndUserId(pc, userId) >= pc.getMaxUsesPerCustomer();
 
-        if (pc.getMaxUsesPerCustomer() != null && usageRepo.countByPromoCodeAndUserId(pc, userId) >= pc.getMaxUsesPerCustomer()) {
-            return ValidatePromoCodeResponse.invalid("You have already used this promo code the maximum number of times");
+        if (atTotalLimit || atCustomerLimit) {
+            // Those counts include codes being held by orders that have been placed but not paid
+            // for, which is what stops one code being spent on several orders at once. It also means
+            // a customer can be blocked by their own unfinished checkout — telling them the code is
+            // "used up" would send them to support over an order they can cancel themselves.
+            if (usageRepo.existsByPromoCode_IdAndUserIdAndStatus(
+                    pc.getId(), userId, PromoCodeUsage.Status.RESERVED)) {
+                return ValidatePromoCodeResponse.invalid(
+                        "This code is already applied to an order you haven't paid for yet. "
+                        + "Complete or cancel that order to use it here.");
+            }
+            return ValidatePromoCodeResponse.invalid(atTotalLimit
+                    ? "Promo code has reached its maximum usage limit"
+                    : "You have already used this promo code the maximum number of times");
         }
 
         if (pc.getApplicableProductIds() != null && productIds != null && !productIds.isEmpty()) {
@@ -149,6 +162,87 @@ public class PromoCodeService {
         return ValidatePromoCodeResponse.valid(pc.getId(), discount, pc.getDiscountType(), pc.getDiscountValue());
     }
 
+    /**
+     * Claims a code for an order that has just been placed.
+     *
+     * <p>This is where a code is actually taken out of circulation. Limits used to be checked
+     * against redemptions alone, and redemptions were only written once an order was paid — so
+     * between placing an order and paying for it a single-use code still looked untouched. Ten
+     * orders could each be created carrying the same code, each pass validation, and each keep its
+     * discount when paid. The unique constraint did not help: it identifies a redemption by
+     * (promo, customer, order), and those were ten different orders.
+     *
+     * <p>The limits are re-checked here rather than trusted from validation, under a write lock on
+     * the promo row. Validation happened earlier and against a count that a concurrent checkout may
+     * since have changed; the lock is what makes read-check-insert one step, so two customers
+     * racing for the last use of a code cannot both win it.
+     *
+     * @return true if the code is now held for this order, false if it was already exhausted and
+     *         the caller must strip the discount before charging anyone
+     */
+    @Transactional
+    public boolean reserveUsage(UUID promoCodeId, UUID orderId, UUID userId, BigDecimal discountApplied) {
+        PromoCode pc = promoCodeRepo.findByIdForUpdate(promoCodeId).orElse(null);
+        if (pc == null) {
+            log.warn("[PROMO] Order {} references promo {} which no longer exists", orderId, promoCodeId);
+            return false;
+        }
+
+        // An order that already holds this code (a retried checkout) keeps it — re-reserving is a
+        // no-op, not a second claim.
+        if (usageRepo.findByPromoCode_IdAndOrderId(promoCodeId, orderId).isPresent()) {
+            return true;
+        }
+
+        if (pc.getMaxUsesTotal() != null && usageRepo.countByPromoCode(pc) >= pc.getMaxUsesTotal()) {
+            log.warn("[PROMO] Code {} exhausted before order {} could claim it", pc.getCode(), orderId);
+            return false;
+        }
+        if (pc.getMaxUsesPerCustomer() != null
+                && usageRepo.countByPromoCodeAndUserId(pc, userId) >= pc.getMaxUsesPerCustomer()) {
+            log.warn("[PROMO] Customer {} has no uses of code {} left for order {}",
+                    userId, pc.getCode(), orderId);
+            return false;
+        }
+
+        PromoCodeUsage usage = new PromoCodeUsage();
+        usage.setPromoCode(pc);
+        usage.setOrderId(orderId);
+        usage.setUserId(userId);
+        usage.setDiscountApplied(discountApplied);
+        usage.setStatus(PromoCodeUsage.Status.RESERVED);
+
+        // Flushed, not just queued: a constraint violation has to surface here, while the caller can
+        // still act on it. Deliberately not caught — the one violation this insert could raise is the
+        // duplicate already ruled out above, so reaching it means something unexpected, and
+        // swallowing it would leave the enclosing checkout transaction marked rollback-only and fail
+        // at commit with an exception that says nothing about promo codes.
+        usageRepo.saveAndFlush(usage);
+        return true;
+    }
+
+    /**
+     * Gives a code back when the order holding it dies.
+     *
+     * <p>Only reservations are released. A redeemed code was actually spent by a customer who got
+     * the discount, and handing it back on cancellation would let the discount be taken twice —
+     * once in money and once in a fresh use of the code.
+     */
+    @Transactional
+    public void releaseReservation(UUID orderId) {
+        long released = usageRepo.deleteByOrderIdAndStatus(orderId, PromoCodeUsage.Status.RESERVED);
+        if (released > 0) {
+            log.info("[PROMO] Released {} promo reservation(s) held by order {}", released, orderId);
+        }
+    }
+
+    /**
+     * Marks the code an order was holding as actually spent, now that the order is paid.
+     *
+     * <p>Normally this only flips the reservation made at checkout. The insert path is for orders
+     * placed before reservations existed, which reach payment with no row to flip and must still
+     * record their redemption.
+     */
     @Transactional
     public void recordUsage(UUID promoCodeId, UUID orderId, UUID userId, BigDecimal discountApplied) {
         // A missing promo must fail the transaction, not silently no-op while the
@@ -156,11 +250,21 @@ public class PromoCodeService {
         PromoCode pc = promoCodeRepo.findById(promoCodeId)
                 .orElseThrow(() -> new NoSuchElementException("Promo code not found: " + promoCodeId));
 
+        PromoCodeUsage existing = usageRepo.findByPromoCode_IdAndOrderId(promoCodeId, orderId).orElse(null);
+        if (existing != null) {
+            if (existing.getStatus() != PromoCodeUsage.Status.REDEEMED) {
+                existing.setStatus(PromoCodeUsage.Status.REDEEMED);
+                usageRepo.save(existing);
+            }
+            return;
+        }
+
         PromoCodeUsage usage = new PromoCodeUsage();
         usage.setPromoCode(pc);
         usage.setOrderId(orderId);
         usage.setUserId(userId);
         usage.setDiscountApplied(discountApplied);
+        usage.setStatus(PromoCodeUsage.Status.REDEEMED);
         try {
             usageRepo.saveAndFlush(usage);
         } catch (DataIntegrityViolationException e) {

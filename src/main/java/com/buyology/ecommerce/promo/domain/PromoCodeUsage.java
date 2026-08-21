@@ -9,7 +9,8 @@ import java.util.UUID;
 @Table(name = "promo_code_usages",
         indexes = {
                 @Index(name = "idx_pcu_promo_user", columnList = "promo_code_id, user_id"),
-                @Index(name = "idx_pcu_order", columnList = "order_id")
+                @Index(name = "idx_pcu_order", columnList = "order_id"),
+                @Index(name = "idx_pcu_promo_status", columnList = "promo_code_id, status")
         },
         uniqueConstraints = {
                 // Dedupe at the DB level: a single redemption is identified by
@@ -20,6 +21,25 @@ import java.util.UUID;
                         columnNames = {"promo_code_id", "user_id", "order_id"})
         })
 public class PromoCodeUsage {
+
+    /**
+     * Whether the code has actually been spent, or is only being held.
+     *
+     * <p>Both count against a code's limits — the difference is what happens next. A RESERVED row
+     * belongs to an order that has been placed but not paid for, and is deleted if that order is
+     * cancelled or its payment fails, which puts the code back. A REDEEMED row is a discount the
+     * customer received and is permanent.
+     *
+     * <p>Recording only redemptions is what let a single-use code be spent repeatedly: nothing
+     * counted the orders already carrying it, so the limit check passed for each in turn and every
+     * one of them kept its discount.
+     */
+    public enum Status {
+        /** Claimed by an unpaid order. Counts against the limit; released if the order dies. */
+        RESERVED,
+        /** Spent on a paid order. Permanent. */
+        REDEEMED
+    }
 
     @Id
     @GeneratedValue
@@ -42,6 +62,15 @@ public class PromoCodeUsage {
     @Column(name = "used_at", nullable = false, updatable = false)
     private Instant usedAt;
 
+    /**
+     * Defaults to REDEEMED so that any path which writes a usage row without going through the
+     * reservation flow still records a spent code rather than a releasable hold — the safe
+     * direction if the two ever drift.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status = Status.REDEEMED;
+
     @PrePersist
     public void prePersist() {
         this.usedAt = Instant.now();
@@ -57,4 +86,6 @@ public class PromoCodeUsage {
     public BigDecimal getDiscountApplied() { return discountApplied; }
     public void setDiscountApplied(BigDecimal discountApplied) { this.discountApplied = discountApplied; }
     public Instant getUsedAt() { return usedAt; }
+    public Status getStatus() { return status; }
+    public void setStatus(Status status) { this.status = status; }
 }

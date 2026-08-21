@@ -432,6 +432,28 @@ public class OrderService {
 
         order = orderRepo.save(order);
 
+        // Take the code out of circulation now, not when the order is paid.
+        //
+        // Redemptions used to be recorded only at PAID, and every limit check counted redemptions,
+        // so a code sat there looking unused for as long as an order went unpaid. Ten orders could
+        // each be created carrying the same single-use code, each pass validation, and each keep
+        // its discount once paid. Reserving at checkout closes that: the second order sees the
+        // first order's claim. The reservation is released if this order is cancelled or its
+        // payment fails, so an unpaid order does not hold a code forever.
+        //
+        // A refusal here means the code ran out between validating it and claiming it — a genuine
+        // race for its last use. The order is still PENDING_PAYMENT and nobody has been charged, so
+        // the discount comes back off and the customer sees the real total before paying.
+        if (appliedPromoId != null
+                && !promoCodeService.reserveUsage(appliedPromoId, order.getId(), userId, discount)) {
+            log.warn("[ORDER] Promo {} was exhausted before order {} could claim it — "
+                    + "removing the {} discount", appliedPromoId, order.getId(), discount);
+            order.setPromoCodeId(null);
+            order.setDiscount(BigDecimal.ZERO);
+            order.setTotalAmount(grossTotal);
+            order = orderRepo.save(order);
+        }
+
         // Convert cart items to order items, decrementing store inventory atomically.
         for (CartItem cartItem : cartItems) {
             // Decrement stock atomically and guard against overselling. Stock lives on
@@ -834,6 +856,15 @@ public class OrderService {
                 appendTrackingEvent(order, OrderStatus.FAILED, reason,
                         null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                 orderRepo.save(order);
+                // The order can never be paid now, so the code it was holding goes back. Without
+                // this a customer whose card was declined would have burned their own single-use
+                // code on an order that charged them nothing.
+                try {
+                    promoCodeService.releaseReservation(order.getId());
+                } catch (Exception e) {
+                    log.warn("[ORDER] Could not release the promo reservation held by failed order {}: {}",
+                            order.getId(), e.getMessage());
+                }
                 log.info("[ORDER] Order {} transitioned to FAILED.", order.getId());
             }
         });
@@ -1335,6 +1366,15 @@ public class OrderService {
 
         // The credit leg, which nothing used to return. See CreditReturnService.
         creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
+
+        // Give back a promo code this order was only holding. A code it actually spent stays spent:
+        // that order was paid, the customer got the discount, and the refund settles it in money.
+        try {
+            promoCodeService.releaseReservation(order.getId());
+        } catch (Exception e) {
+            log.warn("[ORDER] Could not release the promo reservation held by cancelled order {}: {}",
+                    order.getId(), e.getMessage());
+        }
 
         if (order.getPaymentTransactionId() != null) {
             try {
