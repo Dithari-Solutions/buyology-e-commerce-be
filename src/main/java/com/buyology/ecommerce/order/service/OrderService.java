@@ -116,6 +116,8 @@ public class OrderService {
     private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository;
     // Lazy provider avoids a construction-time cycle (PaymentService publishes the events this service listens to).
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.WalletService> walletServiceProvider;
+    private final com.buyology.ecommerce.membership.repository.CreditUsageRepository creditUsageRepository;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -149,6 +151,8 @@ public class OrderService {
                         com.buyology.ecommerce.common.service.EmailService emailService,
                         com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository,
                         org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider,
+                        org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.WalletService> walletServiceProvider,
+                        com.buyology.ecommerce.membership.repository.CreditUsageRepository creditUsageRepository,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -180,6 +184,8 @@ public class OrderService {
         this.emailService = emailService;
         this.authCredentialRepository = authCredentialRepository;
         this.paymentServiceProvider = paymentServiceProvider;
+        this.walletServiceProvider = walletServiceProvider;
+        this.creditUsageRepository = creditUsageRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -1295,6 +1301,46 @@ public class OrderService {
      * the customer (cancellation + refund). Best-effort — failures are logged, never block the
      * cancellation. No-op for unpaid (PENDING_PAYMENT) orders.
      */
+    /**
+     * Puts wallet credit back when the order it paid for is cancelled.
+     *
+     * <p>Returns only what is still owed — amount minus anything already repaid — because repaying
+     * some of it and then having the balance restored in full would hand the member the difference.
+     * Cash they already paid back is a refund question for a human, not something to invent credit
+     * for here.
+     *
+     * <p>Idempotent on the REVERSED status, so a re-cancellation or a retry cannot credit twice.
+     * Best-effort like the rest of the cancellation side effects: a failure here is logged and must
+     * never stop the cancellation itself, because an order the customer cannot cancel is worse than
+     * a credit line that needs a manual correction.
+     */
+    private void returnB2bCreditIfAny(Order order) {
+        if (order.getCreditApplied() == null || order.getCreditApplied().signum() <= 0) {
+            return;
+        }
+        try {
+            creditUsageRepository.findByOrderId(order.getId()).ifPresent(usage -> {
+                if (usage.getStatus() == com.buyology.ecommerce.membership.domain.CreditUsage.Status.REVERSED) {
+                    return;
+                }
+                BigDecimal paid = usage.getPaidAmount() == null ? BigDecimal.ZERO : usage.getPaidAmount();
+                BigDecimal stillOwed = usage.getAmount().subtract(paid).max(BigDecimal.ZERO);
+                if (stillOwed.signum() > 0) {
+                    walletServiceProvider.getObject().addCredit(
+                            usage.getUserId(), stillOwed,
+                            "Credit returned — order " + order.getId() + " cancelled", "SYSTEM");
+                }
+                usage.setStatus(com.buyology.ecommerce.membership.domain.CreditUsage.Status.REVERSED);
+                creditUsageRepository.save(usage);
+                log.info("[ORDER] Returned {} {} of B2B credit for cancelled order {} (usage {})",
+                        stillOwed, usage.getCurrency(), order.getId(), usage.getId());
+            });
+        } catch (Exception e) {
+            log.error("[ORDER] Could not return B2B credit for cancelled order {} — needs manual "
+                    + "correction: {}", order.getId(), e.getMessage(), e);
+        }
+    }
+
     private void handleCancellationSideEffects(Order order, String reason) {
         String email = customerEmail(order);
         String name = customerName(order);
@@ -1303,6 +1349,15 @@ public class OrderService {
         boolean refunded = false;
         BigDecimal refundAmount = null;
         String refundCurrency = null;
+
+        // The credit leg, which nothing used to return.
+        //
+        // A B2B order settled partly or wholly with wallet credit produces a CreditUsage row that
+        // drives payback. Cancelling the order refunded only the gateway leg and left that row
+        // OUTSTANDING, so the member kept being chased — and eventually marked OVERDUE — for goods
+        // they never received. On a B2B minimum order of 20,000 AED that is the largest
+        // single-event loss in the system, and it falls on the customer.
+        returnB2bCreditIfAny(order);
 
         if (order.getPaymentTransactionId() != null) {
             try {

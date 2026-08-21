@@ -15,7 +15,19 @@ import java.util.UUID;
 })
 public class CreditUsage {
 
-    public enum Status { OUTSTANDING, PARTIAL, PAID, OVERDUE }
+    public enum Status {
+        OUTSTANDING, PARTIAL, PAID, OVERDUE,
+        /**
+         * The order was cancelled or fully refunded, so the credit is no longer owed and has been
+         * returned to the wallet.
+         *
+         * <p>Deliberately not PAID: the member never repaid this, and every report that counts
+         * repayments would otherwise count money that was never collected. It is absent from the
+         * OUTSTANDING/PARTIAL/OVERDUE lists that drive chasing and membership gating, which is
+         * exactly the intent — a member must not be pursued for goods they no longer have.
+         */
+        REVERSED
+    }
 
     @Id
     @GeneratedValue
