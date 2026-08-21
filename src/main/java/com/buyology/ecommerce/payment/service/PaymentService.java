@@ -812,10 +812,65 @@ public class PaymentService {
         return null;
     }
 
+    /**
+     * Whether a callback's money matches the transaction it claims to settle.
+     *
+     * <p>This is the check that makes the signature mean what it appears to mean. Paymob's HMAC
+     * covers {@code amount_cents}, {@code currency} and {@code order.id} — but NOT
+     * {@code order.merchant_order_id}, which is the field
+     * {@link #resolveTransactionFromPayload} uses first to decide WHICH of our transactions the
+     * callback belongs to. A signature therefore proves the numbers in the payload are Paymob's;
+     * it proves nothing about which of our rows they apply to.
+     *
+     * <p>Without this comparison, a genuine signed callback for a small payment can be re-pointed
+     * at any other transaction by editing that one unsigned field, and the larger transaction is
+     * marked SUCCESS on the strength of the smaller one's money. Comparing the amount and currency
+     * closes the gap without needing the signature to change: a callback carrying 100 cents can
+     * only ever settle a transaction that is owed 100 cents.
+     *
+     * <p>Absent fields are treated as a mismatch. A callback that does not say what it paid is not
+     * evidence that anything was paid.
+     */
+    private boolean webhookMoneyMatchesTransaction(PaymentTransaction tx, JsonNode obj) {
+        if (tx.getAmountCents() == null) {
+            log.error("[PAYMENT] Transaction {} has no amountCents; refusing to settle it from a webhook",
+                    tx.getId());
+            return false;
+        }
+        if (!obj.hasNonNull("amount_cents")) {
+            log.error("[PAYMENT] Webhook for transaction {} carries no amount_cents", tx.getId());
+            return false;
+        }
+        long payloadCents = obj.get("amount_cents").asLong(-1L);
+        if (payloadCents != tx.getAmountCents()) {
+            log.error("[PAYMENT] REJECTED webhook for transaction {}: payload says {} cents, "
+                            + "transaction is {} cents. A signed callback for one payment cannot "
+                            + "settle a different one — merchant_order_id is not covered by the HMAC.",
+                    tx.getId(), payloadCents, tx.getAmountCents());
+            return false;
+        }
+        String payloadCurrency = obj.hasNonNull("currency") ? obj.get("currency").asText() : null;
+        if (payloadCurrency == null || !payloadCurrency.equalsIgnoreCase(tx.getCurrency())) {
+            log.error("[PAYMENT] REJECTED webhook for transaction {}: payload currency {} != {}",
+                    tx.getId(), payloadCurrency, tx.getCurrency());
+            return false;
+        }
+        return true;
+    }
+
     private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode obj, Long paymobTxnId) {
         tx.setPaymobTransactionId(paymobTxnId);
-        
+
         boolean success = obj.has("success") && obj.get("success").asBoolean();
+
+        // A successful callback moves money, so it is the one that must prove it belongs here.
+        // A failure or pending callback is applied as-is: refusing to record a failure would leave
+        // the transaction stuck PENDING, and marking a payment FAILED costs nobody anything.
+        if (success && !webhookMoneyMatchesTransaction(tx, obj)) {
+            tx.setStatus(PaymentStatus.FAILED);
+            tx.setFailureReason("Rejected: callback amount/currency did not match this transaction");
+            return;
+        }
         boolean pending = obj.has("pending") && obj.get("pending").asBoolean();
 
         if (success) {
