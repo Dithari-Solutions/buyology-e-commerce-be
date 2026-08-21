@@ -116,8 +116,13 @@ public class OrderService {
     private final com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository;
     // Lazy provider avoids a construction-time cycle (PaymentService publishes the events this service listens to).
     private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider;
-    private final org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.WalletService> walletServiceProvider;
-    private final com.buyology.ecommerce.membership.repository.CreditUsageRepository creditUsageRepository;
+    private final com.buyology.ecommerce.membership.service.CreditReturnService creditReturnService;
+    /**
+     * This bean, through its proxy. Needed because {@link #applyCancellationSideEffects} runs after
+     * the cancellation has committed and must open a transaction of its own — a plain {@code this.}
+     * call would bypass the proxy, and with it the propagation that makes those writes land.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -151,8 +156,8 @@ public class OrderService {
                         com.buyology.ecommerce.common.service.EmailService emailService,
                         com.buyology.ecommerce.auth.repository.AuthCredentialRepository authCredentialRepository,
                         org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider,
-                        org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.membership.service.WalletService> walletServiceProvider,
-                        com.buyology.ecommerce.membership.repository.CreditUsageRepository creditUsageRepository,
+                        com.buyology.ecommerce.membership.service.CreditReturnService creditReturnService,
+                        org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -184,8 +189,8 @@ public class OrderService {
         this.emailService = emailService;
         this.authCredentialRepository = authCredentialRepository;
         this.paymentServiceProvider = paymentServiceProvider;
-        this.walletServiceProvider = walletServiceProvider;
-        this.creditUsageRepository = creditUsageRepository;
+        this.creditReturnService = creditReturnService;
+        this.selfProvider = selfProvider;
         this.eventPublisher = eventPublisher;
     }
 
@@ -1139,12 +1144,12 @@ public class OrderService {
         runAfterCommit(() -> {
             broadcastStatusUpdate(saved, null);
             notifyCustomerStatus(saved);
+            // Admin cancelled → auto-refund + customer emails (same as a customer cancellation).
+            // After the commit, never inside it: see applyCancellationSideEffects.
+            if (saved.getStatus() == OrderStatus.CANCELLED) {
+                selfProvider.getObject().applyCancellationSideEffects(saved, req.getCancellationReason());
+            }
         });
-
-        // Admin cancelled → auto-refund + customer emails (same as a customer cancellation).
-        if (saved.getStatus() == OrderStatus.CANCELLED) {
-            handleCancellationSideEffects(saved, req.getCancellationReason());
-        }
 
         return toOrderResponse(saved);
     }
@@ -1270,8 +1275,10 @@ public class OrderService {
                 null, null, null, userId, "CUSTOMER");
 
         Order saved = orderRepo.save(order);
-        broadcastStatusUpdate(saved, null);
-        handleCancellationSideEffects(saved, reason);
+        runAfterCommit(() -> {
+            broadcastStatusUpdate(saved, null);
+            selfProvider.getObject().applyCancellationSideEffects(saved, reason);
+        });
         return toOrderResponse(saved);
     }
 
@@ -1297,51 +1304,27 @@ public class OrderService {
     }
 
     /**
-     * On cancellation of a paid order: auto-initiate a refund of the charged amount and email
-     * the customer (cancellation + refund). Best-effort — failures are logged, never block the
+     * On cancellation of a paid order: return any B2B credit, auto-initiate a refund of the charged
+     * amount, and email the customer. Best-effort — failures are logged, never block the
      * cancellation. No-op for unpaid (PENDING_PAYMENT) orders.
-     */
-    /**
-     * Puts wallet credit back when the order it paid for is cancelled.
      *
-     * <p>Returns only what is still owed — amount minus anything already repaid — because repaying
-     * some of it and then having the balance restored in full would hand the member the difference.
-     * Cash they already paid back is a refund question for a human, not something to invent credit
-     * for here.
+     * <p><strong>Must be invoked after the cancellation commits, never inside its transaction.</strong>
+     * Everything here is irreversible from the database's point of view: money leaves through Paymob,
+     * credit lands in a wallet, mail goes out. Running it inside the transaction meant any later
+     * failure — a constraint at flush, a mapping error in the response — rolled the status back to
+     * PAID while the refund was already on its way, leaving an order that is fully refunded, still
+     * shippable, and looks untouched. Every caller wraps it in {@code runAfterCommit} for that
+     * reason, which also swallows failures here rather than letting them undo the cancellation.
      *
-     * <p>Idempotent on the REVERSED status, so a re-cancellation or a retry cannot credit twice.
-     * Best-effort like the rest of the cancellation side effects: a failure here is logged and must
-     * never stop the cancellation itself, because an order the customer cannot cancel is worse than
-     * a credit line that needs a manual correction.
+     * <p>REQUIRES_NEW, and called through {@code selfProvider} so the annotation is actually honoured.
+     * Inside an after-commit callback the finished transaction is still bound to the thread, so a
+     * REQUIRED transaction started here would <em>join</em> it — flushing its writes into a session
+     * nobody will ever commit and then closing it. The refund would reach Paymob and every row
+     * recording it would disappear. The same reasoning is why {@code onPaymentSucceeded} and
+     * {@code onPaymentFailed} above are REQUIRES_NEW.
      */
-    private void returnB2bCreditIfAny(Order order) {
-        if (order.getCreditApplied() == null || order.getCreditApplied().signum() <= 0) {
-            return;
-        }
-        try {
-            creditUsageRepository.findByOrderId(order.getId()).ifPresent(usage -> {
-                if (usage.getStatus() == com.buyology.ecommerce.membership.domain.CreditUsage.Status.REVERSED) {
-                    return;
-                }
-                BigDecimal paid = usage.getPaidAmount() == null ? BigDecimal.ZERO : usage.getPaidAmount();
-                BigDecimal stillOwed = usage.getAmount().subtract(paid).max(BigDecimal.ZERO);
-                if (stillOwed.signum() > 0) {
-                    walletServiceProvider.getObject().addCredit(
-                            usage.getUserId(), stillOwed,
-                            "Credit returned — order " + order.getId() + " cancelled", "SYSTEM");
-                }
-                usage.setStatus(com.buyology.ecommerce.membership.domain.CreditUsage.Status.REVERSED);
-                creditUsageRepository.save(usage);
-                log.info("[ORDER] Returned {} {} of B2B credit for cancelled order {} (usage {})",
-                        stillOwed, usage.getCurrency(), order.getId(), usage.getId());
-            });
-        } catch (Exception e) {
-            log.error("[ORDER] Could not return B2B credit for cancelled order {} — needs manual "
-                    + "correction: {}", order.getId(), e.getMessage(), e);
-        }
-    }
-
-    private void handleCancellationSideEffects(Order order, String reason) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void applyCancellationSideEffects(Order order, String reason) {
         String email = customerEmail(order);
         String name = customerName(order);
         String orderNo = order.getId().toString();
@@ -1350,14 +1333,8 @@ public class OrderService {
         BigDecimal refundAmount = null;
         String refundCurrency = null;
 
-        // The credit leg, which nothing used to return.
-        //
-        // A B2B order settled partly or wholly with wallet credit produces a CreditUsage row that
-        // drives payback. Cancelling the order refunded only the gateway leg and left that row
-        // OUTSTANDING, so the member kept being chased — and eventually marked OVERDUE — for goods
-        // they never received. On a B2B minimum order of 20,000 AED that is the largest
-        // single-event loss in the system, and it falls on the customer.
-        returnB2bCreditIfAny(order);
+        // The credit leg, which nothing used to return. See CreditReturnService.
+        creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
 
         if (order.getPaymentTransactionId() != null) {
             try {
@@ -1821,6 +1798,22 @@ public class OrderService {
         runAfterCommit(() -> {
             broadcastStatusUpdate(saved, null);
             notifyCustomerStatus(saved);
+
+            if (target == OrderStatus.CANCELLED) {
+                // The delivery partner cancelling the job cancels the customer's order — this method
+                // has already made that terminal, and nothing can re-deliver against it. The money
+                // has to follow the goods: without this the customer paid, the parcel stayed on our
+                // shelf, and the order sat CANCELLED with the payment untouched and nobody looking.
+                selfProvider.getObject().applyCancellationSideEffects(saved, note);
+            } else if (target == OrderStatus.FAILED && saved.getPaymentTransactionId() != null) {
+                // A failed delivery is NOT auto-refunded: the parcel is coming back to us and
+                // whether the customer wants their money or another attempt is theirs to say. But
+                // it is money held against goods they do not have, and FAILED is terminal, so it
+                // cannot be left to be noticed by chance.
+                log.error("[ORDER] Order {} FAILED at the delivery partner while paid (transaction {})"
+                        + " — needs a human decision on refund vs redelivery",
+                        orderId, saved.getPaymentTransactionId());
+            }
         });
         return true;
     }
