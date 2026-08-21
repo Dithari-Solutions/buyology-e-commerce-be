@@ -24,6 +24,9 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SecurityConfig.class);
+
     @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:8080}")
     private String allowedOriginsCsv;
 
@@ -127,6 +130,17 @@ public class SecurityConfig {
                         // the counts are read back under /api/admin/analytics/**, which stays
                         // authenticated and permission-guarded.
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/analytics/visit").permitAll()
+                        // Storefront AI assistant. Public for the same reason the beacon is: the
+                        // shoppers most likely to ask "do you have this in stock?" are not logged
+                        // in, and a login wall would leave the assistant answering only the
+                        // customers who least need it. The caller controls nothing but their own
+                        // question — no history, no prompt, no model — because the transcript and
+                        // the prompt are both built server-side. Spend is bounded by the ASSISTANT
+                        // rate-limit tier (per IP), the per-conversation message ceiling and the
+                        // per-visitor daily conversation cap. Transcripts are read back under
+                        // /api/admin/assistant/**, which stays authenticated and permission-guarded.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/assistant/chat").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/assistant/status").permitAll()
                         // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
                         // Contact verification (email/phone OTP) used by public supplier & B2B apply forms
@@ -181,23 +195,68 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * Origins allowed on every deployment, whatever {@code CORS_ALLOWED_ORIGINS} says.
+     *
+     * <p>{@code app.cors.allowed-origins} has no default — it resolves straight from the env var —
+     * so before this list existed, the storefront's access to the API depended on a value set
+     * separately on each server. Getting it wrong there is invisible from the code and produces the
+     * least obvious failure CORS has: every request works in curl and fails in the browser.
+     *
+     * <p>These are our own first-party frontends, so pinning them here rather than in per-server
+     * configuration is the honest place for them. It also means they cannot be revoked without a
+     * code change — which is the point, and the tradeoff to remember before adding anything that is
+     * not ours. Third-party or short-lived origins still belong in the env var.
+     */
+    static final List<String> BUILT_IN_ALLOWED_ORIGINS = List.of(
+            // The shop itself. Every browser call a customer makes — catalogue, cart, checkout —
+            // comes from here, so this is the origin whose loss is most expensive and the one the
+            // guarantee is really for.
+            "https://buyology.online",
+            // Carries the AI assistant widget. A separate site from the shop, and it stays.
+            "https://v2.buyology.online");
+
+    /**
+     * The effective allowlist: whatever the environment configured, plus {@link
+     * #BUILT_IN_ALLOWED_ORIGINS}, in that order and without duplicates.
+     *
+     * <p>Package-private and static so {@code SecurityConfigCorsTest} can pin it without standing
+     * up the whole filter chain.
+     */
+    static List<String> resolveAllowedOrigins(String configuredCsv) {
+        // Normalise the null before splitting, not inside the split: a ternary whose branches are
+        // String and String[] resolves to their least upper bound, which Arrays.stream cannot take.
+        String csv = configuredCsv == null ? "" : configuredCsv;
+        List<String> configured = java.util.Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
+        // Fail fast: a wildcard origin combined with allowCredentials=true is both rejected by the
+        // browser and a security hole. Still refuse to start with it, and still refuse to start on
+        // an empty value — the built-ins would mask a wiped CORS_ALLOWED_ORIGINS, letting the
+        // storefront keep working while the dashboard silently lost access.
+        if (configured.isEmpty() || configured.contains("*")) {
+            throw new IllegalStateException(
+                    "app.cors.allowed-origins must be a non-empty explicit allowlist (no '*') "
+                    + "because credentials are allowed. Configured value: '" + configuredCsv + "'");
+        }
+
+        List<String> allowed = new java.util.ArrayList<>(configured);
+        for (String builtIn : BUILT_IN_ALLOWED_ORIGINS) {
+            if (!allowed.contains(builtIn)) {
+                allowed.add(builtIn);
+            }
+        }
+        return List.copyOf(allowed);
+    }
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Explicit allowlist — no wildcards. Driven by app.cors.allowed-origins
-        // (env var CORS_ALLOWED_ORIGINS in CI/CD). Defaults to localhost for dev.
-        List<String> allowed = java.util.Arrays.stream(allowedOriginsCsv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
-        // Fail fast: a wildcard origin combined with allowCredentials=true is both
-        // rejected by the browser and a security hole. Refuse to start with it.
-        if (allowed.isEmpty() || allowed.contains("*")) {
-            throw new IllegalStateException(
-                    "app.cors.allowed-origins must be a non-empty explicit allowlist (no '*') "
-                    + "because credentials are allowed. Configured value: '" + allowedOriginsCsv + "'");
-        }
+        List<String> allowed = resolveAllowedOrigins(allowedOriginsCsv);
+        log.info("CORS allowlist: {}", String.join(", ", allowed));
         configuration.setAllowedOrigins(allowed);
 
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));

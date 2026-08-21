@@ -183,6 +183,23 @@ services:
       # Optional external buy-back policy file (mounted into the container). Blank = bundled.
       SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
 
+      # ── Storefront AI assistant — the public customer-support chatbot on
+      #    POST /api/assistant/chat. Shares ANTHROPIC_API_KEY above; a blank key leaves it
+      #    off and GET /api/assistant/status reports enabled:false.
+      #
+      #    Unlike the repair/sell estimates (one call per submitted request), this is a
+      #    PUBLIC endpoint billed per message, so the caps below are the ones that matter
+      #    even on dev — an accidental loop against the dev host spends real money on the
+      #    same key production uses. ──
+      ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-true}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-claude-opus-5}
+      ASSISTANT_TIMEOUT_SECONDS: ${ASSISTANT_TIMEOUT_SECONDS:-45}
+      ASSISTANT_MAX_MESSAGES_PER_CONVERSATION: ${ASSISTANT_MAX_MESSAGES_PER_CONVERSATION:-40}
+      ASSISTANT_MAX_CONVERSATIONS_PER_VISITOR_PER_DAY: ${ASSISTANT_MAX_CONVERSATIONS_PER_VISITOR_PER_DAY:-20}
+      # Mount an edited assistant-knowledge.md and point here to correct a policy answer
+      # without rebuilding the image. Blank = the copy baked into the jar.
+      ASSISTANT_KNOWLEDGE_PATH: ${ASSISTANT_KNOWLEDGE_PATH:-}
+
       # ── Contabo S3 — use a SEPARATE dev bucket so dev uploads never land in prod ──
       CONTABO_S3_ENDPOINT: ${CONTABO_S3_ENDPOINT}
       CONTABO_S3_ACCESS_KEY: ${CONTABO_S3_ACCESS_KEY}

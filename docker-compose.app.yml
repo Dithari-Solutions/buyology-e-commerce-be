@@ -142,6 +142,20 @@ services:
       SELL_AI_ESTIMATE_ENABLED: ${SELL_AI_ESTIMATE_ENABLED:-true}
       SELL_PRICING_PATH: ${SELL_PRICING_PATH:-}
 
+      # ── Storefront AI assistant (public customer-support chatbot) ──
+      # Shares ANTHROPIC_API_KEY above. ASSISTANT_ENABLED=false turns the widget off without a
+      # code deploy — it is the only public endpoint that costs money per request, so that lever
+      # has to be reachable here. The message/conversation caps are what bound the daily spend;
+      # the per-IP rate limit only bounds a burst.
+      ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-true}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-claude-opus-5}
+      ASSISTANT_TIMEOUT_SECONDS: ${ASSISTANT_TIMEOUT_SECONDS:-45}
+      ASSISTANT_MAX_MESSAGES_PER_CONVERSATION: ${ASSISTANT_MAX_MESSAGES_PER_CONVERSATION:-40}
+      ASSISTANT_MAX_CONVERSATIONS_PER_VISITOR_PER_DAY: ${ASSISTANT_MAX_CONVERSATIONS_PER_VISITOR_PER_DAY:-20}
+      # Mount an edited assistant-knowledge.md and point here to correct a policy answer without
+      # rebuilding the jar. Blank = the copy bundled in the image.
+      ASSISTANT_KNOWLEDGE_PATH: ${ASSISTANT_KNOWLEDGE_PATH:-}
+
       # ── Delivery pricing (AED) ──
       # DELIVERY_QUIQUP_FEE_AED is the rate Quiqup bills us for a standard delivery, passed through
       # to the customer on orders under the free-shipping threshold. Defaults to the previous 15.00.

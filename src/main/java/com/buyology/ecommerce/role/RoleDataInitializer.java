@@ -62,6 +62,7 @@ public class RoleDataInitializer implements ApplicationRunner {
      */
     private static final List<String> ALL_PERMISSIONS = List.of(
             PermissionConstants.ANALYTICS_VISITOR_READ,
+            PermissionConstants.ASSISTANT_CONVERSATION_READ,
             PermissionConstants.B2B_COUNTRY_READ,
             PermissionConstants.B2B_COUNTRY_UPDATE,
             PermissionConstants.B2B_COUNTRY_DELETE,
@@ -243,6 +244,7 @@ public class RoleDataInitializer implements ApplicationRunner {
      */
     private static final List<String> ADMIN_PERMISSIONS = List.of(
             PermissionConstants.ANALYTICS_VISITOR_READ,
+            PermissionConstants.ASSISTANT_CONVERSATION_READ,
             PermissionConstants.B2B_COUNTRY_READ,
             PermissionConstants.B2B_COUNTRY_UPDATE,
             PermissionConstants.B2B_COUNTRY_DELETE,
