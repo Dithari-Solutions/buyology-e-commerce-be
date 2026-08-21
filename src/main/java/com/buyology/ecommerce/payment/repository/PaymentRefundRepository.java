@@ -23,4 +23,23 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, UU
     BigDecimal sumAmountByTransactionAndStatus(
             @Param("transaction") PaymentTransaction transaction,
             @Param("status") RefundStatus status);
+
+    /**
+     * Refunded-or-possibly-refunded total for a transaction: SUCCESS plus PENDING.
+     *
+     * <p>The guard that stops a double refund has to answer "how much has already left", and a
+     * PENDING row is money that may well have left. It is written before the gateway is called and
+     * only becomes SUCCESS or FAILED once the gateway answers — so a row still PENDING is one where
+     * the answer never arrived: a timeout, a crash, a rolled-back transaction. Counting only
+     * SUCCESS treats every one of those as "no money moved" and lets a retry send it again.
+     *
+     * <p>Being wrong in this direction is recoverable: a refund blocked by a stale PENDING row is a
+     * support ticket. Being wrong in the other direction pays a customer twice and nothing detects
+     * it.
+     */
+    @Query("SELECT COALESCE(SUM(r.amount), 0) FROM PaymentRefund r " +
+           "WHERE r.transaction = :transaction AND r.status IN " +
+           "(com.buyology.ecommerce.payment.enums.RefundStatus.SUCCESS, " +
+           " com.buyology.ecommerce.payment.enums.RefundStatus.PENDING)")
+    BigDecimal sumRefundedOrInFlight(@Param("transaction") PaymentTransaction transaction);
 }

@@ -423,8 +423,11 @@ public class RefundRequestService {
         // refunded in full. All math is done in the transaction's currency (what Paymob charged).
         String txCurrency = txn.getCurrency();
 
-        BigDecimal alreadyRefunded = paymentRefundRepository
-                .sumAmountByTransactionAndStatus(txn, RefundStatus.SUCCESS);
+        // SUCCESS *and* PENDING. A PENDING row is a refund whose outcome never came back — a
+        // timeout, a crash, a rolled-back transaction — which is money that may already have left.
+        // Counting only SUCCESS treats every one of those as "nothing happened" and lets this pay
+        // it again.
+        BigDecimal alreadyRefunded = paymentRefundRepository.sumRefundedOrInFlight(txn);
         if (alreadyRefunded == null) {
             alreadyRefunded = BigDecimal.ZERO;
         }

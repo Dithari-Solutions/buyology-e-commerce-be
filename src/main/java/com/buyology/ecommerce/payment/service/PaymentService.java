@@ -6,6 +6,7 @@ import com.buyology.ecommerce.payment.domain.*;
 import com.buyology.ecommerce.payment.dto.*;
 import com.buyology.ecommerce.payment.enums.PaymentMethodType;
 import com.buyology.ecommerce.payment.enums.PaymentPurpose;
+import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.payment.enums.PaymentStatus;
 import com.buyology.ecommerce.payment.enums.RefundStatus;
 import com.buyology.ecommerce.payment.event.CourierFeePaidEvent;
@@ -47,6 +48,7 @@ public class PaymentService {
     private final PaymentWebhookEventRepository webhookEventRepo;
     private final ProcessedWebhookEventRepository processedWebhookEventRepo;
     private final PaymentRefundRepository refundRepo;
+    private final RefundClaimStore refundClaimStore;
     private final PaymobClient paymobClient;
     private final ObjectMapper objectMapper;
     private final UserProfileService userProfileService;
@@ -60,6 +62,7 @@ public class PaymentService {
     private final com.buyology.ecommerce.user.service.AccountStatusValidator accountStatusValidator;
 
     public PaymentService(
+            RefundClaimStore refundClaimStore,
             PaymentProviderRepository providerRepo,
             PaymentMethodConfigRepository methodConfigRepo,
             PaymentTransactionRepository transactionRepo,
@@ -83,6 +86,7 @@ public class PaymentService {
         this.webhookEventRepo = webhookEventRepo;
         this.processedWebhookEventRepo = processedWebhookEventRepo;
         this.refundRepo = refundRepo;
+        this.refundClaimStore = refundClaimStore;
         this.paymobClient = paymobClient;
         this.objectMapper = objectMapper;
         this.userProfileService = userProfileService;
@@ -171,16 +175,43 @@ public class PaymentService {
                 if (order.getAuthCredentialId() != null) {
                     req.setCustomerId(order.getAuthCredentialId());
                 }
+                // An order is payable exactly once. Without this, POSTing /initiate again on an
+                // order that is already paid opened a SECOND full-price charge: the customer was
+                // debited twice, and the second capture settled a transaction nothing reconciles
+                // against an order that was already settled, so it was never refunded either.
+                if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+                    throw new IllegalStateException(
+                            "Order " + order.getId() + " is " + order.getStatus()
+                            + " and cannot be paid again.");
+                }
+
                 BigDecimal orderTotal = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
                 BigDecimal totalInReqCcy = order.getCurrency() != null
                         && order.getCurrency().equalsIgnoreCase(req.getCurrency())
                         ? orderTotal
                         : currencyExchangeService.convert(orderTotal, order.getCurrency(), req.getCurrency());
-                // Allow a 1% tolerance for rounding / FX drift; reject gross underpayment.
-                if (req.getAmount().compareTo(totalInReqCcy.multiply(new BigDecimal("0.99"))) < 0) {
-                    throw new IllegalArgumentException(
-                            "Payment amount does not match the order total");
+
+                // The order's total is what gets charged — not the client's number.
+                //
+                // This used to take req.getAmount() and merely check it against a 1% tolerance,
+                // "for rounding / FX drift". Rounding error is ABSOLUTE — a fraction of a currency
+                // unit — so a proportional band is the wrong shape for it, and FX drift does not
+                // exist at all when the client pays in the order's own currency. What the band
+                // actually bought was a discount: any shopper could pay 99% of any order and the
+                // order completed normally, so the loss scaled with the basket — five dirhams on a
+                // 500 AED order, a hundred and fifty on a 15,000 AED one, repeatable.
+                //
+                // Nothing about the client's figure is worth keeping, so it is replaced rather than
+                // validated. A mismatch is still logged, because a client that computes a different
+                // total is usually a storefront bug worth seeing (it is how the express delivery fee
+                // discrepancy would have surfaced).
+                if (req.getAmount() != null
+                        && req.getAmount().subtract(totalInReqCcy).abs().compareTo(new BigDecimal("0.01")) > 0) {
+                    log.warn("[PAYMENT] Order {}: client asked to pay {} {} but the order total is {} {}. "
+                                    + "Charging the order total.",
+                            order.getId(), req.getAmount(), req.getCurrency(), totalInReqCcy, req.getCurrency());
                 }
+                effectiveAmount = totalInReqCcy;
             }
             if (order != null && order.getCreditApplied() != null
                     && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
@@ -189,7 +220,7 @@ public class PaymentService {
                         ? order.getCreditApplied()
                         : currencyExchangeService.convert(order.getCreditApplied(),
                                 order.getCreditCurrency(), req.getCurrency());
-                effectiveAmount = req.getAmount()
+                effectiveAmount = effectiveAmount
                         .subtract(creditInRequestCcy)
                         .max(BigDecimal.ZERO)
                         .setScale(2, java.math.RoundingMode.HALF_UP);
@@ -900,7 +931,10 @@ public class PaymentService {
             throw new IllegalStateException("Refunds only allowed for SUCCESS or PARTIALLY_REFUNDED");
         }
 
-        BigDecimal alreadyRefunded = refundRepo.sumAmountByTransactionAndStatus(tx, RefundStatus.SUCCESS);
+        // Counts PENDING as well as SUCCESS: a PENDING row is a refund whose outcome we never
+        // learned, which is money that may already have left. Treating it as "nothing happened"
+        // is what lets a retry send it a second time.
+        BigDecimal alreadyRefunded = refundRepo.sumRefundedOrInFlight(tx);
         if (alreadyRefunded.add(req.getAmount()).compareTo(tx.getAmount()) > 0) {
             throw new IllegalArgumentException("Refund exceeds remaining amount");
         }
@@ -911,17 +945,28 @@ public class PaymentService {
                 .setScale(0, java.math.RoundingMode.HALF_UP)
                 .longValueExact();
 
-        // Use numeric paymob_transaction_id for refund call
-        String providerRefundId = paymobClient.refund(
-                provider.getSecretKey(), provider.getBaseUrl(),
-                tx.getPaymobTransactionId().toString(), refundCents);
+        // Claim the refund BEFORE calling the gateway, in its own committed transaction.
+        //
+        // The gateway call used to sit inside this method's transaction with the row written after
+        // it. Anything that rolled the transaction back once Paymob had taken the money — a
+        // timeout on the 10s read deadline, an optimistic-lock clash, a failure in a later step —
+        // erased the only evidence the refund happened, and the guard above then read zero and
+        // allowed it to be sent again. Committing first inverts that: the worst case becomes a
+        // refund recorded that did not happen, which blocks a retry and shows up as a support
+        // ticket, rather than one that happened and is invisible.
+        PaymentRefund refund = refundClaimStore.claimRefund(tx, req, refundCents);
 
-        PaymentRefund refund = new PaymentRefund();
-        refund.setTransaction(tx);
-        refund.setAmount(req.getAmount());
-        refund.setAmountCents(refundCents);
-        refund.setCurrency(tx.getCurrency());
-        refund.setReason(req.getReason());
+        String providerRefundId;
+        try {
+            providerRefundId = paymobClient.refund(
+                    provider.getSecretKey(), provider.getBaseUrl(),
+                    tx.getPaymobTransactionId().toString(), refundCents);
+        } catch (RuntimeException e) {
+            // The gateway said no, or said nothing. Only a definite refusal may release the claim;
+            // an ambiguous failure has to keep it, because the money may be gone.
+            refundClaimStore.releaseOrFailClaim(refund.getId(), e);
+            throw e;
+        }
         refund.setStatus(RefundStatus.SUCCESS);
         refund.setProviderRefundId(providerRefundId);
         // Attribute the refund to the authenticated admin, not a client-supplied id.
