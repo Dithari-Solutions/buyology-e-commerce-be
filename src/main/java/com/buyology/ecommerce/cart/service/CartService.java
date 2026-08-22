@@ -406,10 +406,16 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
 
-        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
+        List<CartItem> items = cartItemRepository.findByCartIdAndSelectedTrue(cart.getId());
         if (items.isEmpty()) {
-            log.warn("checkout rejected — cart is empty [authCredentialId={} cartId={}]", authCredentialId, cart.getId());
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Cart is empty");
+            // Distinguish "nothing here" from "nothing ticked" — the second has a self-service fix
+            // the message must name.
+            boolean cartHasRows = !cartItemRepository.findByCartId(cart.getId()).isEmpty();
+            log.warn("checkout rejected — {} [authCredentialId={} cartId={}]",
+                    cartHasRows ? "no items selected" : "cart is empty", authCredentialId, cart.getId());
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, cartHasRows
+                    ? "No items are selected for checkout. Tick at least one item in your cart."
+                    : "Cart is empty");
         }
 
         log.info("checkout — cartId={} authCredentialId={} itemCount={} total={} currency={}",
@@ -418,6 +424,44 @@ public class CartService {
         cartRepository.save(cart);
 
         return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Cart checked out successfully");
+    }
+
+    /**
+     * Ticks or unticks one cart line. The row stays; only whether it will be ordered changes —
+     * and with it the cart total, which is always the selected subtotal.
+     */
+    @Transactional
+    public ResponseEntity<ApiResponse<CartResponse>> setItemSelection(
+            UUID authCredentialId, UUID cartItemId, boolean selected) {
+        requireOwnedCredential(authCredentialId);
+        CartItem item = cartItemRepository.findById(cartItemId).orElse(null);
+        if (item == null || item.getCart() == null
+                || item.getCart().getAuthCredential() == null
+                || !authCredentialId.equals(item.getCart().getAuthCredential().getId())) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "Cart item not found");
+        }
+        item.setSelected(selected);
+        cartItemRepository.save(item);
+        Cart cart = item.getCart();
+        recalculateCartTotal(cart);
+        return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Selection updated");
+    }
+
+    /** Ticks or unticks every line at once — the "select all" checkbox. */
+    @Transactional
+    public ResponseEntity<ApiResponse<CartResponse>> setAllSelection(UUID authCredentialId, boolean selected) {
+        requireOwnedCredential(authCredentialId);
+        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(
+                authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        if (cart == null) {
+            return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
+        }
+        for (CartItem item : cartItemRepository.findByCartId(cart.getId())) {
+            item.setSelected(selected);
+            cartItemRepository.save(item);
+        }
+        recalculateCartTotal(cart);
+        return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Selection updated");
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
@@ -472,7 +516,11 @@ public class CartService {
     }
 
     private void recalculateCartTotal(Cart cart) {
-        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
+        // cart.totalPrice is BY DEFINITION the SELECTED subtotal — the number the shopper is about
+        // to be charged. OrderService prices the order from it, calculateShippingFee's
+        // free-delivery threshold reads it, and the promo validator is judged against it. Summing
+        // unticked rows into it is exactly the mismatch the selection flag exists to end.
+        List<CartItem> items = cartItemRepository.findByCartIdAndSelectedTrue(cart.getId());
         BigDecimal total = items.stream()
                 .map(CartItem::getTotalPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -620,6 +668,7 @@ public class CartService {
         }
         response.setStoreId(item.getStoreId());
         response.setQuantity(item.getQuantity());
+        response.setSelected(item.isSelected());
         response.setUnitPrice(item.getUnitPrice());
         response.setTotalPrice(item.getTotalPrice());
         // Pre-discount prices for strike-through display (null when not discounted).

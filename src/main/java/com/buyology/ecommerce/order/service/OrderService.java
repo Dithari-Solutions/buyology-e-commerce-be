@@ -126,6 +126,7 @@ public class OrderService {
     /** Plain injection, NOT selfProvider: this one is meant to join the caller's transaction. */
     private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
     private final com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService;
+    private final com.buyology.ecommerce.cart.service.CartCheckoutCleanupService cartCheckoutCleanupService;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -163,6 +164,7 @@ public class OrderService {
                         org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider,
                         com.buyology.ecommerce.store.service.StockReservationService stockReservationService,
                         com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService,
+                        com.buyology.ecommerce.cart.service.CartCheckoutCleanupService cartCheckoutCleanupService,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -198,6 +200,7 @@ public class OrderService {
         this.selfProvider = selfProvider;
         this.stockReservationService = stockReservationService;
         this.quiqupCancelService = quiqupCancelService;
+        this.cartCheckoutCleanupService = cartCheckoutCleanupService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -249,9 +252,13 @@ public class OrderService {
             }
         }
 
-        List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
+        // Only the lines the shopper has ticked become the order. Unticked lines stay in the cart
+        // untouched: not priced, not stock-decremented, not shipped, not charged. cart.totalPrice
+        // is already the selected subtotal (CartService.recalculateCartTotal), so the pricing and
+        // the free-shipping threshold below read the same basis as this list.
+        List<CartItem> cartItems = cartItemRepo.findByCartIdAndSelectedTrue(cart.getId());
         if (cartItems.isEmpty()) {
-            throw new IllegalStateException("Cannot create an order from an empty cart");
+            throw new IllegalStateException("Cannot create an order: no items are selected for checkout");
         }
 
         // The order is constrained to the user's market: their explicitly selected country,
@@ -736,7 +743,7 @@ public class OrderService {
 
                     // Clear the cart safely (idempotent)
                     if (order.getCartId() != null) {
-                        clearCartItemsSafely(order.getCartId());
+                        cartCheckoutCleanupService.clearOrderedItems(order.getCartId());
                     }
                 }
             });
@@ -751,7 +758,7 @@ public class OrderService {
                 return;
             }
 
-            List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
+            List<CartItem> cartItems = cartItemRepo.findByCartIdAndSelectedTrue(cart.getId());
             if (cartItems.isEmpty()) {
                 log.warn("[ORDER] Cart has no items: cartId={}", cart.getId());
                 return;
@@ -879,7 +886,7 @@ public class OrderService {
             // }
 
             // Clear cart items and mark cart ABANDONED so the customer can start fresh
-            clearCartItemsSafely(cart.getId());
+            cartCheckoutCleanupService.clearOrderedItems(cart.getId());
         }
     }
 
@@ -960,33 +967,6 @@ public class OrderService {
         });
     }
 
-    /**
-     * Safely clears cart items and their specs, then marks the cart as ABANDONED.
-     * Uses robust JPQL queries and check-then-delete to avoid StaleStateException.
-     */
-    private void clearCartItemsSafely(UUID cartId) {
-        cartRepo.findById(cartId).ifPresent(cart -> {
-            if (cart.getStatus() == Cart.CartStatus.ABANDONED) {
-                log.debug("[ORDER] Cart {} already abandoned. Skipping deletion.", cartId);
-                return;
-            }
-
-            log.info("[ORDER] Safely clearing cart items for cartId={}", cartId);
-            
-            // Delete specs first (child rows) using robust JPQL
-            cartItemSpecSelectionRepo.deleteByCartId(cartId);
-            
-            // Delete items using robust JPQL (bypasses entity lifecycle check)
-            cartItemRepo.deleteByCartId(cartId);
-            
-            // Update cart status and total
-            cart.setStatus(Cart.CartStatus.ABANDONED);
-            cart.setTotalPrice(BigDecimal.ZERO);
-            cartRepo.saveAndFlush(cart);
-            
-            log.info("[ORDER] Cart {} cleared successfully.", cartId);
-        });
-    }
 
     @SuppressWarnings("unused") // kept for future re-enable of courier-backend integration
     private void pushToCourier(Order order) {
@@ -2325,6 +2305,12 @@ public class OrderService {
      * AFTER_COMMIT event was lost). This job finds such orders whose transaction is
      * actually SUCCESS and completes them. It is PROMOTE-ONLY — it never cancels or
      * fails an order — so it can never void or mis-handle a real payment. Runs every 5 min.
+     *
+     * <p>Cluster-safety, stated once because three fixes now meet here: this job runs on BOTH
+     * replicas (no ShedLock). It is promote-only — transitionTo(PAID) never touches stock — and
+     * the cart clear is safe to run twice ONLY because clearOrderedItems deletes selected rows and
+     * leaves survivors unticked, so the second replica's pass matches zero rows. Do not "improve"
+     * this by re-ticking survivors.
      */
     @org.springframework.scheduling.annotation.Scheduled(
             fixedDelayString = "${order.reconciliation-interval-ms:300000}")
@@ -2353,7 +2339,7 @@ public class OrderService {
             appendTrackingEvent(order, OrderStatus.PAID, "Payment reconciled (webhook recovery)",
                     null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
             orderRepo.save(order);
-            if (order.getCartId() != null) clearCartItemsSafely(order.getCartId());
+            if (order.getCartId() != null) cartCheckoutCleanupService.clearOrderedItems(order.getCartId());
             promoted++;
         }
         if (promoted > 0) {

@@ -34,6 +34,18 @@ public class CartItem {
     @Column(name = "quantity", nullable = false)
     private Integer quantity = 1;
 
+    /**
+     * False when the shopper has unticked this line on the cart page.
+     *
+     * <p>The row stays in the cart, is excluded from cart.totalPrice, and is NOT turned into an
+     * OrderItem — before this flag the checkbox was pure Redux state, and an unticked item was
+     * still priced, stock-decremented, charged and shipped while the cart page showed a total
+     * without it. Defaults to true so every existing row and every client that does not know about
+     * selection behaves exactly as before.
+     */
+    @Column(name = "selected", nullable = false)
+    private boolean selected = true;
+
     @Column(name = "unit_price", precision = 12, scale = 2, nullable = false)
     private BigDecimal unitPrice;
 
@@ -100,6 +112,9 @@ public class CartItem {
 
     public Integer getQuantity() { return quantity; }
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
+
+    public boolean isSelected() { return selected; }
+    public void setSelected(boolean selected) { this.selected = selected; }
 
     public BigDecimal getUnitPrice() { return unitPrice; }
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }

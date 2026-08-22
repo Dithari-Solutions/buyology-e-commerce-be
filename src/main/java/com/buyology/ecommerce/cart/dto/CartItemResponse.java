@@ -21,6 +21,12 @@ public class CartItemResponse {
     private BigDecimal originalTotalPrice;
     /** True when the item's store is within the 30-minute delivery radius of the user's location. */
     private boolean quickDelivery;
+
+    /**
+     * Whether this line will be part of the order. Defaults to true so any path that forgets to
+     * set it still means "will be ordered" — the safe direction, matching the entity default.
+     */
+    private boolean selected = true;
     private List<CartItemSpecSelectionResponse> selectedSpecs;
     private Instant createdAt;
     private Instant updatedAt;
@@ -63,6 +69,8 @@ public class CartItemResponse {
 
     public boolean isQuickDelivery() { return quickDelivery; }
     public void setQuickDelivery(boolean quickDelivery) { this.quickDelivery = quickDelivery; }
+    public boolean isSelected() { return selected; }
+    public void setSelected(boolean selected) { this.selected = selected; }
 
     public List<CartItemSpecSelectionResponse> getSelectedSpecs() { return selectedSpecs; }
     public void setSelectedSpecs(List<CartItemSpecSelectionResponse> selectedSpecs) { this.selectedSpecs = selectedSpecs; }

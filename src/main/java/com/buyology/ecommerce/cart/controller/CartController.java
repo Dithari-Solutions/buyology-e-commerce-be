@@ -64,6 +64,23 @@ public class CartController {
         return cartService.clearCart(authCredentialId);
     }
 
+    @Operation(summary = "Tick or untick one cart line. Unticked lines stay in the cart but are not ordered.")
+    @PatchMapping("/{authCredentialId}/items/{cartItemId}/selection")
+    public ResponseEntity<ApiResponse<CartResponse>> setItemSelection(
+            @PathVariable UUID authCredentialId,
+            @PathVariable UUID cartItemId,
+            @RequestParam boolean selected) {
+        return cartService.setItemSelection(authCredentialId, cartItemId, selected);
+    }
+
+    @Operation(summary = "Tick or untick every cart line at once.")
+    @PatchMapping("/{authCredentialId}/selection")
+    public ResponseEntity<ApiResponse<CartResponse>> setAllSelection(
+            @PathVariable UUID authCredentialId,
+            @RequestParam boolean selected) {
+        return cartService.setAllSelection(authCredentialId, selected);
+    }
+
     @Operation(summary = "Checkout the active cart")
     @PostMapping("/{authCredentialId}/checkout")
     public ResponseEntity<ApiResponse<CartResponse>> checkout(@PathVariable UUID authCredentialId) {
