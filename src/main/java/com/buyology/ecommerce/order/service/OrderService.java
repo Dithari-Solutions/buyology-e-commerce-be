@@ -123,6 +123,8 @@ public class OrderService {
      * call would bypass the proxy, and with it the propagation that makes those writes land.
      */
     private final org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider;
+    /** Plain injection, NOT selfProvider: this one is meant to join the caller's transaction. */
+    private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -158,6 +160,7 @@ public class OrderService {
                         org.springframework.beans.factory.ObjectProvider<com.buyology.ecommerce.payment.service.PaymentService> paymentServiceProvider,
                         com.buyology.ecommerce.membership.service.CreditReturnService creditReturnService,
                         org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider,
+                        com.buyology.ecommerce.store.service.StockReservationService stockReservationService,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -191,6 +194,7 @@ public class OrderService {
         this.paymentServiceProvider = paymentServiceProvider;
         this.creditReturnService = creditReturnService;
         this.selfProvider = selfProvider;
+        this.stockReservationService = stockReservationService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -251,7 +255,11 @@ public class OrderService {
             log.warn("[ORDER] createOrder: cart {} changed since PENDING_PAYMENT order {} "
                             + "(subtotal {} -> {}); cancelling the stale order and creating a fresh one",
                     cart.getId(), prior.getId(), priorSubtotal, currentSubtotal);
-            prior.setStatus(OrderStatus.CANCELLED);
+            // transitionTo also puts the stale order's stock back, in this transaction and
+            // before the decrement loop below asks for the same units. Reversed, a customer whose
+            // cart merely changed would be told "Insufficient stock" for units their own dead
+            // order is sitting on.
+            transitionTo(prior, OrderStatus.CANCELLED);
             orderRepo.save(prior);
             // Hand back the promo code the stale order was holding. It is not paid and never will
             // be, and the fresh order built below is about to ask for the same code — without this
@@ -389,7 +397,7 @@ public class OrderService {
             order.setDeliveryLongitude(address.getLongitude());
         }
 
-        order.setStatus(OrderStatus.PENDING_PAYMENT);
+        transitionTo(order, OrderStatus.PENDING_PAYMENT);
 
         // Pricing
         BigDecimal subtotal = cart.getTotalPrice();
@@ -502,6 +510,14 @@ public class OrderService {
             item.setSupplierId(cartItem.getProduct().getSupplierId());
             order.getItems().add(item);
         }
+
+        // Record that this order is now holding stock. Every line above either decremented the
+        // store listing, or soft-decremented the product's display stock, or both — and the loop
+        // throws on a failed decrement, so reaching here means they all succeeded. This stamp is
+        // what tells StockReservationService there is something to give back, and its absence is
+        // what stops B2B quote orders (which never come through here and never decrement) from
+        // being credited units they never took.
+        order.setStockReservedAt(Instant.now());
 
         // Initial tracking event
         appendTrackingEvent(order, OrderStatus.PENDING_PAYMENT, "Order created, awaiting payment",
@@ -637,7 +653,7 @@ public class OrderService {
                                 order.getTotalAmount(), order.getCurrency());
                         return;
                     }
-                    order.setStatus(OrderStatus.PAID);
+                    transitionTo(order, OrderStatus.PAID);
                     order.setPaymentTransactionId(event.getTransactionId());
                     order.setPaidAt(Instant.now());
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
@@ -768,7 +784,7 @@ public class OrderService {
                             order.getId(), tx.getId(), tx.getAmount(), tx.getCurrency(),
                             order.getTotalAmount(), order.getCurrency());
                 } else {
-                    order.setStatus(OrderStatus.PAID);
+                    transitionTo(order, OrderStatus.PAID);
                     order.setPaymentTransactionId(event.getTransactionId());
                     order.setPaidAt(Instant.now());
                     appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
@@ -857,7 +873,7 @@ public class OrderService {
         orderRepo.findById(tx.getAppOrderId()).ifPresent(order -> {
             if (order.getStatus() == OrderStatus.PENDING_PAYMENT
                     || order.getStatus() == OrderStatus.PROCESSING) {
-                order.setStatus(OrderStatus.FAILED);
+                transitionTo(order, OrderStatus.FAILED);
                 order.setPaymentTransactionId(event.getTransactionId());
                 String reason = event.getReason() != null ? event.getReason() : "Payment failed";
                 appendTrackingEvent(order, OrderStatus.FAILED, reason,
@@ -1169,8 +1185,7 @@ public class OrderService {
             order.setCancellationReason(req.getCancellationReason());
         }
 
-        applyMilestoneTimestamp(order, req.getStatus());
-        order.setStatus(req.getStatus());
+        transitionTo(order, req.getStatus());
 
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, null, adminUserId, "ADMIN");
@@ -1230,8 +1245,7 @@ public class OrderService {
         if (req.getTrackingCode() != null) order.setTrackingCode(req.getTrackingCode());
         if (req.getCarrierName() != null)  order.setCarrierName(req.getCarrierName());
 
-        applyMilestoneTimestamp(order, req.getStatus());
-        order.setStatus(req.getStatus());
+        transitionTo(order, req.getStatus());
 
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, req.getLocationDescription(), adminUserId, "ADMIN");
@@ -1306,8 +1320,7 @@ public class OrderService {
         validateTransition(order.getStatus(), OrderStatus.CANCELLED, order.getDeliveryMethod());
 
         order.setCancellationReason(reason);
-        applyMilestoneTimestamp(order, OrderStatus.CANCELLED);
-        order.setStatus(OrderStatus.CANCELLED);
+        transitionTo(order, OrderStatus.CANCELLED);
         appendTrackingEvent(order, OrderStatus.CANCELLED,
                 reason != null ? reason : "Cancelled by customer",
                 null, null, null, userId, "CUSTOMER");
@@ -1708,8 +1721,7 @@ public class OrderService {
 
         validateTransition(order.getStatus(), target, order.getDeliveryMethod());
 
-        applyMilestoneTimestamp(order, target);
-        order.setStatus(target);
+        transitionTo(order, target);
 
         appendTrackingEvent(order, target, req.getNotes(),
                 req.getLatitude(), req.getLongitude(),
@@ -1738,7 +1750,7 @@ public class OrderService {
             order.setCourierName(courierName);
             order.setCourierPhone(courierPhone);
             if (order.getStatus() == OrderStatus.PAID) {
-                order.setStatus(OrderStatus.COURIER_ASSIGNED);
+                transitionTo(order, OrderStatus.COURIER_ASSIGNED);
                 appendTrackingEvent(order, OrderStatus.COURIER_ASSIGNED,
                         "Courier assigned by delivery service",
                         null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
@@ -1791,8 +1803,7 @@ public class OrderService {
                 return;
             }
 
-            applyMilestoneTimestamp(order, target);
-            order.setStatus(target);
+            transitionTo(order, target);
             appendTrackingEvent(order, target, "Synced from courier backend",
                     null, null, null, proofImageUrl, SYSTEM_ACTOR_ID, "SYSTEM");
             orderRepo.save(order);
@@ -1848,8 +1859,7 @@ public class OrderService {
             return false;
         }
 
-        applyMilestoneTimestamp(order, target);
-        order.setStatus(target);
+        transitionTo(order, target);
         appendTrackingEvent(order, target, note, null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
         Order saved = orderRepo.save(order);
         log.info("[QUIQUP] Order {} moved to {} by the delivery partner", orderId, target);
@@ -2003,8 +2013,7 @@ public class OrderService {
             throw new IllegalArgumentException("Suppliers cannot cancel or fail orders");
         }
         validateTransition(order.getStatus(), newStatus, order.getDeliveryMethod());
-        applyMilestoneTimestamp(order, newStatus);
-        order.setStatus(newStatus);
+        transitionTo(order, newStatus);
         appendTrackingEvent(order, newStatus, notes, null, null, null, supplier.getId(), "SUPPLIER");
         Order saved = orderRepo.save(order);
         runAfterCommit(() -> {
@@ -2080,7 +2089,7 @@ public class OrderService {
             if (tx == null) continue;                       // no successful payment — leave as-is
             if (!isPaidAmountSufficient(order, tx)) continue; // underpaid — leave for manual review
 
-            order.setStatus(OrderStatus.PAID);
+            transitionTo(order, OrderStatus.PAID);
             order.setPaymentTransactionId(tx.getId());
             order.setPaidAt(Instant.now());
             appendTrackingEvent(order, OrderStatus.PAID, "Payment reconciled (webhook recovery)",
@@ -2145,6 +2154,54 @@ public class OrderService {
             throw new IllegalStateException(
                     "Invalid status transition: " + current + " → " + next);
         }
+    }
+
+    /**
+     * The one place an order's status changes.
+     *
+     * <p>It exists because stock did not use to come back. createOrder decrements a store
+     * listing's stock the moment the order is built, and six different places wrote the terminal
+     * status that should have returned it — customer cancel, admin cancel, the delivery partner,
+     * the courier sync, the payment-failed listener, and createOrder's own cancellation of a stale
+     * prior order. Every one of them would have had to remember, and none of them did: three
+     * declined cards on a five-unit variant left it at two with nothing sold.
+     *
+     * <p>So the release is not something a branch calls. It is something a status change does, and
+     * a terminal branch added later gets it by writing its status the only way this class allows.
+     */
+    private void transitionTo(Order order, OrderStatus target) {
+        OrderStatus from = order.getStatus();
+        applyMilestoneTimestamp(order, target);
+        order.setStatus(target);
+
+        if (releasesStock(from, target)) {
+            // In THIS transaction, deliberately — see StockReservationService.releaseForOrder for
+            // why splitting it off would both hang and double-count.
+            stockReservationService.releaseForOrder(order);
+        } else if (target == OrderStatus.FAILED
+                && order.getStockReservedAt() != null && order.getStockRestoredAt() == null) {
+            log.error("[STOCK] Order {} failed at {} while still holding reserved stock. The parcel "
+                    + "is out of our hands, so the units are NOT returned automatically — restock "
+                    + "them when it physically comes back.", order.getId(), from);
+        }
+    }
+
+    /**
+     * Which terminal transitions put the units back on the shelf.
+     *
+     * <p>Cancellation always does: it is only allowed up to IN_COURIER, the business already
+     * auto-refunds there, and the goods come back to us. A failed <em>payment</em> does too —
+     * nothing ever left. A failed <em>delivery</em> does not: that parcel is with a courier or on
+     * its way back, and inventing a sellable unit for it oversells the last one. Whether a human
+     * refunds or redelivers is already an open question at that point.
+     */
+    @SuppressWarnings("deprecation") // PROCESSING kept for historical orders
+    static boolean releasesStock(OrderStatus from, OrderStatus to) {
+        if (to == OrderStatus.CANCELLED) {
+            return true;
+        }
+        return to == OrderStatus.FAILED
+                && (from == OrderStatus.PENDING_PAYMENT || from == OrderStatus.PROCESSING);
     }
 
     @SuppressWarnings("deprecation") // SHIPPED kept for legacy orders

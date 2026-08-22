@@ -220,6 +220,25 @@ public class Order {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    /**
+     * Set by createOrder once this order has taken units out of store stock.
+     *
+     * <p>NULL means the order never reserved anything — B2B quote orders, which are built without
+     * going through createOrder, and orders predating V35 that the migration could not identify.
+     * There is nothing to give back for those.
+     */
+    @Column(name = "stock_reserved_at")
+    private Instant stockReservedAt;
+
+    /**
+     * Set when those units went back on the shelf.
+     *
+     * <p>Non-NULL is the proof that the return already happened, and it is the whole of what makes
+     * restoring idempotent — see StockReservationService.
+     */
+    @Column(name = "stock_restored_at")
+    private Instant stockRestoredAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -461,6 +480,10 @@ public class Order {
 
     public Instant getCancelledAt() { return cancelledAt; }
     public void setCancelledAt(Instant cancelledAt) { this.cancelledAt = cancelledAt; }
+    public Instant getStockReservedAt() { return stockReservedAt; }
+    public void setStockReservedAt(Instant stockReservedAt) { this.stockReservedAt = stockReservedAt; }
+    public Instant getStockRestoredAt() { return stockRestoredAt; }
+    public void setStockRestoredAt(Instant stockRestoredAt) { this.stockRestoredAt = stockRestoredAt; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

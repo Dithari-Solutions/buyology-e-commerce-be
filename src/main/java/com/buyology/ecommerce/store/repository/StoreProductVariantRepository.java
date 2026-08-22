@@ -33,4 +33,27 @@ public interface StoreProductVariantRepository extends JpaRepository<StoreProduc
                        @Param("productId") UUID productId,
                        @Param("variantId") UUID variantId,
                        @Param("qty") int qty);
+
+    /**
+     * Puts stock back for the store-listing of the given (store, product, variant) when the order
+     * that reserved it dies.
+     *
+     * <p>The mirror of {@link #decrementStock}, and deliberately a statement rather than a
+     * read-modify-write on the entity: the decrement is a statement too, so the two compose
+     * correctly when both run in one transaction — which happens in createOrder, where a stale
+     * order is cancelled and the fresh one then decrements the same row.
+     *
+     * <p>No lower guard, unlike the decrement: putting units back can never oversell.
+     *
+     * @return 1 when the listing was found, 0 when it no longer exists (delisted since the order)
+     */
+    @Modifying
+    @Query("update StoreProductVariant v set v.stock = v.stock + :qty " +
+           "where v.variant.id = :variantId " +
+           "and v.storeProduct.product.id = :productId " +
+           "and v.storeProduct.store.id = :storeId")
+    int incrementStock(@Param("storeId") UUID storeId,
+                       @Param("productId") UUID productId,
+                       @Param("variantId") UUID variantId,
+                       @Param("qty") int qty);
 }

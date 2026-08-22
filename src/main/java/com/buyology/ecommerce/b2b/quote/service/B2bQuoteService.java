@@ -90,6 +90,7 @@ public class B2bQuoteService {
     private final ContaboObjectService contaboObjectService;
     private final B2bMembershipApplicationRepository membershipApplicationRepo;
     private final ProductMediaRepository productMediaRepository;
+    private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String procurementEmail;
@@ -112,7 +113,8 @@ public class B2bQuoteService {
                            UserRoleRepository userRoleRepository,
                            ContaboObjectService contaboObjectService,
                            B2bMembershipApplicationRepository membershipApplicationRepo,
-                           ProductMediaRepository productMediaRepository) {
+                           ProductMediaRepository productMediaRepository,
+                           com.buyology.ecommerce.store.service.StockReservationService stockReservationService) {
         this.quoteRepo = quoteRepo;
         this.itemRepo = itemRepo;
         this.membershipRepo = membershipRepo;
@@ -129,6 +131,7 @@ public class B2bQuoteService {
         this.contaboObjectService = contaboObjectService;
         this.membershipApplicationRepo = membershipApplicationRepo;
         this.productMediaRepository = productMediaRepository;
+        this.stockReservationService = stockReservationService;
     }
 
     // =========================================================================
@@ -738,7 +741,14 @@ public class B2bQuoteService {
         // Cancel the pending order so a re-submission builds a fresh one.
         if (quote.getOrderId() != null) {
             orderRepo.findById(quote.getOrderId()).ifPresent(o -> {
+                o.setCancelledAt(java.time.Instant.now());
                 o.setStatus(OrderStatus.CANCELLED);
+                // A B2B quote order never decremented stock — buildOrderFromQuote does not go
+                // through createOrder — so this is a no-op today: stockReservedAt is null and the
+                // service returns false. It is wired anyway so that the day B2B does reserve, the
+                // release is already here rather than being the eighth place someone has to
+                // remember. Same transaction as the status, which is what makes it exactly-once.
+                stockReservationService.releaseForOrder(o);
                 orderRepo.save(o);
             });
             quote.setOrderId(null);
