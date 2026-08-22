@@ -38,6 +38,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     // of creating a duplicate order + charge.
     Optional<Order> findFirstByCartIdAndStatusIn(UUID cartId, List<OrderStatus> statuses);
 
+    /**
+     * Every order this cart has produced that is still payable or paid, newest first.
+     *
+     * <p>createOrder classifies ALL of them, not just the newest: a bug or a race that left two
+     * PENDING_PAYMENT orders on one cart would otherwise keep the older one forever invisible,
+     * holding its stock and its promo claim.
+     */
+    List<Order> findAllByCartIdAndStatusInOrderByCreatedAtDesc(UUID cartId, List<OrderStatus> statuses);
+
     @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
            "WHERE (:status IS NULL OR o.status = :status) " +
            "AND (:deliveryMethod IS NULL OR o.deliveryMethod = :deliveryMethod) " +

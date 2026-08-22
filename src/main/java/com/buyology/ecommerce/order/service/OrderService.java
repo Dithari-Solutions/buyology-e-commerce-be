@@ -228,49 +228,25 @@ public class OrderService {
                     "Cart must be in CHECKED_OUT status to create an order. Current status: " + cart.getStatus());
         }
 
-        // Idempotency: if this cart already produced an order that is still payable or paid
-        // — e.g. the app was killed after createOrder but before payment, the cart stayed
-        // CHECKED_OUT, and the user re-entered checkout and paid again — return THAT order
-        // instead of creating a duplicate order + second charge for the same cart. (The
-        // in-app repay path already covers the same-session case; this closes the
-        // relaunch/cross-session case. Buy Now uses a fresh ephemeral cart per call, so it
-        // never matches here.)
-        Optional<Order> existingOrder = orderRepo.findFirstByCartIdAndStatusIn(
+        // Idempotency, in two halves.
+        //
+        // The PAID half is unconditional and runs before anything else is loaded: a PAID order
+        // means this cart's money is already taken, and nothing about coupons, addresses or
+        // delivery methods may ever cause a second order — or a second charge — for it. Running it
+        // first also keeps it reachable when the profile or promo checks below would throw.
+        //
+        // The PENDING_PAYMENT half is decided LATER, once the current checkout has been fully
+        // resolved — because deciding it on the cart subtotal alone was the bug: a promo, an
+        // address change or a switch to pickup leaves the subtotal untouched, and the customer got
+        // the old order verbatim. See CheckoutIdentity.
+        List<Order> priorOrders = orderRepo.findAllByCartIdAndStatusInOrderByCreatedAtDesc(
                 cart.getId(), List.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID));
-        if (existingOrder.isPresent()) {
-            Order prior = existingOrder.get();
-            BigDecimal priorSubtotal = prior.getSubtotal() == null ? BigDecimal.ZERO : prior.getSubtotal();
-            BigDecimal currentSubtotal = cart.getTotalPrice() == null ? BigDecimal.ZERO : cart.getTotalPrice();
-            // Reuse the prior order ONLY when it still reflects the cart:
-            //   • PAID → the user already paid for this cart; never duplicate it or re-charge.
-            //   • PENDING_PAYMENT with the SAME subtotal → a genuine double-tap / relaunch of the
-            //     same checkout; reuse it to avoid creating a duplicate order.
-            // If the cart's subtotal CHANGED since this order was created, the prior order (and
-            // its totalAmount) is STALE — reusing it charged the OLD amount at the gateway
-            // regardless of the current cart (the fixed-amount production bug seen on web + app).
-            // Cancel the stale order and fall through to build a fresh one for the current total.
-            if (prior.getStatus() == OrderStatus.PAID
-                    || priorSubtotal.compareTo(currentSubtotal) == 0) {
-                log.info("[ORDER] createOrder: reusing existing {} order {} for cart {} (idempotent)",
-                        prior.getStatus(), prior.getId(), cart.getId());
+        for (Order prior : priorOrders) {
+            if (prior.getStatus() == OrderStatus.PAID) {
+                log.info("[ORDER] createOrder: cart {} is already PAID by order {} — returning it "
+                        + "(idempotent)", cart.getId(), prior.getId());
                 return toOrderResponse(prior);
             }
-            log.warn("[ORDER] createOrder: cart {} changed since PENDING_PAYMENT order {} "
-                            + "(subtotal {} -> {}); cancelling the stale order and creating a fresh one",
-                    cart.getId(), prior.getId(), priorSubtotal, currentSubtotal);
-            // transitionTo also puts the stale order's stock back, in this transaction and
-            // before the decrement loop below asks for the same units. Reversed, a customer whose
-            // cart merely changed would be told "Insufficient stock" for units their own dead
-            // order is sitting on.
-            transitionTo(prior, OrderStatus.CANCELLED);
-            orderRepo.save(prior);
-            // Hand back the promo code the stale order was holding. It is not paid and never will
-            // be, and the fresh order built below is about to ask for the same code — without this
-            // the customer's own abandoned order refuses it to them, the replacement silently
-            // loses the discount, and a single-use code is burned on an order nobody ever paid.
-            // Joins this transaction on purpose: if the cancellation rolls back, the stale order is
-            // payable again and must keep its claim.
-            promoCodeService.releaseReservation(prior.getId());
         }
 
         List<CartItem> cartItems = cartItemRepo.findByCartId(cart.getId());
@@ -293,98 +269,57 @@ public class OrderService {
             marketCountry = cart.getCountryCode();
         }
 
-        boolean isPickup = req.getDeliveryMethod() == DeliveryMethod.PICKUP;
+        // Resolve the CURRENT checkout completely — method after the EXPRESS downgrade, the fee
+        // that method actually costs, and where the goods go — before deciding anything about
+        // prior orders. The reuse decision needs the resolved values, not the request's.
+        FulfilmentPlan plan = resolveFulfilment(userId, req, cart, cartItems, profile, marketCountry);
+
+        // What the order will be stamped with; also inputs to the reuse decision.
+        String currency = cart.getCurrency();
+        if (currency == null || currency.isBlank()) {
+            currency = profile.getPreferredCurrency();
+        }
+        String orderCountryCode = (marketCountry != null && !marketCountry.isBlank())
+                ? marketCountry : plan.country();
+
+        // The PENDING_PAYMENT half of the idempotency: reuse a prior order only when EVERY price-
+        // and fulfilment-deciding input still matches; supersede the rest. A double-tap matches
+        // trivially. A changed checkout supersedes — which returns the stale order's stock (via
+        // transitionTo) and its promo reservation before the fresh order asks for both.
+        Order reusable = null;
+        for (Order prior : priorOrders) {
+            if (reusable == null && CheckoutIdentity.isSameCheckout(
+                    prior, cart, cartItems, req, plan, currency, orderCountryCode)) {
+                reusable = prior;
+            } else {
+                supersedeStaleOrder(prior, cart.getId());
+            }
+        }
+        if (reusable != null) {
+            log.info("[ORDER] createOrder: reusing PENDING_PAYMENT order {} for cart {} — the "
+                    + "checkout is identical (idempotent)", reusable.getId(), cart.getId());
+            return toOrderResponse(reusable);
+        }
 
         // Build order
         Order order = new Order();
         order.setUserId(userId);
         order.setAuthCredentialId(authCredentialId);
         order.setCartId(cart.getId());
-
-        if (isPickup) {
-            // ── Store pickup: customer collects from a chosen branch; no address, no shipping ──
-            if (req.getPickupStoreId() == null) {
-                throw new IllegalArgumentException("Please choose a store to pick up from.");
-            }
-            StoreLocation branch = storeLocationRepo
-                    .findByStoreIdAndIsPrimary(req.getPickupStoreId(), true)
-                    .orElseGet(() -> storeLocationRepo
-                            .findAllByStoreIdAndIsActive(req.getPickupStoreId(), true)
-                            .stream().findFirst().orElse(null));
-            if (branch == null) {
-                throw new IllegalArgumentException("The selected store is not available for pickup.");
-            }
-            Store pickupStore = branch.getStore();
-            if (pickupStore == null) {
-                throw new IllegalArgumentException("The selected store is not available for pickup.");
-            }
-
-            // The customer may only collect from a store in their own market/country.
-            String storeCountry = (branch.getCountry() != null && !branch.getCountry().isBlank())
-                    ? branch.getCountry()
-                    : (pickupStore.getCountry() != null ? pickupStore.getCountry().getCode() : null);
-            if (marketCountry != null && !marketCountry.isBlank()
-                    && storeCountry != null && !isSameCountry(storeCountry, marketCountry)) {
-                throw new IllegalArgumentException(
-                        "You can only pick up from a store in your selected country (" + marketCountry + ").");
-            }
-
-            order.setDeliveryMethod(DeliveryMethod.PICKUP);
-            order.setShippingFee(BigDecimal.ZERO);
-            order.setEstimatedDeliveryTime(estimateDeliveryTime(DeliveryMethod.PICKUP));
-            order.setPickupStoreId(pickupStore.getId());
-            order.setPickupStoreName(pickupStore.getName());
-            order.setPickupStoreAddress(buildPickupAddress(branch));
+        order.setDeliveryMethod(plan.method());
+        order.setShippingFee(plan.shippingFee());
+        order.setEstimatedDeliveryTime(plan.estimatedDeliveryTime());
+        order.setCountry(plan.country());
+        if (plan.method() == DeliveryMethod.PICKUP) {
+            order.setPickupStoreId(plan.pickupStoreId());
+            order.setPickupStoreName(plan.pickupStoreName());
+            order.setPickupStoreAddress(plan.pickupStoreAddress());
             // Pickup contact + market snapshot (no delivery address).
             order.setRecipientFirstName(profile.getUser() != null ? profile.getUser().getFirstName() : null);
             order.setRecipientLastName(profile.getUser() != null ? profile.getUser().getLastName() : null);
             order.setRecipientPhone(profile.getPhoneNumber());
-            order.setCountry(storeCountry);
-            order.setCountryCode(marketCountry);
         } else {
-            UserAddress address = addressRepo.findById(req.getAddressId())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            req.getAddressId() == null
-                                    ? "addressId is required for delivery"
-                                    : "Address not found: " + req.getAddressId()));
-
-            if (address.getUser() == null || !userId.equals(address.getUser().getId())) {
-                throw new IllegalArgumentException("Address does not belong to the authenticated user");
-            }
-
-            // The delivery address must be in the user's market (when one is set).
-            if (marketCountry != null && !marketCountry.isBlank()
-                    && !isSameCountry(address.getCountry(), marketCountry)) {
-                throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
-                        + marketCountry + ").");
-            }
-
-            // Honor the customer's choice. EXPRESS is re-validated against the address
-            // (store within the 30-min radius); if it can't be fulfilled we quietly downgrade
-            // to REGULAR rather than failing the order — this must never throw, so it can't
-            // regress an order that previously succeeded.
-            DeliveryMethod requested = req.getDeliveryMethod();
-            DeliveryMethod method;
-            if (requested == DeliveryMethod.EXPRESS) {
-                DeliveryMethod resolved;
-                try {
-                    resolved = resolveDeliveryMethod(cartItems, address);
-                } catch (RuntimeException ex) {
-                    resolved = DeliveryMethod.REGULAR;
-                }
-                method = resolved;
-            } else if (requested != null) {
-                method = requested;
-            } else {
-                method = resolveDeliveryMethod(cartItems, address);
-            }
-            BigDecimal shippingFee = calculateShippingFee(
-                    cart.getTotalPrice(), cart.getCurrency(), method, address.getCountry());
-
-            order.setDeliveryMethod(method);
-            order.setShippingFee(shippingFee);
-            order.setEstimatedDeliveryTime(estimateDeliveryTime(method));
-
+            UserAddress address = plan.address();
             // Address snapshot
             order.setDeliveryAddressId(address.getId());
             order.setRecipientFirstName(address.getFirstName());
@@ -394,7 +329,6 @@ public class OrderService {
             order.setAddressLine2(address.getAddressLine2());
             order.setCity(address.getCity());
             order.setState(address.getState());
-            order.setCountry(address.getCountry());
             order.setPostalCode(address.getPostalCode());
             order.setDeliveryLatitude(address.getLatitude());
             order.setDeliveryLongitude(address.getLongitude());
@@ -437,14 +371,8 @@ public class OrderService {
         order.setDiscount(discount);
         order.setTotalAmount(totalAmount);
         
-        // Ensure currency is never null (fall back to profile if cart was somehow not stamped)
-        String currency = cart.getCurrency();
-        if (currency == null || currency.isBlank()) {
-            currency = profile.getPreferredCurrency();
-        }
         order.setCurrency(currency);
-        
-        order.setCountryCode(marketCountry != null && !marketCountry.isBlank() ? marketCountry : order.getCountry());
+        order.setCountryCode(orderCountryCode);
         order.setCouponCode(req.getCouponCode());
         order.setPromoCodeId(appliedPromoId);
 
@@ -532,6 +460,135 @@ public class OrderService {
         // not here — so a code only counts as redeemed once the order is actually paid.
 
         return toOrderResponse(order);
+    }
+
+    /**
+     * Everything about a checkout that decides the delivery fee and where the goods go.
+     *
+     * <p>Package-private so {@link CheckoutIdentity} can compare a prior order against it without
+     * reaching into OrderService.
+     */
+    record FulfilmentPlan(DeliveryMethod method,
+                          BigDecimal shippingFee,
+                          String estimatedDeliveryTime,
+                          UUID pickupStoreId, String pickupStoreName, String pickupStoreAddress,
+                          UUID addressId, UserAddress address,
+                          String country) {
+    }
+
+    /**
+     * Resolves the current checkout — validation, the EXPRESS downgrade, the fee — WITHOUT touching
+     * an order. Extracted from createOrder so the result exists before the reuse decision: whether
+     * a prior order is still this checkout can only be judged against the RESOLVED method and fee,
+     * not the raw request.
+     */
+    private FulfilmentPlan resolveFulfilment(UUID userId, CreateOrderRequest req, Cart cart,
+                                             List<CartItem> cartItems, UserProfiles profile,
+                                             String marketCountry) {
+        if (req.getDeliveryMethod() == DeliveryMethod.PICKUP) {
+            // ── Store pickup: customer collects from a chosen branch; no address, no shipping ──
+            if (req.getPickupStoreId() == null) {
+                throw new IllegalArgumentException("Please choose a store to pick up from.");
+            }
+            StoreLocation branch = storeLocationRepo
+                    .findByStoreIdAndIsPrimary(req.getPickupStoreId(), true)
+                    .orElseGet(() -> storeLocationRepo
+                            .findAllByStoreIdAndIsActive(req.getPickupStoreId(), true)
+                            .stream().findFirst().orElse(null));
+            if (branch == null) {
+                throw new IllegalArgumentException("The selected store is not available for pickup.");
+            }
+            Store pickupStore = branch.getStore();
+            if (pickupStore == null) {
+                throw new IllegalArgumentException("The selected store is not available for pickup.");
+            }
+
+            // The customer may only collect from a store in their own market/country.
+            String storeCountry = (branch.getCountry() != null && !branch.getCountry().isBlank())
+                    ? branch.getCountry()
+                    : (pickupStore.getCountry() != null ? pickupStore.getCountry().getCode() : null);
+            if (marketCountry != null && !marketCountry.isBlank()
+                    && storeCountry != null && !isSameCountry(storeCountry, marketCountry)) {
+                throw new IllegalArgumentException(
+                        "You can only pick up from a store in your selected country (" + marketCountry + ").");
+            }
+
+            return new FulfilmentPlan(DeliveryMethod.PICKUP, BigDecimal.ZERO,
+                    estimateDeliveryTime(DeliveryMethod.PICKUP),
+                    pickupStore.getId(), pickupStore.getName(), buildPickupAddress(branch),
+                    null, null, storeCountry);
+        }
+
+        UserAddress address = addressRepo.findById(req.getAddressId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        req.getAddressId() == null
+                                ? "addressId is required for delivery"
+                                : "Address not found: " + req.getAddressId()));
+
+        if (address.getUser() == null || !userId.equals(address.getUser().getId())) {
+            throw new IllegalArgumentException("Address does not belong to the authenticated user");
+        }
+
+        // The delivery address must be in the user's market (when one is set).
+        if (marketCountry != null && !marketCountry.isBlank()
+                && !isSameCountry(address.getCountry(), marketCountry)) {
+            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
+                    + marketCountry + ").");
+        }
+
+        // Honor the customer's choice. EXPRESS is re-validated against the address (store within
+        // the 30-min radius); if it can't be fulfilled we quietly downgrade to REGULAR rather than
+        // failing the order — this must never throw, so it can't regress an order that previously
+        // succeeded.
+        DeliveryMethod requested = req.getDeliveryMethod();
+        DeliveryMethod method;
+        if (requested == DeliveryMethod.EXPRESS) {
+            DeliveryMethod resolved;
+            try {
+                resolved = resolveDeliveryMethod(cartItems, address);
+            } catch (RuntimeException ex) {
+                resolved = DeliveryMethod.REGULAR;
+            }
+            method = resolved;
+        } else if (requested != null) {
+            method = requested;
+        } else {
+            method = resolveDeliveryMethod(cartItems, address);
+        }
+        BigDecimal shippingFee = calculateShippingFee(
+                cart.getTotalPrice(), cart.getCurrency(), method, address.getCountry());
+
+        return new FulfilmentPlan(method, shippingFee, estimateDeliveryTime(method),
+                null, null, null, address.getId(), address, address.getCountry());
+    }
+
+    /**
+     * Cancels a prior PENDING_PAYMENT order that no longer matches the checkout being submitted.
+     *
+     * <p>Plain private and REQUIRED — deliberately neither REQUIRES_NEW nor proxied. This is not an
+     * after-commit callback; it runs inside createOrder's own transaction, and that is the point:
+     * if createOrder rolls back, the stale order must be payable again with its stock and its promo
+     * claim intact, not half-cancelled with no replacement.
+     *
+     * <p>Deliberately does NOT call applyCancellationSideEffects: that path refunds money and
+     * emails cancellation notices, and a PENDING_PAYMENT order has taken no money — firing it here
+     * would email the customer a cancellation in the middle of their own checkout.
+     *
+     * <p>Must run BEFORE the promo validation and the stock decrement below it: the stale order is
+     * holding the very code and the very units the fresh order is about to ask for.
+     */
+    private void supersedeStaleOrder(Order stale, UUID cartId) {
+        String reason = "Superseded by a re-entered checkout for cart " + cartId;
+        log.warn("[ORDER] createOrder: checkout for cart {} no longer matches PENDING_PAYMENT order {} "
+                + "(fee/coupon/address/method/basket changed); cancelling it", cartId, stale.getId());
+        stale.setCancellationReason(reason);
+        // transitionTo stamps cancelledAt and returns the stock, in this transaction.
+        transitionTo(stale, OrderStatus.CANCELLED);
+        appendTrackingEvent(stale, OrderStatus.CANCELLED, reason,
+                null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+        orderRepo.save(stale);
+        // Joins this transaction on purpose — see the class comment above.
+        promoCodeService.releaseReservation(stale.getId());
     }
 
     /**
@@ -743,6 +800,13 @@ public class OrderService {
 
             CreateOrderRequest req = new CreateOrderRequest();
             req.setCartId(tx.getCartId());
+
+            // Carry the coupon from an order-first order already standing on this cart. Paymob's
+            // metadata never carries couponCode, so without this the stricter CheckoutIdentity
+            // would read "coupon removed", supersede a discounted order, rebuild it at full price
+            // — and the underpayment check would then flag the customer's own correct payment.
+            orderRepo.findFirstByCartIdAndStatusIn(tx.getCartId(), List.of(OrderStatus.PENDING_PAYMENT))
+                    .ifPresent(pending -> req.setCouponCode(pending.getCouponCode()));
 
             if (isPickup) {
                 if (pickupStoreId == null) {
