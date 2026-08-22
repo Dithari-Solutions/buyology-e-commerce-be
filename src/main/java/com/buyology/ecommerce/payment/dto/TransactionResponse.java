@@ -19,6 +19,10 @@ public class TransactionResponse {
     private String paymobTransactionId;
     private String failureReason;
     private String failureCode;
+    /** Last four digits of the paying card, when Paymob reported them. */
+    private String cardLast4;
+    /** Card brand (e.g. "MasterCard"), when Paymob reported it. */
+    private String cardBrand;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -51,6 +55,10 @@ public class TransactionResponse {
 
     public String getFailureCode() { return failureCode; }
     public void setFailureCode(String failureCode) { this.failureCode = failureCode; }
+    public String getCardLast4() { return cardLast4; }
+    public void setCardLast4(String cardLast4) { this.cardLast4 = cardLast4; }
+    public String getCardBrand() { return cardBrand; }
+    public void setCardBrand(String cardBrand) { this.cardBrand = cardBrand; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

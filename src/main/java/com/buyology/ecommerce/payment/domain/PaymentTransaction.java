@@ -126,6 +126,14 @@ public class PaymentTransaction {
     @Column(name = "failure_code", length = 50)
     private String failureCode;
 
+    /** Last four digits of the paying card, parsed from Paymob's masked source_data.pan. */
+    @Column(name = "card_last4", length = 4)
+    private String cardLast4;
+
+    /** Card brand as Paymob reports it (source_data.sub_type, e.g. "MasterCard"). */
+    @Column(name = "card_brand", length = 32)
+    private String cardBrand;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "metadata", columnDefinition = "jsonb")
     private String metadata;
@@ -227,6 +235,10 @@ public class PaymentTransaction {
 
     public String getFailureCode() { return failureCode; }
     public void setFailureCode(String failureCode) { this.failureCode = failureCode; }
+    public String getCardLast4() { return cardLast4; }
+    public void setCardLast4(String cardLast4) { this.cardLast4 = cardLast4; }
+    public String getCardBrand() { return cardBrand; }
+    public void setCardBrand(String cardBrand) { this.cardBrand = cardBrand; }
 
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }

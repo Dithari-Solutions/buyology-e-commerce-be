@@ -903,8 +903,29 @@ public class PaymentService {
         return true;
     }
 
+    /**
+     * Remember which card paid, for the customer's order page. Paymob's {@code source_data.pan}
+     * arrives already masked (e.g. {@code 512345xxxxxx1234}); only its last four digits and the
+     * brand ({@code sub_type}) are stored — never anything resembling a full PAN. Failure
+     * callbacks carry it too, which is fine: the display joins through a SUCCESS transaction.
+     */
+    private void captureCardIdentity(PaymentTransaction tx, JsonNode obj) {
+        JsonNode src = obj.path("source_data");
+        if (src.isMissingNode() || src.isNull()) return;
+        String pan = src.path("pan").asText("");
+        String digits = pan.replaceAll("\\D", "");
+        if (digits.length() >= 4) {
+            tx.setCardLast4(digits.substring(digits.length() - 4));
+        }
+        String brand = src.path("sub_type").asText("");
+        if (!brand.isBlank()) {
+            tx.setCardBrand(brand.length() > 32 ? brand.substring(0, 32) : brand);
+        }
+    }
+
     private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode obj, Long paymobTxnId) {
         tx.setPaymobTransactionId(paymobTxnId);
+        captureCardIdentity(tx, obj);
 
         boolean success = obj.has("success") && obj.get("success").asBoolean();
 
@@ -1094,6 +1115,8 @@ public class PaymentService {
         res.setPaymobTransactionId(tx.getPaymobTransactionId() != null ? tx.getPaymobTransactionId().toString() : null);
         res.setFailureReason(tx.getFailureReason());
         res.setFailureCode(tx.getFailureCode());
+        res.setCardLast4(tx.getCardLast4());
+        res.setCardBrand(tx.getCardBrand());
         res.setCreatedAt(tx.getCreatedAt());
         res.setUpdatedAt(tx.getUpdatedAt());
         return res;
