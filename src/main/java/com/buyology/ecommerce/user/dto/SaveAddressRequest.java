@@ -25,6 +25,10 @@ public class SaveAddressRequest {
 
     private AddressLabel label = AddressLabel.HOME;
 
+    /** Free-text name shown instead of the label; intended for label=OTHER. Optional, max 60. */
+    @jakarta.validation.constraints.Size(max = 60)
+    private String customLabel;
+
     @NotBlank
     @Size(max = 255)
     private String addressLine1;
@@ -65,6 +69,8 @@ public class SaveAddressRequest {
     public void setPhoneNumber(String phoneNumber) { this.phoneNumber = phoneNumber; }
 
     public AddressLabel getLabel() { return label; }
+    public String getCustomLabel() { return customLabel; }
+    public void setCustomLabel(String customLabel) { this.customLabel = customLabel; }
     public void setLabel(AddressLabel label) { this.label = label; }
 
     public String getAddressLine1() { return addressLine1; }

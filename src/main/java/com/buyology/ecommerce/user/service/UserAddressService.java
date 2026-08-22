@@ -118,6 +118,8 @@ public class UserAddressService {
         address.setPhoneNumber(phone);
         address.setPhoneVerified(phoneVerified);
         address.setLabel(req.getLabel());
+        address.setCustomLabel(req.getCustomLabel() == null || req.getCustomLabel().isBlank()
+                ? null : req.getCustomLabel().trim());
         address.setAddressLine1(req.getAddressLine1());
         address.setAddressLine2(req.getAddressLine2());
         address.setCity(city);
@@ -228,6 +230,7 @@ public class UserAddressService {
         res.setPhoneNumber(a.getPhoneNumber());
         res.setPhoneVerified(a.isPhoneVerified());
         res.setLabel(a.getLabel());
+        res.setCustomLabel(a.getCustomLabel());
         res.setAddressLine1(a.getAddressLine1());
         res.setAddressLine2(a.getAddressLine2());
         res.setCity(a.getCity());

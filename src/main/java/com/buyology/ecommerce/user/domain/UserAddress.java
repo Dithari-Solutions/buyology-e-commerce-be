@@ -48,6 +48,13 @@ public class UserAddress {
     @Column(name = "label", nullable = false, length = 10)
     private AddressLabel label = AddressLabel.HOME;
 
+    /**
+     * The customer's own name for this address ("Grandma's place", "Warehouse #2"), used when the
+     * fixed HOME/WORK/OTHER labels are not enough — set from the storefront when OTHER is chosen.
+     */
+    @Column(name = "custom_label", length = 60)
+    private String customLabel;
+
     // Building name / number + street — enough for courier to locate the building
     @Column(name = "address_line1", nullable = false, length = 255)
     private String addressLine1;
@@ -128,6 +135,8 @@ public class UserAddress {
 
     public AddressLabel getLabel() { return label; }
     public void setLabel(AddressLabel label) { this.label = label; }
+    public String getCustomLabel() { return customLabel; }
+    public void setCustomLabel(String customLabel) { this.customLabel = customLabel; }
 
     public String getAddressLine1() { return addressLine1; }
     public void setAddressLine1(String addressLine1) { this.addressLine1 = addressLine1; }

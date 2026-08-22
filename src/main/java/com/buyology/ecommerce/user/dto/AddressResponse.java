@@ -14,6 +14,7 @@ public class AddressResponse {
     private String phoneNumber;
     private boolean phoneVerified;
     private AddressLabel label;
+    private String customLabel;
     private String addressLine1;
     private String addressLine2;
     private String city;
@@ -46,6 +47,8 @@ public class AddressResponse {
     public void setPhoneVerified(boolean phoneVerified) { this.phoneVerified = phoneVerified; }
 
     public AddressLabel getLabel() { return label; }
+    public String getCustomLabel() { return customLabel; }
+    public void setCustomLabel(String customLabel) { this.customLabel = customLabel; }
     public void setLabel(AddressLabel label) { this.label = label; }
 
     public String getAddressLine1() { return addressLine1; }
