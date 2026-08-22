@@ -78,7 +78,7 @@ public class OrderService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    private static final double THIRTY_MIN_RADIUS_KM = 12.5;
+    private static final double THIRTY_MIN_RADIUS_KM = com.buyology.ecommerce.store.service.ExpressDeliveryRadius.KM;
 
     // Delivery pricing lives in DeliveryFeePolicy — the cart reads the same bean, so the fee quoted
     // while shopping cannot drift from the fee charged at checkout.

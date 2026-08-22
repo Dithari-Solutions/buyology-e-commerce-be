@@ -112,6 +112,16 @@ public class DeliveryFeePolicy {
         return expressFeeAed;
     }
 
+    /**
+     * The 30-minute fee actually payable on this AED subtotal — ZERO above the free-shipping
+     * threshold, exactly as {@link #feeAed} decides for EXPRESS. Exists so every surface that
+     * quotes express (cart, product page, checkout) prices it through the same branch the order
+     * charges, instead of re-deriving the threshold by hand.
+     */
+    public BigDecimal expressFeeAedForSubtotal(BigDecimal subtotalAed) {
+        return feeAed(com.buyology.ecommerce.order.domain.enums.DeliveryMethod.EXPRESS, null, subtotalAed);
+    }
+
     public BigDecimal cartPreviewFeeAed(String countryCode, BigDecimal subtotalAed) {
         return feeAed(DeliveryMethod.REGULAR, countryCode, subtotalAed);
     }

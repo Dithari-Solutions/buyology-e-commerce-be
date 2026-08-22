@@ -46,7 +46,7 @@ public class CartService {
 
     private static final Logger log = LoggerFactory.getLogger(CartService.class);
 
-    private static final double THIRTY_MIN_RADIUS_KM = 12.5;
+    private static final double THIRTY_MIN_RADIUS_KM = com.buyology.ecommerce.store.service.ExpressDeliveryRadius.KM;
 
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
@@ -632,26 +632,31 @@ public class CartService {
         // delivery figure above is the STANDARD rate regardless, so a customer who went on to
         // choose 30-minute delivery saw one number in the cart and was charged another at checkout.
         // Quoting both leaves the standard field untouched for clients that only read that.
-        boolean expressAvailable = itemResponses.stream()
-                .anyMatch(CartItemResponse::isQuickDelivery);
+        // ALL selected items, not ANY item — the same rule OrderService.resolveDeliveryMethod
+        // applies when it decides what to actually charge. anyMatch here is how a customer was
+        // quoted the express fee and then charged a silently downgraded regular delivery. Unticked
+        // rows are excluded: they are not part of the order, so an out-of-radius one must not
+        // block express for a cart that qualifies.
+        boolean expressAvailable = CartExpressRule.expressAvailable(
+                itemResponses.stream().filter(CartItemResponse::isSelected).toList());
         response.setExpressAvailable(expressAvailable);
-        if (expressAvailable) {
-            try {
-                BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
-                String ccy = cart.getCurrency() != null ? cart.getCurrency() : POLICY_BASE_CURRENCY;
-                BigDecimal subtotalAed = POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
-                        ? subtotal
-                        : currencyExchangeService.convert(subtotal, ccy, POLICY_BASE_CURRENCY);
-                BigDecimal expressAed = deliveryFeePolicy.qualifiesForFreeDelivery(subtotalAed)
-                        ? BigDecimal.ZERO
-                        : deliveryFeePolicy.expressFeeAed();
-                response.setExpressDeliveryFee(
-                        expressAed.signum() == 0 || POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
-                                ? expressAed
-                                : currencyExchangeService.convert(expressAed, POLICY_BASE_CURRENCY, ccy));
-            } catch (Exception ignored) {
-                // FX unavailable — leave the express fee null, same contract as the standard fee.
-            }
+        // The fee is quoted unconditionally (when FX allows): availability here is judged against
+        // the DEVICE's coordinates, but the order judges against the DELIVERY ADDRESS — a cart
+        // that reads unavailable can still become an express order at checkout, and the customer
+        // deserves the price either way.
+        try {
+            BigDecimal subtotal = cart.getTotalPrice() != null ? cart.getTotalPrice() : BigDecimal.ZERO;
+            String ccy = cart.getCurrency() != null ? cart.getCurrency() : POLICY_BASE_CURRENCY;
+            BigDecimal subtotalAed = POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
+                    ? subtotal
+                    : currencyExchangeService.convert(subtotal, ccy, POLICY_BASE_CURRENCY);
+            BigDecimal expressAed = deliveryFeePolicy.expressFeeAedForSubtotal(subtotalAed);
+            response.setExpressDeliveryFee(
+                    expressAed.signum() == 0 || POLICY_BASE_CURRENCY.equalsIgnoreCase(ccy)
+                            ? expressAed
+                            : currencyExchangeService.convert(expressAed, POLICY_BASE_CURRENCY, ccy));
+        } catch (Exception ignored) {
+            // FX unavailable — leave the express fee null, same contract as the standard fee.
         }
 
         return response;

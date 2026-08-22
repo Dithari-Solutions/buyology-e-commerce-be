@@ -54,6 +54,16 @@ public class StoreLocationController {
         return locationService.getDeliveryInfo(country, lat, lng);
     }
 
+    @Operation(summary = "Store IDs within the 30-minute delivery radius of a point",
+            description = "The same set OrderService uses to decide EXPRESS vs REGULAR. Pass the "
+                    + "DELIVERY ADDRESS coordinates, not the device's — the order resolves express "
+                    + "against where the parcel is going.")
+    @GetMapping("/express-stores")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.store.dto.ExpressStoresResponse>> getExpressStores(
+            @RequestParam double lat, @RequestParam double lng) {
+        return locationService.getExpressStoreIds(lat, lng);
+    }
+
     // ── Location endpoints ────────────────────────────────────────────────────
 
     @Operation(summary = "Add a location (branch) to a store",

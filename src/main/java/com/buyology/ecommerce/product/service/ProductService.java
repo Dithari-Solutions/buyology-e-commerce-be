@@ -1863,9 +1863,7 @@ public class ProductService {
         // too, so the number shown next to the badge is the number that will be charged. Free
         // delivery applies to express exactly as it does to standard, hence the same zero check.
         if (Boolean.TRUE.equals(resp.getExpressDelivery())) {
-            BigDecimal expressAed = deliveryFeePolicy.qualifiesForFreeDelivery(priceAed)
-                    ? BigDecimal.ZERO
-                    : deliveryFeePolicy.expressFeeAed();
+            BigDecimal expressAed = deliveryFeePolicy.expressFeeAedForSubtotal(priceAed);
             resp.setExpressDeliveryFee("AED".equalsIgnoreCase(ccy)
                     ? expressAed
                     : currencyExchangeService.convert(expressAed, "AED", ccy));

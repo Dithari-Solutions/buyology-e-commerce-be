@@ -5,6 +5,7 @@ import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreLocation;
 import com.buyology.ecommerce.store.dto.CreateStoreLocationRequest;
 import com.buyology.ecommerce.store.dto.DeliveryInfoResponse;
+import com.buyology.ecommerce.store.dto.ExpressStoresResponse;
 import com.buyology.ecommerce.store.dto.StoreLocationResponse;
 import com.buyology.ecommerce.store.dto.UpdateStoreLocationRequest;
 import com.buyology.ecommerce.store.repository.StoreLocationRepository;
@@ -127,7 +128,24 @@ public class StoreLocationService {
         return ApiResponse.success(null, "Location deactivated successfully");
     }
 
-    private static final double EXPRESS_RADIUS_KM = 12.5;
+    /**
+     * The store-id set the ORDER uses to decide EXPRESS vs REGULAR, for arbitrary coordinates.
+     *
+     * <p>Pass the DELIVERY ADDRESS's coordinates, not the device's: OrderService resolves express
+     * against where the parcel is going, and the storefront asking about the wrong point is
+     * exactly how a customer was quoted express and charged a downgrade. Deliberately the same
+     * query and radius as OrderService.resolveDeliveryMethod, and deliberately WITHOUT the cart's
+     * open-hours filter — this mirrors what the order will actually decide.
+     */
+    public ResponseEntity<ApiResponse<ExpressStoresResponse>> getExpressStoreIds(double lat, double lng) {
+        List<UUID> ids = locationRepository.findStoreIdsWithinRadius(
+                lat, lng, ExpressDeliveryRadius.KM);
+        return ApiResponse.success(new ExpressStoresResponse(ExpressDeliveryRadius.KM, ids),
+                "Express-capable stores");
+    }
+
+    /** Shared with the cart and the express-stores endpoint — see ExpressDeliveryRadius. */
+    private static final double EXPRESS_RADIUS_KM = com.buyology.ecommerce.store.service.ExpressDeliveryRadius.KM;
 
     public ResponseEntity<ApiResponse<DeliveryInfoResponse>> getDeliveryInfo(
             String country, double lat, double lng) {
