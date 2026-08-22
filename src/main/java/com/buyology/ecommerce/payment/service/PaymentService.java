@@ -185,6 +185,20 @@ public class PaymentService {
                             + " and cannot be paid again.");
                 }
 
+                // PENDING_PAYMENT is not the same as unpaid. An underpayment leaves the order
+                // PENDING_PAYMENT with a SUCCESS transaction against it, and a lost success event
+                // does the same until reconcileStuckPayments catches up — in both cases money has
+                // already been captured for this order, and charging again would take the FULL
+                // amount a second time. REFUNDED is deliberately absent from the list: money given
+                // back leaves the order legitimately payable.
+                transactionRepo.findFirstByAppOrderIdAndStatusIn(order.getId(),
+                                List.of(PaymentStatus.SUCCESS, PaymentStatus.PARTIALLY_REFUNDED))
+                        .ifPresent(settled -> {
+                            throw new IllegalStateException("Order " + order.getId()
+                                    + " already has a settled payment (" + settled.getId()
+                                    + "). It cannot be charged again — contact support.");
+                        });
+
                 BigDecimal orderTotal = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
                 BigDecimal totalInReqCcy = order.getCurrency() != null
                         && order.getCurrency().equalsIgnoreCase(req.getCurrency())

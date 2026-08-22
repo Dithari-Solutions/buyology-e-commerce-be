@@ -45,6 +45,29 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     Optional<PaymentTransaction> findFirstByAppOrderIdAndStatusIn(
             UUID appOrderId, List<PaymentStatus> statuses);
 
+    /**
+     * Settled order payments that no order claims and that nobody has reviewed yet.
+     *
+     * <p>Driven from the TRANSACTION side on purpose: the cases this must find include a payment
+     * whose order was never created at all, which no scan over orders can see. A transaction whose
+     * order points back at it is healthy and excluded in SQL, so the healthy back catalogue can
+     * never fill the page and starve the sweep.
+     */
+    @Query(value = """
+            SELECT pt.* FROM payment_transactions pt
+            LEFT JOIN orders o ON o.id = pt.app_order_id
+            WHERE pt.purpose = 'ORDER'
+              AND pt.status = 'SUCCESS'
+              AND pt.created_at < :cutoff
+              AND (o.id IS NULL OR o.payment_transaction_id IS DISTINCT FROM pt.id)
+              AND NOT EXISTS (SELECT 1 FROM payment_anomalies a
+                              WHERE a.payment_transaction_id = pt.id)
+            ORDER BY pt.created_at ASC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<PaymentTransaction> findUnreviewedSettledOrderPayments(@Param("cutoff") Instant cutoff,
+                                                                @Param("limit") int limit);
+
     /** Latest courier-fee charge for a refund in any of the given statuses (for resume/idempotency). */
     Optional<PaymentTransaction> findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
             UUID refundRequestId, PaymentPurpose purpose, List<PaymentStatus> statuses);

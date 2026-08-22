@@ -127,6 +127,9 @@ public class OrderService {
     private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
     private final com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService;
     private final com.buyology.ecommerce.cart.service.CartCheckoutCleanupService cartCheckoutCleanupService;
+    private final com.buyology.ecommerce.payment.service.PaymentAnomalyService paymentAnomalyService;
+    private final com.buyology.ecommerce.payment.service.PaidAmountPolicy paidAmountPolicy;
+    private final com.buyology.ecommerce.payment.repository.PaymentAnomalyRepository paymentAnomalyRepo;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -165,6 +168,9 @@ public class OrderService {
                         com.buyology.ecommerce.store.service.StockReservationService stockReservationService,
                         com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService,
                         com.buyology.ecommerce.cart.service.CartCheckoutCleanupService cartCheckoutCleanupService,
+                        com.buyology.ecommerce.payment.service.PaymentAnomalyService paymentAnomalyService,
+                        com.buyology.ecommerce.payment.service.PaidAmountPolicy paidAmountPolicy,
+                        com.buyology.ecommerce.payment.repository.PaymentAnomalyRepository paymentAnomalyRepo,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -201,6 +207,9 @@ public class OrderService {
         this.stockReservationService = stockReservationService;
         this.quiqupCancelService = quiqupCancelService;
         this.cartCheckoutCleanupService = cartCheckoutCleanupService;
+        this.paymentAnomalyService = paymentAnomalyService;
+        this.paidAmountPolicy = paidAmountPolicy;
+        this.paymentAnomalyRepo = paymentAnomalyRepo;
         this.eventPublisher = eventPublisher;
     }
 
@@ -710,44 +719,51 @@ public class OrderService {
         }
 
         if (tx.getAppOrderId() != null) {
-            // Path 1 — order already exists, just transition it to PAID
-            orderRepo.findById(tx.getAppOrderId()).ifPresent(order -> {
-                if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
-                    if (!isPaidAmountSufficient(order, tx)) {
-                        log.error("[ORDER] Underpayment detected for order {} (tx {}): paid {} {} < order total {} {}. "
-                                        + "Leaving order in PENDING_PAYMENT for manual review.",
-                                order.getId(), tx.getId(), tx.getAmount(), tx.getCurrency(),
-                                order.getTotalAmount(), order.getCurrency());
-                        return;
-                    }
-                    transitionTo(order, OrderStatus.PAID);
-                    order.setPaymentTransactionId(event.getTransactionId());
-                    order.setPaidAt(Instant.now());
-                    appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
+            // Path 1 — the order exists. Resolve, classify, and make sure EVERY reachable state
+            // ends in a written record. The old shape — `if (PENDING_PAYMENT) { ... }` with no
+            // else — is how a payment settling after a cancellation vanished: money captured, no
+            // log, no refund, and the reconciler scanning only PENDING_PAYMENT never saw it.
+            Order order = orderRepo.findById(tx.getAppOrderId()).orElse(null);
+            if (order == null) {
+                paymentAnomalyService.recordAndAlert(
+                        com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.ORPHANED_NO_ORDER,
+                        tx, tx.getAppOrderId(), null,
+                        "SUCCESS payment references a missing order row", "LISTENER");
+                return;
+            }
+
+            var classification = com.buyology.ecommerce.payment.service.PaymentAnomalyService.classify(
+                    order.getStatus(),
+                    tx.getId().equals(order.getPaymentTransactionId()),
+                    isPaidAmountSufficient(order, tx),
+                    // A supplier: the extra query runs only on the anomaly branch, never on the
+                    // happy path every payment takes.
+                    () -> paymentAnomalyService.settledByAnotherSuccessfulPayment(order.getId(), tx.getId()));
+
+            switch (classification.outcome()) {
+                case ALREADY_APPLIED -> log.info(
+                        "[ORDER] Payment {} already settled order {} ({}); duplicate event ignored.",
+                        tx.getId(), order.getId(), order.getStatus());
+                case ANOMALY -> {
+                    // Durable evidence FIRST (REQUIRES_NEW, its own connection), so it survives
+                    // whatever this transaction does next. Then a tracking line so the order's own
+                    // history shows the money event.
+                    paymentAnomalyService.recordAndAlert(classification.kind(), tx, order.getId(),
+                            order.getStatus(),
+                            "paid " + tx.getAmount() + " " + tx.getCurrency() + " while the order was "
+                                    + order.getStatus() + " (total " + order.getTotalAmount() + " "
+                                    + order.getCurrency() + ")", "LISTENER");
+                    appendTrackingEvent(order, order.getStatus(),
+                            "Payment " + tx.getId() + " (" + tx.getAmount() + " " + tx.getCurrency()
+                                    + ") arrived while the order was " + order.getStatus()
+                                    + " — flagged for payment review",
                             null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
                     orderRepo.save(order);
-
-                    // Record promo redemption now that the order is actually paid.
-                    recordPromoUsageOnPaid(order);
-
-                    // Notify suppliers (owning items) + superadmins of the new paid order.
-                    notifyNewOrder(order);
-
-                    // Email the customer their order confirmation (climate/SDG content).
-                    sendOrderConfirmationEmailFor(order);
-
-                    // Hand off to downstream integrations (ERPNext sales order + invoice).
-                    // Listeners run after this transaction commits, so a slow or failing
-                    // integration can never affect the order or the payment.
-                    eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
-
-                    // Clear the cart safely (idempotent)
-                    if (order.getCartId() != null) {
-                        cartCheckoutCleanupService.clearOrderedItems(order.getCartId());
-                    }
                 }
-            });
+                case APPLY -> applySettledPayment(order, tx, event);
+            }
         } else if (tx.getCartId() != null) {
+
             // Path 2 — cart-first flow
             log.info("[ORDER] Cart-first flow: cartId={}", tx.getCartId());
             Cart cart = cartRepo.findById(tx.getCartId()).orElse(null);
@@ -857,6 +873,19 @@ public class OrderService {
                                     + "Leaving order in PENDING_PAYMENT for manual review.",
                             order.getId(), tx.getId(), tx.getAmount(), tx.getCurrency(),
                             order.getTotalAmount(), order.getCurrency());
+                    // "Manual review" is only real if a review queue holds it. The order id is
+                    // passed explicitly — the tx back-fill has not run yet at this point.
+                    paymentAnomalyService.recordAndAlert(
+                            com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.UNDERPAID,
+                            tx, order.getId(), order.getStatus(),
+                            "cart-first: paid " + tx.getAmount() + " " + tx.getCurrency()
+                                    + " against an order total of " + order.getTotalAmount() + " "
+                                    + order.getCurrency(), "LISTENER");
+                    appendTrackingEvent(order, order.getStatus(),
+                            "Underpaid — payment " + tx.getId() + " does not cover the order total; "
+                                    + "flagged for payment review",
+                            null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                    orderRepo.save(order);
                 } else {
                     transitionTo(order, OrderStatus.PAID);
                     order.setPaymentTransactionId(event.getTransactionId());
@@ -897,27 +926,41 @@ public class OrderService {
      * with a 1% tolerance for rounding / FX drift. Fails OPEN on a computation error
      * (logged) so a transient FX glitch never strands a legitimate payment.
      */
+    /** Delegates to the extracted policy so the classification is testable. Behaviour unchanged. */
     private boolean isPaidAmountSufficient(Order order, PaymentTransaction tx) {
-        try {
-            BigDecimal due = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
-            if (order.getCreditApplied() != null && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal creditInOrderCcy = order.getCreditCurrency() != null
-                        && order.getCreditCurrency().equalsIgnoreCase(order.getCurrency())
-                        ? order.getCreditApplied()
-                        : currencyExchangeService.convert(order.getCreditApplied(),
-                                order.getCreditCurrency(), order.getCurrency());
-                due = due.subtract(creditInOrderCcy).max(BigDecimal.ZERO);
-            }
-            BigDecimal dueInTxCcy = order.getCurrency() != null
-                    && order.getCurrency().equalsIgnoreCase(tx.getCurrency())
-                    ? due
-                    : currencyExchangeService.convert(due, order.getCurrency(), tx.getCurrency());
-            BigDecimal paid = tx.getAmount() == null ? BigDecimal.ZERO : tx.getAmount();
-            return paid.compareTo(dueInTxCcy.multiply(new BigDecimal("0.99"))) >= 0;
-        } catch (Exception e) {
-            log.error("[ORDER] Amount reconciliation failed for order {} / tx {}: {} — allowing payment.",
-                    order.getId(), tx.getId(), e.getMessage());
-            return true;
+        return paidAmountPolicy.covers(order, tx);
+    }
+
+
+    /**
+     * The happy path, verbatim from before the classification existed: promote to PAID and run
+     * every paid-order side effect.
+     */
+    private void applySettledPayment(Order order, PaymentTransaction tx, PaymentSucceededEvent event) {
+        transitionTo(order, OrderStatus.PAID);
+        order.setPaymentTransactionId(event.getTransactionId());
+        order.setPaidAt(Instant.now());
+        appendTrackingEvent(order, OrderStatus.PAID, "Payment confirmed",
+                null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+        orderRepo.save(order);
+
+        // Record promo redemption now that the order is actually paid.
+        recordPromoUsageOnPaid(order);
+
+        // Notify suppliers (owning items) + superadmins of the new paid order.
+        notifyNewOrder(order);
+
+        // Email the customer their order confirmation (climate/SDG content).
+        sendOrderConfirmationEmailFor(order);
+
+        // Hand off to downstream integrations (ERPNext sales order + invoice).
+        // Listeners run after this transaction commits, so a slow or failing
+        // integration can never affect the order or the payment.
+        eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
+
+        // Clear the cart safely (idempotent)
+        if (order.getCartId() != null) {
+            cartCheckoutCleanupService.clearOrderedItems(order.getCartId());
         }
     }
 
@@ -2317,7 +2360,7 @@ public class OrderService {
     @Transactional
     public void reconcileStuckPayments() {
         List<Order> stuck = orderRepo.findAllByStatus(
-                OrderStatus.PENDING_PAYMENT, PageRequest.of(0, 50)).getContent();
+                OrderStatus.PENDING_PAYMENT, PageRequest.of(0, 200)).getContent();
         if (stuck.isEmpty()) return;
 
         Instant cutoff = Instant.now().minus(java.time.Duration.ofMinutes(15));
@@ -2331,7 +2374,18 @@ public class OrderService {
                             List.of(com.buyology.ecommerce.payment.enums.PaymentStatus.SUCCESS))
                     .orElse(null);
             if (tx == null) continue;                       // no successful payment — leave as-is
-            if (!isPaidAmountSufficient(order, tx)) continue; // underpaid — leave for manual review
+            // An order already in the payment-review queue is a human's problem, not this job's.
+            if (paymentAnomalyRepo.existsByAppOrderIdAndResolutionNot(order.getId(), "RESOLVED")) continue;
+            if (!isPaidAmountSufficient(order, tx)) {
+                // Recording is what makes "leave for manual review" true rather than aspirational.
+                paymentAnomalyService.recordAndAlert(
+                        com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.UNDERPAID,
+                        tx, order.getId(), order.getStatus(),
+                        "reconciler: paid " + tx.getAmount() + " " + tx.getCurrency()
+                                + " against an order total of " + order.getTotalAmount() + " "
+                                + order.getCurrency(), "RECONCILER");
+                continue;
+            }
 
             transitionTo(order, OrderStatus.PAID);
             order.setPaymentTransactionId(tx.getId());
