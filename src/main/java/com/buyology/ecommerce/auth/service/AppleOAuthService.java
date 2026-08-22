@@ -83,8 +83,15 @@ public class AppleOAuthService {
             map.add("client_id", appleProperties.getClientId());
             map.add("client_secret", clientSecret);
             map.add("grant_type", "authorization_code");
-            if (appleProperties.getRedirectUri() != null && !appleProperties.getRedirectUri().isEmpty()) {
-                map.add("redirect_uri", appleProperties.getRedirectUri());
+            // The client's own redirect URI wins when supplied (two storefronts, one backend);
+            // the server-configured value is the fallback for clients that predate the field.
+            // Apple validates the value against the Service ID's registered Return URLs during
+            // the exchange, so an unregistered URI fails there rather than opening a redirect.
+            String redirectUri = authRequest.getRedirectUri() != null && !authRequest.getRedirectUri().isBlank()
+                    ? authRequest.getRedirectUri()
+                    : appleProperties.getRedirectUri();
+            if (redirectUri != null && !redirectUri.isEmpty()) {
+                map.add("redirect_uri", redirectUri);
             }
 
             HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(map, headers);
