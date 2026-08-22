@@ -125,6 +125,7 @@ public class OrderService {
     private final org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider;
     /** Plain injection, NOT selfProvider: this one is meant to join the caller's transaction. */
     private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
+    private final com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -161,6 +162,7 @@ public class OrderService {
                         com.buyology.ecommerce.membership.service.CreditReturnService creditReturnService,
                         org.springframework.beans.factory.ObjectProvider<OrderService> selfProvider,
                         com.buyology.ecommerce.store.service.StockReservationService stockReservationService,
+                        com.buyology.ecommerce.quiqup.service.QuiqupCancelService quiqupCancelService,
                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
@@ -195,6 +197,7 @@ public class OrderService {
         this.creditReturnService = creditReturnService;
         this.selfProvider = selfProvider;
         this.stockReservationService = stockReservationService;
+        this.quiqupCancelService = quiqupCancelService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -1187,6 +1190,18 @@ public class OrderService {
 
         transitionTo(order, req.getStatus());
 
+        // The durability hinge of the courier-cancel design: the INTENT to stop the Quiqup job is
+        // written in the same transaction that cancels the order, so a replica dying between the
+        // commit and the after-commit callback still leaves a row the retry job will find. Without
+        // this the crash window silently reverts to the old behaviour — refund out, courier still
+        // driving.
+        if (req.getStatus() == OrderStatus.CANCELLED
+                && order.getQuiqupOrderId() != null && !order.getQuiqupOrderId().isBlank()
+                && order.getQuiqupCancelStatus() == null) {
+            order.setQuiqupCancelStatus("PENDING");
+            order.setQuiqupCancelRequestedAt(Instant.now());
+        }
+
         appendTrackingEvent(order, req.getStatus(), req.getNotes(),
                 null, null, null, adminUserId, "ADMIN");
 
@@ -1197,10 +1212,15 @@ public class OrderService {
         runAfterCommit(() -> {
             broadcastStatusUpdate(saved, null);
             notifyCustomerStatus(saved);
-            // Admin cancelled → auto-refund + customer emails (same as a customer cancellation).
-            // After the commit, never inside it: see applyCancellationSideEffects.
             if (saved.getStatus() == OrderStatus.CANCELLED) {
-                selfProvider.getObject().applyCancellationSideEffects(saved, req.getCancellationReason());
+                // Stop the courier BEFORE any money moves. An admin cancellation is authoritative,
+                // so the order stays CANCELLED whatever Quiqup says — only the money leg is gated
+                // on the courier being verifiably stopped. No transaction is open here (the
+                // committed one is still bound to the thread but does nothing), and the cancel
+                // service does its own writes in REQUIRES_NEW.
+                var courier = quiqupCancelService.cancelForOrder(saved.getId(), req.getCancellationReason());
+                selfProvider.getObject().applyCancellationSideEffects(
+                        saved, req.getCancellationReason(), courier.refundAllowed());
             }
         });
 
@@ -1305,14 +1325,83 @@ public class OrderService {
 
     /**
      * Allows a customer to cancel their own order while it is still cancellable.
+     *
+     * <p>Deliberately NOT {@code @Transactional}: when the order has been handed to Quiqup, the
+     * courier must be verifiably stopped BEFORE we cancel anything — and that is an HTTP call of up
+     * to the configured timeout, which must not hold a pooled connection. The cancellation itself
+     * happens in {@link #applyCustomerCancellation}, reached through the proxy so its
+     * {@code @Transactional} actually applies.
+     *
+     * <p>Ordering is the whole point. Cancel-first-ask-later is the bug this replaces: the refund
+     * went out while the courier kept driving, and the customer kept the goods and the money.
      */
-    @Transactional
     public OrderResponse customerCancelOrder(UUID orderId, UUID userId, String reason) {
         Order order = orderRepo.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        // Customers may cancel only up to (and including) IN_COURIER. Once the order is
-        // IN_TRANSIT ("courier on the way to delivery") or later, it can no longer be cancelled.
+        // The cheap guard first, so an obviously-too-late cancel fails instantly with the usual
+        // message and never pays the courier round-trip.
+        if (!isCustomerCancellable(order.getStatus())) {
+            throw new IllegalStateException(
+                    "This order can no longer be cancelled — it is already on its way to you.");
+        }
+
+        boolean dispatched = order.getQuiqupOrderId() != null && !order.getQuiqupOrderId().isBlank();
+        var courier = dispatched
+                ? quiqupCancelService.cancelForOrder(orderId, reason)
+                : new com.buyology.ecommerce.quiqup.service.QuiqupCancelService.CancelResult(
+                        com.buyology.ecommerce.quiqup.service.QuiqupCancelService.Outcome.NOTHING_TO_CANCEL,
+                        "never dispatched");
+
+        switch (courier.outcome()) {
+            case CONFIRMED, NOTHING_TO_CANCEL -> { /* safe to proceed */ }
+            case REFUSED_TOO_LATE -> throw new IllegalStateException(
+                    "This order can no longer be cancelled — the courier has already collected it. "
+                    + "Refuse the delivery at the door, or start a return once it arrives.");
+            case UNCONFIRMED, NEEDS_HUMAN -> {
+                if (quiqupCancelService.strictCustomerPreflight()) {
+                    // Nothing has been written, so "try again in a minute" is completely clean.
+                    throw new IllegalStateException(
+                            "We could not reach the courier to stop this delivery. Nothing has been "
+                            + "changed — please try again in a minute.");
+                }
+                // Cancel-anyway mode: commit the cancellation, withhold the refund, and let the
+                // retry job resolve the courier. transitionTo withholds the stock for the same
+                // evidence, so nothing is sellable while the parcel may still be moving.
+            }
+        }
+
+        try {
+            return selfProvider.getObject().applyCustomerCancellation(orderId, userId, reason, courier);
+        } catch (RuntimeException e) {
+            if (dispatched && courier.refundAllowed()) {
+                // The courier is stopped but the order could not be cancelled (a concurrent admin
+                // move inside the HTTP window). Three facts now disagree — job cancelled, order
+                // live, stock held — and only a human can re-dispatch.
+                log.error("[QUIQUP] Cancelled Quiqup job {} but order {} could not be cancelled — "
+                        + "the job needs re-dispatching by hand", order.getQuiqupOrderId(), orderId, e);
+                alertSuperadmins(orderId, "Quiqup job cancelled but order still live",
+                        "Order " + orderId + ": the courier was stopped but the cancellation failed. "
+                        + "Re-dispatch or cancel by hand.");
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * The transactional half of a customer cancellation. Public and proxy-invoked only — call it
+     * through {@code selfProvider} or the {@code @Transactional} silently does not apply.
+     *
+     * @param preflight what the courier pre-flight concluded; decides whether money may move
+     */
+    @Transactional
+    public OrderResponse applyCustomerCancellation(UUID orderId, UUID userId, String reason,
+                                                   com.buyology.ecommerce.quiqup.service.QuiqupCancelService.CancelResult preflight) {
+        Order order = orderRepo.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        // Re-checked inside the transaction: the pre-flight window is long enough for a concurrent
+        // admin move, and the guard outside was only ever the cheap first pass.
         if (!isCustomerCancellable(order.getStatus())) {
             throw new IllegalStateException(
                     "This order can no longer be cancelled — it is already on its way to you.");
@@ -1326,9 +1415,10 @@ public class OrderService {
                 null, null, null, userId, "CUSTOMER");
 
         Order saved = orderRepo.save(order);
+        boolean refundAllowed = preflight.refundAllowed();
         runAfterCommit(() -> {
             broadcastStatusUpdate(saved, null);
-            selfProvider.getObject().applyCancellationSideEffects(saved, reason);
+            selfProvider.getObject().applyCancellationSideEffects(saved, reason, refundAllowed);
         });
         return toOrderResponse(saved);
     }
@@ -1373,9 +1463,15 @@ public class OrderService {
      * nobody will ever commit and then closing it. The refund would reach Paymob and every row
      * recording it would disappear. The same reasoning is why {@code onPaymentSucceeded} and
      * {@code onPaymentFailed} above are REQUIRES_NEW.
+     *
+     * <p>{@code refundAllowed} is the courier gate. False means the order's Quiqup job could not be
+     * verified as stopped, so everything of value — the gateway refund, the B2B credit, the
+     * withheld stock, and the "your money is coming" emails — waits, and a superadmin is alerted
+     * instead. The retry job re-invokes this with {@code true} once Quiqup confirms. Paths with no
+     * courier involvement pass {@code true} unconditionally.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void applyCancellationSideEffects(Order order, String reason) {
+    public void applyCancellationSideEffects(Order order, String reason, boolean refundAllowed) {
         String email = customerEmail(order);
         String name = customerName(order);
         String orderNo = order.getId().toString();
@@ -1384,22 +1480,49 @@ public class OrderService {
         BigDecimal refundAmount = null;
         String refundCurrency = null;
 
-        // The credit leg, which nothing used to return. See CreditReturnService.
-        //
-        // Guarded because it can genuinely throw — WalletService.addCredit raises
-        // NoSuchElementException for a member with no wallet row — and unguarded it took the
-        // gateway refund and both customer emails down with it, silently, from inside an
-        // after-commit callback. A credit line needing a manual correction is a support ticket; a
-        // cancelled order that was never refunded is the customer's money.
-        try {
-            creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
-        } catch (Exception e) {
-            log.error("[ORDER] Could not return B2B credit for cancelled order {} — needs manual "
-                    + "correction: {}", order.getId(), e.getMessage(), e);
+        if (!refundAllowed) {
+            // The courier gate. False means the Quiqup job carrying this order's parcel could not
+            // be verified as stopped: the parcel may be moving toward the customer right now, and
+            // paying the money back while it does is the double loss this gate exists to prevent.
+            // Everything of VALUE below waits — the refund, the B2B credit, the "your money is
+            // coming" emails, and the stock. The retry job re-runs this with refundAllowed=true
+            // once Quiqup confirms; REFUSED_TOO_LATE and NEEDS_HUMAN land on a superadmin instead.
+            log.error("[ORDER] NOT auto-refunding cancelled order {} — the Quiqup job {} was not "
+                    + "confirmed cancelled (quiqupCancelStatus={}). The parcel may still be moving; "
+                    + "a human or the retry job decides the money.",
+                    order.getId(), order.getQuiqupOrderId(), order.getQuiqupCancelStatus());
+        } else {
+            // The credit leg, which nothing used to return. See CreditReturnService.
+            //
+            // Guarded because it can genuinely throw — WalletService.addCredit raises
+            // NoSuchElementException for a member with no wallet row — and unguarded it took the
+            // gateway refund and both customer emails down with it, silently, from inside an
+            // after-commit callback. A credit line needing a manual correction is a support
+            // ticket; a cancelled order that was never refunded is the customer's money.
+            try {
+                creditReturnService.returnForCancelledOrder(order.getId(), order.getCreditApplied());
+            } catch (Exception e) {
+                log.error("[ORDER] Could not return B2B credit for cancelled order {} — needs manual "
+                        + "correction: {}", order.getId(), e.getMessage(), e);
+            }
+
+            // Stock that transitionTo withheld because the courier was not yet confirmed stopped.
+            // This runs in a REQUIRES_NEW transaction AFTER the cancellation committed, so there is
+            // no outer lock to self-block on, and stockRestoredAt keeps it exactly-once — for the
+            // common paths (customer pre-flight, partner-confirmed) the release already happened
+            // inside transitionTo and this is a no-op.
+            try {
+                orderRepo.findById(order.getId()).ifPresent(stockReservationService::releaseForOrder);
+            } catch (Exception e) {
+                log.error("[ORDER] Could not release withheld stock for cancelled order {}: {}",
+                        order.getId(), e.getMessage(), e);
+            }
         }
 
         // Give back a promo code this order was only holding. A code it actually spent stays spent:
         // that order was paid, the customer got the discount, and the refund settles it in money.
+        // Deliberately NOT behind the courier gate — a reservation is bookkeeping, not value handed
+        // to the customer, and the stale-order and payment-failed paths depend on it always firing.
         //
         // The independent variant, because this runs after the cancellation has committed: joining
         // would let a failure here mark the surrounding transaction rollback-only, and catching it
@@ -1411,7 +1534,13 @@ public class OrderService {
                     order.getId(), e.getMessage());
         }
 
-        if (order.getPaymentTransactionId() != null) {
+        if (refundAllowed && order.getCancelRefundInitiatedAt() != null) {
+            // A cheap short-circuit and an audit trail, NOT the double-refund guard — that stays
+            // RefundClaimStore, which counts SUCCESS and PENDING refunds before any HTTP reaches
+            // Paymob. This just keeps a retried side-effect pass from re-sending the email pair.
+            log.info("[ORDER] Cancellation refund already initiated for order {} at {}; skipping",
+                    order.getId(), order.getCancelRefundInitiatedAt());
+        } else if (refundAllowed && order.getPaymentTransactionId() != null) {
             try {
                 PaymentTransaction tx = paymentTransactionRepo.findById(order.getPaymentTransactionId()).orElse(null);
                 if (tx != null && (tx.getStatus() == com.buyology.ecommerce.payment.enums.PaymentStatus.SUCCESS
@@ -1424,12 +1553,26 @@ public class OrderService {
                     refunded = true;
                     refundAmount = tx.getAmount();
                     refundCurrency = tx.getCurrency();
+                    // Stamped in this REQUIRES_NEW transaction, so a retried pass sees it.
+                    orderRepo.findById(order.getId()).ifPresent(o -> {
+                        o.setCancelRefundInitiatedAt(Instant.now());
+                        orderRepo.save(o);
+                    });
                     log.info("[ORDER] Auto-refund initiated for cancelled order {}", order.getId());
                 }
             } catch (Exception e) {
                 log.warn("[ORDER] Auto-refund on cancel failed for order {} — needs manual refund: {}",
                         order.getId(), e.getMessage());
             }
+        }
+
+        if (!refundAllowed) {
+            // The customer must NOT be told their order is cancelled and their money is coming
+            // while a courier may still be carrying the parcel. A person makes contact instead.
+            alertSuperadmins(order.getId(), "Cancelled order awaiting courier confirmation",
+                    "Order " + orderNo + " is cancelled but its Quiqup job is not confirmed stopped. "
+                    + "Refund and customer contact are on hold.");
+            return;
         }
 
         if (email != null) {
@@ -1439,6 +1582,18 @@ public class OrderService {
                 try { emailService.sendRefundInitiatedOnCancelEmail(email, name, orderNo, refundAmount.toPlainString(), refundCurrency); }
                 catch (Exception e) { log.warn("[ORDER] refund-initiated email failed for {}: {}", order.getId(), e.getMessage()); }
             }
+        }
+    }
+
+    /** Push an operational alert to every superadmin. Best-effort; never throws. */
+    private void alertSuperadmins(UUID orderId, String title, String body) {
+        try {
+            java.util.Map<String, String> data = java.util.Map.of(
+                    "orderId", orderId.toString(), "type", "ORDER_ATTENTION");
+            userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
+                    pushService.sendToUser(uid, title, body, "ORDER_ATTENTION", data));
+        } catch (Exception e) {
+            log.warn("[ORDER] Could not alert superadmins about order {}: {}", orderId, e.getMessage());
         }
     }
 
@@ -1859,6 +2014,14 @@ public class OrderService {
             return false;
         }
 
+        if (target == OrderStatus.CANCELLED) {
+            // Quiqup themselves cancelled the job, so the courier is provably stopped — there is
+            // nothing to call back at them. Stamped BEFORE transitionTo, because transitionTo's
+            // stock gate reads this field: without it a partner-cancelled order would have its
+            // units withheld waiting on a confirmation that already happened.
+            order.setQuiqupCancelStatus("CONFIRMED_BY_PARTNER");
+            order.setQuiqupCancelConfirmedAt(Instant.now());
+        }
         transitionTo(order, target);
         appendTrackingEvent(order, target, note, null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
         Order saved = orderRepo.save(order);
@@ -1876,7 +2039,8 @@ public class OrderService {
                 // has already made that terminal, and nothing can re-deliver against it. The money
                 // has to follow the goods: without this the customer paid, the parcel stayed on our
                 // shelf, and the order sat CANCELLED with the payment untouched and nobody looking.
-                selfProvider.getObject().applyCancellationSideEffects(saved, note);
+                // refundAllowed=true: the partner's own cancellation IS the confirmation.
+                selfProvider.getObject().applyCancellationSideEffects(saved, note, true);
             } else if (target == OrderStatus.FAILED && saved.getPaymentTransactionId() != null) {
                 // A failed delivery is NOT auto-refunded: the parcel is coming back to us and
                 // whether the customer wants their money or another attempt is theirs to say. But
@@ -1888,6 +2052,36 @@ public class OrderService {
             }
         });
         return true;
+    }
+
+    /**
+     * Records a delivery event that arrived for an order we had already cancelled.
+     *
+     * <p>Deliberately does NOT move the status — CANCELLED is terminal and that guard is right —
+     * but the parcel evidently moved anyway, which is goods and money that need a human. Before
+     * this, such events were dropped without trace: the order read as cleanly cancelled while the
+     * courier delivered it.
+     *
+     * <p>REQUIRES_NEW because it is invoked from the webhook path, which may carry no transaction,
+     * and because this record must commit regardless of anything the caller does next.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordPostCancellationMovement(UUID orderId, String quiqupStatus) {
+        orderRepo.findById(orderId).ifPresent(o -> {
+            o.setQuiqupCancelStatus("REFUSED_TOO_LATE");
+            String detail = "Quiqup reported '" + quiqupStatus + "' after we cancelled this order";
+            o.setQuiqupCancelError(detail.length() > 1000 ? detail.substring(0, 1000) : detail);
+            appendTrackingEvent(o, o.getStatus(),
+                    "Delivery partner reported '" + quiqupStatus + "' AFTER cancellation — the parcel was not stopped",
+                    null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+            orderRepo.save(o);
+        });
+        log.error("[QUIQUP] Order {} is CANCELLED but Quiqup reported '{}' — the parcel was delivered "
+                + "or is in transit despite the cancellation. Refund/recovery needs a human.",
+                orderId, quiqupStatus);
+        alertSuperadmins(orderId, "Cancelled order is still being delivered",
+                "Order " + orderId + ": Quiqup reported '" + quiqupStatus + "' after cancellation. "
+                + "The parcel was not stopped — decide refund vs recovery.");
     }
 
     /**
@@ -2175,15 +2369,42 @@ public class OrderService {
         order.setStatus(target);
 
         if (releasesStock(from, target)) {
-            // In THIS transaction, deliberately — see StockReservationService.releaseForOrder for
-            // why splitting it off would both hang and double-count.
-            stockReservationService.releaseForOrder(order);
+            if (target == OrderStatus.CANCELLED && courierNotConfirmedStopped(order)) {
+                // The one case where "cancelled" does not mean "the goods are ours again": a
+                // dispatched order whose Quiqup job is not verifiably stopped. Putting these units
+                // back would let the last one sell while a courier hands it to the cancelling
+                // customer — an oversell on top of a withheld refund. The retry job releases them
+                // (through applyCancellationSideEffects) the moment Quiqup confirms.
+                log.error("[STOCK] Order {} cancelled but its Quiqup job {} is not confirmed stopped "
+                        + "(status={}). Withholding {} — the units stay reserved until the courier "
+                        + "is verifiably stopped.", order.getId(), order.getQuiqupOrderId(),
+                        order.getQuiqupCancelStatus(), "the stock release");
+            } else {
+                // In THIS transaction, deliberately — see StockReservationService.releaseForOrder
+                // for why splitting it off would both hang and double-count.
+                stockReservationService.releaseForOrder(order);
+            }
         } else if (target == OrderStatus.FAILED
                 && order.getStockReservedAt() != null && order.getStockRestoredAt() == null) {
             log.error("[STOCK] Order {} failed at {} while still holding reserved stock. The parcel "
                     + "is out of our hands, so the units are NOT returned automatically — restock "
                     + "them when it physically comes back.", order.getId(), from);
         }
+    }
+
+    /**
+     * True when this order was handed to Quiqup and the job is not verifiably stopped.
+     *
+     * <p>The evidence bar is the same one the refund uses: CONFIRMED (we checked) or
+     * CONFIRMED_BY_PARTNER (they cancelled it themselves). PENDING, UNCONFIRMED, NEEDS_HUMAN,
+     * REFUSED_TOO_LATE and null-with-a-job all mean a courier may still be moving.
+     */
+    private static boolean courierNotConfirmedStopped(Order order) {
+        if (order.getQuiqupOrderId() == null || order.getQuiqupOrderId().isBlank()) {
+            return false;   // never dispatched — nothing to stop
+        }
+        String status = order.getQuiqupCancelStatus();
+        return !"CONFIRMED".equals(status) && !"CONFIRMED_BY_PARTNER".equals(status);
     }
 
     /**
@@ -2379,6 +2600,12 @@ public class OrderService {
         res.setQuiqupStatus(o.getQuiqupStatus());
         res.setQuiqupDispatchedAt(o.getQuiqupDispatchedAt());
         res.setQuiqupDispatchError(o.getQuiqupDispatchError());
+        // The cancel leg, so an admin can see WHY a cancelled order's refund is being held and
+        // recover it — before this, the only cancel control needed a Quiqup job id shown nowhere.
+        res.setQuiqupCancelStatus(o.getQuiqupCancelStatus());
+        res.setQuiqupCancelConfirmedAt(o.getQuiqupCancelConfirmedAt());
+        res.setQuiqupCancelError(o.getQuiqupCancelError());
+        res.setCancelRefundInitiatedAt(o.getCancelRefundInitiatedAt());
         return res;
     }
 

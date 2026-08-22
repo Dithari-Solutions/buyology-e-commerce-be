@@ -37,16 +37,19 @@ public class AdminQuiqupController {
     private final QuiqupTestEventRepository eventRepository;
     private final ObjectMapper objectMapper;
     private final com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService;
+    private final com.buyology.ecommerce.quiqup.service.QuiqupCancelService cancelService;
 
     public AdminQuiqupController(QuiqupProperties props, QuiqupClient client, QuiqupSamples samples,
                                  QuiqupTestEventRepository eventRepository, ObjectMapper objectMapper,
-                                 com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService) {
+                                 com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService,
+                                 com.buyology.ecommerce.quiqup.service.QuiqupCancelService cancelService) {
         this.props = props;
         this.client = client;
         this.samples = samples;
         this.eventRepository = eventRepository;
         this.objectMapper = objectMapper;
         this.dispatchService = dispatchService;
+        this.cancelService = cancelService;
     }
 
     public record RawRequest(String method, String path, JsonNode body) {}
@@ -201,6 +204,29 @@ public class AdminQuiqupController {
         String outcome = dispatchService.dispatch(orderId);
         return ApiResponse.success(java.util.Map.of("orderId", orderId.toString(), "outcome", outcome),
                 "Dispatch attempted");
+    }
+
+    /**
+     * Retries stopping the Quiqup job for an ORDER id — the manual-recovery half of the cancel leg.
+     *
+     * <p>Takes our own order id rather than a hand-typed Quiqup job id, which is what made the old
+     * cancel control unusable: the dashboard never displayed the job id it demanded. An admin
+     * looking at a cancelled order whose refund is held (quiqupCancelStatus REFUSED_TOO_LATE or
+     * NEEDS_HUMAN, surfaced on the admin order view) presses this; the outcome and its consequences
+     * are decided by exactly the same service and gates as the automatic path.
+     */
+    @io.swagger.v3.oas.annotations.Operation(summary = "Retry stopping the Quiqup job for a cancelled order")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:cancel') or @rbacPolicy.legacyAdmin()")
+    @PostMapping("/cancel/{orderId}")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> cancelForOrder(
+            @PathVariable java.util.UUID orderId) {
+        var result = cancelService.cancelForOrder(orderId, "Manual retry from the admin dashboard");
+        return ApiResponse.success(java.util.Map.of(
+                        "orderId", orderId.toString(),
+                        "outcome", result.outcome().name(),
+                        "refundAllowed", result.refundAllowed(),
+                        "detail", result.detail() == null ? "" : result.detail()),
+                "Cancel attempted");
     }
 
     // ── received webhooks ───────────────────────────────────────────────────────

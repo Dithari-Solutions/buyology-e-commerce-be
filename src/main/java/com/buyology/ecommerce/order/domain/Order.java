@@ -282,6 +282,43 @@ public class Order {
     @Column(name = "quiqup_status", length = 60)
     private String quiqupStatus;
 
+    /**
+     * How the attempt to stop the Quiqup job went: PENDING, UNCONFIRMED, CONFIRMED,
+     * CONFIRMED_BY_PARTNER, REFUSED_TOO_LATE, NEEDS_HUMAN.
+     *
+     * <p>A plain String, deliberately NOT an @Enumerated(STRING) field. Hibernate 6 emits a CHECK
+     * constraint from an enum's values at table-creation time and never revisits it, so the first
+     * added value fails in production under ddl-auto=validate — this repo has been bitten twice
+     * (V33, V34). This list will grow; a String plus validation in Java removes the whole class of
+     * bug. Mirrors quiqupStatus above, which is a String for the same reason.
+     */
+    @Column(name = "quiqup_cancel_status", length = 24)
+    private String quiqupCancelStatus;
+
+    @Column(name = "quiqup_cancel_requested_at")
+    private Instant quiqupCancelRequestedAt;
+
+    @Column(name = "quiqup_cancel_confirmed_at")
+    private Instant quiqupCancelConfirmedAt;
+
+    @Column(name = "quiqup_cancel_error", length = 1000)
+    private String quiqupCancelError;
+
+    @Column(name = "quiqup_cancel_attempts")
+    private Integer quiqupCancelAttempts = 0;
+
+    /** Claim marker so only one replica talks to Quiqup about this cancellation at a time. */
+    @Column(name = "quiqup_cancel_claimed_at")
+    private Instant quiqupCancelClaimedAt;
+
+    /**
+     * When the cancellation refund was handed to PaymentService. A cheap short-circuit and an audit
+     * trail, NOT the double-refund guard — that stays RefundClaimStore, which counts SUCCESS and
+     * PENDING refunds before any HTTP reaches Paymob.
+     */
+    @Column(name = "cancel_refund_initiated_at")
+    private Instant cancelRefundInitiatedAt;
+
     @Column(name = "quiqup_dispatched_at")
     private Instant quiqupDispatchedAt;
 
@@ -508,6 +545,20 @@ public class Order {
 
     public String getQuiqupStatus() { return quiqupStatus; }
     public void setQuiqupStatus(String quiqupStatus) { this.quiqupStatus = quiqupStatus; }
+    public String getQuiqupCancelStatus() { return quiqupCancelStatus; }
+    public void setQuiqupCancelStatus(String quiqupCancelStatus) { this.quiqupCancelStatus = quiqupCancelStatus; }
+    public Instant getQuiqupCancelRequestedAt() { return quiqupCancelRequestedAt; }
+    public void setQuiqupCancelRequestedAt(Instant quiqupCancelRequestedAt) { this.quiqupCancelRequestedAt = quiqupCancelRequestedAt; }
+    public Instant getQuiqupCancelConfirmedAt() { return quiqupCancelConfirmedAt; }
+    public void setQuiqupCancelConfirmedAt(Instant quiqupCancelConfirmedAt) { this.quiqupCancelConfirmedAt = quiqupCancelConfirmedAt; }
+    public String getQuiqupCancelError() { return quiqupCancelError; }
+    public void setQuiqupCancelError(String quiqupCancelError) { this.quiqupCancelError = quiqupCancelError; }
+    public Integer getQuiqupCancelAttempts() { return quiqupCancelAttempts; }
+    public void setQuiqupCancelAttempts(Integer quiqupCancelAttempts) { this.quiqupCancelAttempts = quiqupCancelAttempts; }
+    public Instant getQuiqupCancelClaimedAt() { return quiqupCancelClaimedAt; }
+    public void setQuiqupCancelClaimedAt(Instant quiqupCancelClaimedAt) { this.quiqupCancelClaimedAt = quiqupCancelClaimedAt; }
+    public Instant getCancelRefundInitiatedAt() { return cancelRefundInitiatedAt; }
+    public void setCancelRefundInitiatedAt(Instant cancelRefundInitiatedAt) { this.cancelRefundInitiatedAt = cancelRefundInitiatedAt; }
 
     public Instant getQuiqupDispatchedAt() { return quiqupDispatchedAt; }
     public void setQuiqupDispatchedAt(Instant quiqupDispatchedAt) { this.quiqupDispatchedAt = quiqupDispatchedAt; }

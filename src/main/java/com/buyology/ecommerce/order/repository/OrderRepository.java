@@ -113,6 +113,50 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("UPDATE Order o SET o.quiqupDispatchClaimedAt = NULL WHERE o.id = :orderId AND o.quiqupOrderId IS NULL")
     int releaseQuiqupDispatchClaim(@Param("orderId") UUID orderId);
 
+    // ── Quiqup cancel ────────────────────────────────────────────────────────
+
+    /**
+     * Wins the right to talk to Quiqup about cancelling this order's job.
+     *
+     * <p>Condition and write are one statement, so two replicas cannot both pass it — the same
+     * shape as {@link #claimForQuiqupDispatch} and for the same reason. {@code staleBefore} must
+     * comfortably exceed the Quiqup request timeout: a claim expiring while the call is still in
+     * flight would let the retry fire a second cancel, which is harmless at Quiqup but races the
+     * refund gate.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Order o SET o.quiqupCancelClaimedAt = :now
+            WHERE o.id = :orderId
+              AND o.quiqupOrderId IS NOT NULL
+              AND (o.quiqupCancelStatus IS NULL OR o.quiqupCancelStatus IN ('PENDING', 'UNCONFIRMED'))
+              AND (o.quiqupCancelClaimedAt IS NULL OR o.quiqupCancelClaimedAt < :staleBefore)
+            """)
+    int claimForQuiqupCancel(@Param("orderId") UUID orderId,
+                             @Param("now") Instant now,
+                             @Param("staleBefore") Instant staleBefore);
+
+    /**
+     * Cancelled orders whose Quiqup job is not yet confirmed stopped — the retry job's worklist.
+     *
+     * <p>Bounded by {@code horizon} (quiqup.cancel.deadline-minutes): past it a courier is not
+     * waiting on us any more and the case has already been escalated to a human.
+     */
+    @Query("""
+            SELECT o FROM Order o
+            WHERE o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.CANCELLED
+              AND o.quiqupOrderId IS NOT NULL
+              AND o.quiqupCancelStatus IN ('PENDING', 'UNCONFIRMED')
+              AND o.cancelledAt > :horizon
+            ORDER BY o.cancelledAt ASC
+            """)
+    List<Order> findOrdersNeedingQuiqupCancel(@Param("horizon") Instant horizon, Pageable pageable);
+
+    /** Hands the cancel claim back after an attempt, so a retry need not wait out the stale window. */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Order o SET o.quiqupCancelClaimedAt = NULL WHERE o.id = :orderId")
+    int releaseQuiqupCancelClaim(@Param("orderId") UUID orderId);
+
     /** Resolve an inbound Quiqup webhook back to the order it concerns. */
     Optional<Order> findByQuiqupOrderId(String quiqupOrderId);
 

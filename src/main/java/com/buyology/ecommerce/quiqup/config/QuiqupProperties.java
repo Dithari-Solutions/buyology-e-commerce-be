@@ -39,6 +39,13 @@ public class QuiqupProperties {
                     + "undelivered. Set QUIQUP_ALLOW_PRODUCTION_WRITES=true to dispatch for real, or "
                     + "QUIQUP_DISPATCH_ENABLED=false to leave dispatch off.");
         }
+        if (enabled && dispatch.isEnabled() && !cancel.isEnabled()) {
+            // A warning rather than a startup failure: switching cancel off deliberately during an
+            // incident is legitimate. But it must never be off silently.
+            org.slf4j.LoggerFactory.getLogger(QuiqupProperties.class).warn(
+                    "[QUIQUP] quiqup.cancel.enabled is FALSE while dispatch is on: cancelling a "
+                    + "dispatched order will refund the customer and leave the courier collecting.");
+        }
         if (enabled && webhookRequireSignature && (webhookSecret == null || webhookSecret.isBlank())) {
             throw new IllegalStateException(
                     "quiqup.webhook-require-signature is true but quiqup.webhook-secret is blank. "
@@ -123,6 +130,7 @@ public class QuiqupProperties {
     private final Oauth oauth = new Oauth();
     private final Paths paths = new Paths();
     private final Dispatch dispatch = new Dispatch();
+    private final Cancel cancel = new Cancel();
 
     /**
      * Automatic dispatch of paid orders to Quiqup.
@@ -178,6 +186,49 @@ public class QuiqupProperties {
     }
 
     public Dispatch getDispatch() { return dispatch; }
+
+    /** Stopping a Quiqup job when its order is cancelled. */
+    public static class Cancel {
+
+        /**
+         * Master switch. On by default — off means a cancelled dispatched order keeps its courier,
+         * which is exactly the bug this module exists to fix. Off is legitimate mid-incident.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Refuse a CUSTOMER cancellation whose Quiqup job could not be confirmed stopped, rather
+         * than cancelling the order and withholding the refund until the retry job resolves it.
+         *
+         * <p>Default true, because refusing writes nothing: "try again in a minute" is completely
+         * clean, whereas cancel-anyway commits an order the customer believes is done while their
+         * money and their stock both wait on a courier we could not reach. The cost is that a
+         * Quiqup outage makes customer self-service cancellation unavailable. Admin cancellations
+         * are never gated by this — an admin's decision is authoritative and only the money leg
+         * waits.
+         */
+        private boolean strictCustomerPreflight = true;
+
+        /** Give up and escalate to a human after this many unconfirmed attempts. */
+        private int maxAttempts = 5;
+
+        /**
+         * Stop retrying a cancel this long after the order was cancelled. Past it a courier is not
+         * waiting on us any more, and the case has already been escalated.
+         */
+        private int deadlineMinutes = 120;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public boolean isStrictCustomerPreflight() { return strictCustomerPreflight; }
+        public void setStrictCustomerPreflight(boolean v) { this.strictCustomerPreflight = v; }
+        public int getMaxAttempts() { return maxAttempts; }
+        public void setMaxAttempts(int v) { this.maxAttempts = v; }
+        public int getDeadlineMinutes() { return deadlineMinutes; }
+        public void setDeadlineMinutes(int v) { this.deadlineMinutes = v; }
+    }
+
+    public Cancel getCancel() { return cancel; }
 
     /** Whether {@link #baseUrl} points at Quiqup staging. Mirrors the client's own check. */
     public boolean isStagingBase() {

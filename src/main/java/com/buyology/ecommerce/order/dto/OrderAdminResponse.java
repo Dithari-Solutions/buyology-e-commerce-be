@@ -41,6 +41,18 @@ public class OrderAdminResponse extends OrderResponse {
      */
     private String quiqupDispatchError;
 
+    /**
+     * How stopping the Quiqup job went when this order was cancelled: CONFIRMED,
+     * CONFIRMED_BY_PARTNER, PENDING, UNCONFIRMED, REFUSED_TOO_LATE, NEEDS_HUMAN. Null means the
+     * question never arose. REFUSED_TOO_LATE and NEEDS_HUMAN are the rows a human must act on —
+     * the refund is withheld until they do.
+     */
+    private String quiqupCancelStatus;
+    private java.time.Instant quiqupCancelConfirmedAt;
+    private String quiqupCancelError;
+    /** When the cancellation refund was handed to the gateway. Null on a cancelled order = held. */
+    private java.time.Instant cancelRefundInitiatedAt;
+
     // Getters and Setters
 
     public String getPickupProofImageUrl() { return pickupProofImageUrl; }
@@ -63,6 +75,15 @@ public class OrderAdminResponse extends OrderResponse {
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
+    public String getQuiqupCancelStatus() { return quiqupCancelStatus; }
+    public void setQuiqupCancelStatus(String v) { this.quiqupCancelStatus = v; }
+    public java.time.Instant getQuiqupCancelConfirmedAt() { return quiqupCancelConfirmedAt; }
+    public void setQuiqupCancelConfirmedAt(java.time.Instant v) { this.quiqupCancelConfirmedAt = v; }
+    public String getQuiqupCancelError() { return quiqupCancelError; }
+    public void setQuiqupCancelError(String v) { this.quiqupCancelError = v; }
+    public java.time.Instant getCancelRefundInitiatedAt() { return cancelRefundInitiatedAt; }
+    public void setCancelRefundInitiatedAt(java.time.Instant v) { this.cancelRefundInitiatedAt = v; }
 
     public String getQuiqupOrderId() { return quiqupOrderId; }
     public void setQuiqupOrderId(String quiqupOrderId) { this.quiqupOrderId = quiqupOrderId; }

@@ -77,6 +77,18 @@ public class QuiqupDeliveryStatusService {
         if (!moved) {
             log.info("[QUIQUP] Order {} not moved by status '{}' (duplicate, stale or terminal)",
                     order.getId(), quiqupStatus);
+
+            // A movement event on an order we already cancelled means the parcel was NOT stopped —
+            // the exact case that used to vanish without trace while the courier delivered it.
+            // Re-read the status rather than trusting the instance loaded before the sync, so an
+            // order cancelled-and-superseded in between does not escalate falsely.
+            if (target == OrderStatus.IN_COURIER || target == OrderStatus.IN_TRANSIT
+                    || target == OrderStatus.DELIVERED) {
+                orderRepo.findById(order.getId())
+                        .filter(fresh -> fresh.getStatus() == OrderStatus.CANCELLED)
+                        .ifPresent(fresh -> orderService.recordPostCancellationMovement(
+                                fresh.getId(), quiqupStatus));
+            }
         }
     }
 

@@ -59,7 +59,7 @@ class CancellationSideEffectBoundaryTest {
     @Test
     void theRefundRunsInItsOwnTransaction() {
         assertRequiresNewAndProxyable(method(OrderService.class, "applyCancellationSideEffects",
-                com.buyology.ecommerce.order.domain.Order.class, String.class));
+                com.buyology.ecommerce.order.domain.Order.class, String.class, boolean.class));
     }
 
     @Test
