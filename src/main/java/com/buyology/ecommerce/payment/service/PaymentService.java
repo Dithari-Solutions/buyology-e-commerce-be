@@ -925,7 +925,6 @@ public class PaymentService {
 
     private void applyWebhookToTransaction(PaymentTransaction tx, JsonNode obj, Long paymobTxnId) {
         tx.setPaymobTransactionId(paymobTxnId);
-        captureCardIdentity(tx, obj);
 
         boolean success = obj.has("success") && obj.get("success").asBoolean();
 
@@ -937,6 +936,9 @@ public class PaymentService {
             tx.setFailureReason("Rejected: callback amount/currency did not match this transaction");
             return;
         }
+        // Only after the callback has proven it belongs to THIS transaction — a rejected
+        // mismatched callback must not stamp another payment's card onto it.
+        captureCardIdentity(tx, obj);
         boolean pending = obj.has("pending") && obj.get("pending").asBoolean();
 
         if (success) {
