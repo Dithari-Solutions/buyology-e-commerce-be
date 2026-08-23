@@ -1104,6 +1104,32 @@ public class OrderService {
      * {@link DeliveryFeePolicy}, which both this and the cart read so the fee quoted while shopping
      * cannot drift from the fee charged.
      */
+    /**
+     * Quote the fees a checkout will actually be charged — REGULAR and EXPRESS through the very
+     * same {@link #calculateShippingFee} the order pipeline runs, so the number on the page and
+     * the number on the order can never disagree.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public com.buyology.ecommerce.order.dto.DeliveryQuoteResponse quoteDeliveryFees(
+            BigDecimal subtotal, String currency, String deliveryCountry) {
+        if (subtotal == null || subtotal.signum() < 0) subtotal = BigDecimal.ZERO;
+        String ccy = (currency == null || currency.isBlank()) ? BASE_CURRENCY : currency;
+        String country = (deliveryCountry == null || deliveryCountry.isBlank()) ? "UAE" : deliveryCountry;
+        BigDecimal subtotalAed = BASE_CURRENCY.equalsIgnoreCase(ccy)
+                ? subtotal
+                : currencyExchangeService.convert(subtotal, ccy, BASE_CURRENCY);
+        BigDecimal thresholdAed = deliveryFeePolicy.freeShippingThresholdAed();
+        BigDecimal threshold = BASE_CURRENCY.equalsIgnoreCase(ccy)
+                ? thresholdAed
+                : currencyExchangeService.convert(thresholdAed, BASE_CURRENCY, ccy);
+        return new com.buyology.ecommerce.order.dto.DeliveryQuoteResponse(
+                ccy,
+                calculateShippingFee(subtotal, ccy, DeliveryMethod.REGULAR, country),
+                calculateShippingFee(subtotal, ccy, DeliveryMethod.EXPRESS, country),
+                threshold,
+                deliveryFeePolicy.qualifiesForFreeDelivery(subtotalAed));
+    }
+
     private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency,
                                             DeliveryMethod method, String deliveryCountry) {
         BigDecimal subtotalAed = BASE_CURRENCY.equalsIgnoreCase(currency)

@@ -66,6 +66,16 @@ public class OrderController {
      * The user's persistent cart is left untouched; an ephemeral one-item cart is
      * used internally. Starts in PENDING_PAYMENT like any other order.
      */
+    @GetMapping("/delivery-quote")
+    public ResponseEntity<ApiResponse<com.buyology.ecommerce.order.dto.DeliveryQuoteResponse>> deliveryQuote(
+            @RequestParam java.math.BigDecimal subtotal,
+            @RequestParam String currency,
+            @RequestParam(required = false) String country) {
+        return ApiResponse.success(
+                orderService.quoteDeliveryFees(subtotal, currency, country),
+                "Delivery quote");
+    }
+
     @PostMapping("/buy-now")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<OrderResponse>> createBuyNowOrder(
