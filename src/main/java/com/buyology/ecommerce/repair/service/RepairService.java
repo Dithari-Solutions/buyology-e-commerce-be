@@ -524,6 +524,8 @@ public class RepairService {
                         saved.getEstimatedTime(), saved.getAdminNote());
             }
         });
+        notifyCustomerRow(saved, "Repair price ready",
+                "Repair " + saved.getReference() + ": your price estimate is ready — review and respond.");
         return toResponse(request);
     }
 
@@ -654,7 +656,20 @@ public class RepairService {
         return dto;
     }
 
+    /** In-app bell row for the repair's owner (type REPAIR_UPDATE); best-effort. */
+    private void notifyCustomerRow(RepairRequest request, String title, String body) {
+        if (request.getUserId() == null) return;
+        try {
+            pushService.sendToUser(request.getUserId(), title, body, "REPAIR_UPDATE",
+                    java.util.Map.of("id", request.getId().toString(), "type", "REPAIR_UPDATE"));
+        } catch (Exception e) {
+            log.warn("[NOTIFY] repair customer notification failed: {}", e.getMessage());
+        }
+    }
+
     private void emailStatus(RepairRequest request, String note) {
+        notifyCustomerRow(request, "Repair update",
+                "Repair " + request.getReference() + " is now: " + stageLabel(request.getStatus()) + ".");
         best("status email", () -> {
             String email = contactEmailFor(request);
             if (email != null && !email.isBlank()) {

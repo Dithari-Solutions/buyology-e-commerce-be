@@ -570,7 +570,20 @@ public class RefundRequestService {
         return order == null || order.getId() == null ? "" : order.getId().toString();
     }
 
+    /** In-app bell row for the refund's owner (type REFUND_UPDATE); best-effort. */
+    private void notifyCustomerRow(RefundRequest req, String title, String body) {
+        if (req.getUserId() == null) return;
+        try {
+            pushService.sendToUser(req.getUserId(), title, body, "REFUND_UPDATE",
+                    java.util.Map.of("id", req.getId().toString(), "type", "REFUND_UPDATE"));
+        } catch (Exception e) {
+            log.warn("[NOTIFY] refund customer notification failed: {}", e.getMessage());
+        }
+    }
+
     private void notifyRequestReceived(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Refund request received",
+                "We're reviewing your refund request — we'll update you here.");
         String to = emailFor(order);
         if (to == null) return;
         emailService.sendRefundRequestReceivedEmail(
@@ -578,6 +591,8 @@ public class RefundRequestService {
     }
 
     private void notifyApproved(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Refund approved",
+                "Your refund request was approved — choose how to return the product.");
         String to = emailFor(order);
         if (to == null) return;
         RefundSetting setting = settingService.getOrCreate();
@@ -587,6 +602,7 @@ public class RefundRequestService {
     }
 
     private void notifyRejected(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Refund update", "Your refund request was declined.");
         String to = emailFor(order);
         if (to == null) return;
         emailService.sendRefundRejectedEmail(
@@ -595,6 +611,8 @@ public class RefundRequestService {
     }
 
     private void notifyMethodConfirmed(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Return method confirmed",
+                "Your return method is confirmed — see the instructions on your order page.");
         String to = emailFor(order);
         if (to == null) return;
         String method;
@@ -615,6 +633,8 @@ public class RefundRequestService {
     }
 
     private void notifyProductReceived(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Product received",
+                "We received your product — your refund is being processed.");
         String to = emailFor(order);
         if (to == null) return;
         emailService.sendRefundProductReceivedEmail(
@@ -622,6 +642,8 @@ public class RefundRequestService {
     }
 
     private void notifyCompleted(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Refund completed",
+                "Your refund has been paid back to your payment method.");
         String to = emailFor(order);
         if (to == null) return;
         emailService.sendRefundCompletedEmail(
@@ -631,6 +653,8 @@ public class RefundRequestService {
     }
 
     private void notifyFailed(RefundRequest req, Order order) {
+        notifyCustomerRow(req, "Refund needs attention",
+                "Your refund could not be completed automatically — our team is on it.");
         String to = emailFor(order);
         if (to == null) return;
         emailService.sendRefundFailedEmail(

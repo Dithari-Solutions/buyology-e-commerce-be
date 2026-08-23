@@ -554,6 +554,9 @@ public class SellService {
                 saved.getReference(), saved.getProductName(),
                 saved.getOfferPriceCurrency(), saved.getOfferPrice(),
                 saved.getOfferValidFor(), saved.getAdminNote()));
+        notifyCustomerRow(saved, "Offer received",
+                "We made you an offer for " + saved.getProductName() + " — review it in sell request "
+                        + saved.getReference() + ".");
         return toResponse(request);
     }
 
@@ -707,7 +710,20 @@ public class SellService {
         return dto;
     }
 
+    /** In-app bell row for the sell request's owner (type SELL_UPDATE); best-effort. */
+    private void notifyCustomerRow(SellRequest request, String title, String body) {
+        if (request.getUserId() == null) return;
+        try {
+            pushService.sendToUser(request.getUserId(), title, body, "SELL_UPDATE",
+                    java.util.Map.of("id", request.getId().toString(), "type", "SELL_UPDATE"));
+        } catch (Exception e) {
+            log.warn("[NOTIFY] sell customer notification failed: {}", e.getMessage());
+        }
+    }
+
     private void emailStatus(SellRequest request, String note) {
+        notifyCustomerRow(request, "Sell request update",
+                "Sell " + request.getReference() + " is now: " + stageLabel(request.getStatus()) + ".");
         best("status email", () -> emailService.sendSellStatusEmail(
                 contactEmailFor(request), resolveCustomerName(request.getUserId()),
                 request.getReference(), request.getProductName(),

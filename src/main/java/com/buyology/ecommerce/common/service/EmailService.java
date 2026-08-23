@@ -959,6 +959,81 @@ public class EmailService {
         }
     }
 
+    // ── Support tickets ────────────────────────────────────────────────────────
+
+    /** Customer confirmation: their support ticket was received. */
+    @Async
+    public void sendSupportReceivedEmail(String toEmail, String customerName, String requestRef, String subject) {
+        try {
+            String html = loadTemplate("static/support-request-received.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)));
+            send(toEmail, "We received your support ticket", html);
+            log.info("Support received email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send support received email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Support-team notification with a dashboard link — used both for new tickets and for
+     * customer replies; {@code heading} says which ("New support ticket" / "New customer reply").
+     */
+    @Async
+    public void sendSupportTeamEmail(String teamEmail, String heading, String customerName, String requestRef,
+                                     String subject, String category, String body, String reviewUrl) {
+        try {
+            String html = loadTemplate("static/support-request-notification.html")
+                    .replace("{{HEADING}}", escapeHtml(nullToEmpty(heading)))
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
+                    .replace("{{CATEGORY}}", escapeHtml(nullToEmpty(category)))
+                    .replace("{{BODY}}", escapeHtml(nullToEmpty(body)))
+                    .replace("{{REVIEW_URL}}", nullToEmpty(reviewUrl));
+            send(teamEmail, nullToEmpty(heading) + ": " + nullToEmpty(requestRef), html);
+            log.info("Support team email ({}) sent to {}", heading, teamEmail);
+        } catch (Exception e) {
+            log.warn("Could not send support team email to {}: {}", teamEmail, e.getMessage());
+        }
+    }
+
+    /** Customer status update: the team moved their ticket (with an optional note). */
+    @Async
+    public void sendSupportStatusEmail(String toEmail, String customerName, String requestRef,
+                                       String subject, String statusLabel, String note) {
+        try {
+            String html = loadTemplate("static/support-status-update.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
+                    .replace("{{STATUS_LABEL}}", escapeHtml(nullToEmpty(statusLabel)))
+                    .replace("{{NOTE}}", escapeHtml(nullToEmpty(note)));
+            send(toEmail, "Update on your support ticket: " + nullToEmpty(requestRef), html);
+            log.info("Support status email ({}) sent to {}", statusLabel, toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send support status email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Customer notification: the team replied on their ticket. */
+    @Async
+    public void sendSupportReplyEmail(String toEmail, String customerName, String requestRef,
+                                      String subject, String reply) {
+        try {
+            String html = loadTemplate("static/support-reply.html")
+                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
+                    .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
+                    .replace("{{REPLY}}", escapeHtml(nullToEmpty(reply)));
+            send(toEmail, "Support replied to your ticket: " + nullToEmpty(requestRef), html);
+            log.info("Support reply email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.warn("Could not send support reply email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     // ── Sell (trade-in) requests ───────────────────────────────────────────────
     // Mirrors the repair emails above. Each one no-ops on a blank recipient so callers don't have
     // to null-check a contact address that was snapshotted at submit time.

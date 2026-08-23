@@ -1834,6 +1834,18 @@ public class OrderService {
 
     /** Best-effort order-confirmation email (with climate/SDG content) once an order is PAID. */
     private void sendOrderConfirmationEmailFor(Order order) {
+        // The confirmation email has an in-app twin so the storefront bell also shows the moment
+        // an order is paid — both call sites of this method are the settled-payment paths.
+        if (order.getUserId() != null) {
+            try {
+                pushService.sendToUser(order.getUserId(), "Payment confirmed",
+                        "Order BUY-" + order.getId().toString().substring(0, 8).toUpperCase()
+                                + " is paid — we're getting it ready.", "ORDER_STATUS",
+                        java.util.Map.of("orderId", order.getId().toString(), "type", "ORDER_STATUS"));
+            } catch (Exception e) {
+                log.warn("[ORDER] paid notification failed for {}: {}", order.getId(), e.getMessage());
+            }
+        }
         try {
             String email = customerEmail(order);
             if (email == null) return;
