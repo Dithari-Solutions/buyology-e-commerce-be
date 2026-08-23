@@ -184,8 +184,9 @@ public class RefundRequestService {
         // The dashboard bell must not miss this — every superadmin gets a feed row.
         try {
             java.util.Map<String, String> data = java.util.Map.of("id", req.getId().toString(), "type", "REFUND_REQUEST");
+            String body = "Refund requested for order BUY-" + req.getOrderId().toString().substring(0, 8).toUpperCase() + ".";
             userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
-                    pushService.sendToUser(uid, "New refund request", "Refund requested for order BUY-" + req.getOrderId().toString().substring(0, 8).toUpperCase() + ".", "REFUND_REQUEST", data));
+                    pushService.sendToUser(uid, "New refund request", body, "REFUND_REQUEST", data));
         } catch (Exception e) {
             log.warn("[NOTIFY] superadmin fan-out failed: {}", e.getMessage());
         }
