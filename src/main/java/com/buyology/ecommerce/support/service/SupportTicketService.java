@@ -127,7 +127,7 @@ public class SupportTicketService {
         ticket.setCategory(parseCategory(category));
         ticket.setSubject(subject.trim());
         ticket.setDescription(description.trim());
-        ticket.setPageUrl(trimTo(pageUrl, MAX_PAGE_URL));
+        ticket.setPageUrl(sanitizePageUrl(pageUrl));
         ticket.setImageKeys(uploadImages(images));
         ticket.setStatus(SupportTicketStatus.OPEN);
         ticket.setContactEmail(email);
@@ -366,6 +366,8 @@ public class SupportTicketService {
             if (keys.size() >= MAX_IMAGES) break;
             String filename = image.getOriginalFilename();
             if (filename == null || filename.isBlank()) filename = "image";
+            // Keys are stored newline-delimited, so the client-supplied name must never carry one.
+            filename = filename.replaceAll("[\\r\\n]", "_");
             String key = "support/" + UUID.randomUUID() + "/" + filename;
             keys.add(contaboObjectService.uploadFile(key, image));
         }
@@ -481,6 +483,18 @@ public class SupportTicketService {
         String first = u.getFirstName() == null ? "" : u.getFirstName().trim();
         String last = u.getLastName() == null ? "" : u.getLastName().trim();
         return (first + " " + last).trim();
+    }
+
+    /**
+     * The page URL is customer input rendered as a clickable link in the dashboard — only plain
+     * web URLs are kept ({@code javascript:}/{@code data:} and friends are dropped, not errored,
+     * so a weird value never blocks a ticket).
+     */
+    private static String sanitizePageUrl(String value) {
+        String trimmed = trimTo(value, MAX_PAGE_URL);
+        if (trimmed == null) return null;
+        String lower = trimmed.toLowerCase();
+        return (lower.startsWith("https://") || lower.startsWith("http://")) ? trimmed : null;
     }
 
     private static String trimTo(String value, int max) {

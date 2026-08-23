@@ -966,7 +966,7 @@ public class EmailService {
     public void sendSupportReceivedEmail(String toEmail, String customerName, String requestRef, String subject) {
         try {
             String html = loadTemplate("static/support-request-received.html")
-                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(safeName(customerName)))
                     .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
                     .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)));
             send(toEmail, "We received your support ticket", html);
@@ -986,7 +986,7 @@ public class EmailService {
         try {
             String html = loadTemplate("static/support-request-notification.html")
                     .replace("{{HEADING}}", escapeHtml(nullToEmpty(heading)))
-                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(safeName(customerName)))
                     .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
                     .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
                     .replace("{{CATEGORY}}", escapeHtml(nullToEmpty(category)))
@@ -1005,7 +1005,7 @@ public class EmailService {
                                        String subject, String statusLabel, String note) {
         try {
             String html = loadTemplate("static/support-status-update.html")
-                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(safeName(customerName)))
                     .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
                     .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
                     .replace("{{STATUS_LABEL}}", escapeHtml(nullToEmpty(statusLabel)))
@@ -1023,7 +1023,7 @@ public class EmailService {
                                       String subject, String reply) {
         try {
             String html = loadTemplate("static/support-reply.html")
-                    .replace("{{CUSTOMER_NAME}}", safeName(customerName))
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(safeName(customerName)))
                     .replace("{{REQUEST_REF}}", nullToEmpty(requestRef))
                     .replace("{{SUBJECT}}", escapeHtml(nullToEmpty(subject)))
                     .replace("{{REPLY}}", escapeHtml(nullToEmpty(reply)));

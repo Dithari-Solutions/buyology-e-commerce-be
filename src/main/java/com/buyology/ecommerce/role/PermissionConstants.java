@@ -205,6 +205,12 @@ public final class PermissionConstants {
     // Make, revise or withdraw the buy-back offer on a trade-in request and advance its status.
     public static final String SELL_UPDATE = "sell:update";
 
+    // View the customer support-ticket queue and ticket details.
+    public static final String SUPPORT_READ = "support:read";
+
+    // Reply to support tickets and move their status (resolve/close).
+    public static final String SUPPORT_UPDATE = "support:update";
+
     // View the Quiqup integration config, sample payloads, test order details, labels and received
     // webhook events.
     public static final String QUIQUP_READ = "quiqup:read";

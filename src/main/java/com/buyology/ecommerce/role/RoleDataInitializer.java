@@ -117,6 +117,8 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.REPAIR_UPDATE,
             PermissionConstants.SELL_READ,
             PermissionConstants.SELL_UPDATE,
+            PermissionConstants.SUPPORT_READ,
+            PermissionConstants.SUPPORT_UPDATE,
             PermissionConstants.QUIQUP_READ,
             PermissionConstants.QUIQUP_ORDER_CREATE,
             PermissionConstants.QUIQUP_ORDER_UPDATE,
@@ -272,6 +274,8 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.REPAIR_UPDATE,
             PermissionConstants.SELL_READ,
             PermissionConstants.SELL_UPDATE,
+            PermissionConstants.SUPPORT_READ,
+            PermissionConstants.SUPPORT_UPDATE,
             PermissionConstants.BANNER_READ,
             PermissionConstants.BANNER_CREATE,
             PermissionConstants.BANNER_UPDATE,
@@ -398,7 +402,9 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.ORDER_READ,
             PermissionConstants.REFUND_READ,
             PermissionConstants.USER_READ,
-            PermissionConstants.B2B_INQUIRY_READ
+            PermissionConstants.B2B_INQUIRY_READ,
+            PermissionConstants.SUPPORT_READ,
+            PermissionConstants.SUPPORT_UPDATE
     );
 
     /** Runs the courier fleet and the deliveries assigned to it. */

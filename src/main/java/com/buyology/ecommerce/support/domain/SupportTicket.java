@@ -20,7 +20,8 @@ import java.util.UUID;
 @Table(name = "support_tickets", indexes = {
         @Index(name = "idx_support_tickets_credential", columnList = "credential_id"),
         @Index(name = "idx_support_tickets_status", columnList = "status"),
-        @Index(name = "idx_support_tickets_admin_unread", columnList = "admin_unread")
+        @Index(name = "idx_support_tickets_admin_unread", columnList = "admin_unread"),
+        @Index(name = "idx_support_tickets_created_at", columnList = "created_at DESC")
 })
 public class SupportTicket {
 
