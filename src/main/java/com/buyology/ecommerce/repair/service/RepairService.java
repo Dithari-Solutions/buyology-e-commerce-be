@@ -241,6 +241,14 @@ public class RepairService {
         }
 
         RepairDeliveryMethod previous = request.getInboundDeliveryMethod();
+        // Re-choosing the courier when its fee is ALREADY PAID must not mint another charge
+        // (and silently reset the paid one) — the pickup is booked; nothing to do. The unpaid
+        // same-method call stays open on purpose: it is the retry path for an abandoned fee.
+        if (method == RepairDeliveryMethod.COURIER_PICKUP
+                && previous == RepairDeliveryMethod.COURIER_PICKUP
+                && request.isCourierFeePaid()) {
+            return new RepairDeliveryResponse(toResponse(request), null);
+        }
         boolean methodChanged = previous != null && previous != method;
         if (methodChanged) {
             request.setPreviousInboundDeliveryMethod(previous);
@@ -403,7 +411,12 @@ public class RepairService {
         if (country == null || country.isBlank()) {
             return List.of();
         }
-        return storeLocationRepository.findAllByCountryAndIsActive(country.trim().toUpperCase(), true).stream()
+        // Branch rows arrive from the dashboard's map picker with whatever spelling the
+        // geocoder used (AE vs ARE vs UAE) — match by country identity, not string equality.
+        String wanted = country.trim();
+        return storeLocationRepository.findAllByIsActive(true).stream()
+                .filter(loc -> com.buyology.ecommerce.common.utils.CountryCodeUtil
+                        .isSameCountry(wanted, loc.getCountry()))
                 .map(StoreLocationOptionResponse::from)
                 .collect(Collectors.toList());
     }
