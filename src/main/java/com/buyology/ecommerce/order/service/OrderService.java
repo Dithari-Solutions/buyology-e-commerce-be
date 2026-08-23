@@ -657,6 +657,25 @@ public class OrderService {
         AuthCredentials credential = authCredentialRepository.findById(authCredentialId)
                 .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
 
+        // Every Buy Now builds a FRESH ephemeral cart, so createOrder's cartId-keyed reuse can
+        // never match a prior attempt: without this sweep, each retry after a failed or abandoned
+        // payment would strand another PENDING_PAYMENT order — holding the promo reservation
+        // hostage and sinking display stock nothing ever returns. Supersede this user's pending
+        // orders born from a spent buy-now cart (ABANDONED marks exactly those) for the SAME
+        // product+store, inside this transaction, before the new order claims stock and promo.
+        for (Order prior : orderRepo.findAllByUserIdAndStatusOrderByCreatedAtDesc(
+                userId, OrderStatus.PENDING_PAYMENT)) {
+            if (prior.getCartId() == null) continue;
+            Cart priorCart = cartRepo.findById(prior.getCartId()).orElse(null);
+            if (priorCart == null || priorCart.getStatus() != Cart.CartStatus.ABANDONED) continue;
+            List<OrderItem> priorItems = prior.getItems();
+            if (priorItems.size() == 1
+                    && req.getProductId().equals(priorItems.get(0).getProductId())
+                    && req.getStoreId().equals(priorItems.get(0).getStoreId())) {
+                supersedeStaleOrder(prior, prior.getCartId());
+            }
+        }
+
         // Ephemeral, single-item cart — NOT the user's active cart.
         Cart cart = new Cart(credential);
         cart.setCountryCode(storeCountry);

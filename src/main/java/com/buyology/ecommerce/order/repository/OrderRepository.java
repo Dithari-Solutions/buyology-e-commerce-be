@@ -47,6 +47,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      */
     List<Order> findAllByCartIdAndStatusInOrderByCreatedAtDesc(UUID cartId, List<OrderStatus> statuses);
 
+    List<Order> findAllByUserIdAndStatusOrderByCreatedAtDesc(UUID userId, OrderStatus status);
+
     @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
            "WHERE (:status IS NULL OR o.status = :status) " +
            "AND (:deliveryMethod IS NULL OR o.deliveryMethod = :deliveryMethod) " +

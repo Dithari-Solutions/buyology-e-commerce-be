@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.order.dto;
 
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
@@ -20,6 +21,7 @@ public class BuyNowOrderRequest {
     private UUID storeId;
 
     /** Defaults to 1 when null/invalid. */
+    @Max(value = 1000, message = "quantity must not exceed 1000")
     private Integer quantity;
 
     @NotNull
