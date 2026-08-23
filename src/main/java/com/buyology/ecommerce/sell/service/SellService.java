@@ -268,6 +268,14 @@ public class SellService {
         }
 
         SellDeliveryMethod previous = request.getInboundDeliveryMethod();
+        // Re-choosing the courier when its fee is ALREADY PAID must not mint another charge
+        // (and silently reset the paid one) — the leg is booked; nothing to do. The unpaid
+        // same-method call stays open on purpose: it is the retry path for an abandoned fee.
+        if (method == SellDeliveryMethod.COURIER_PICKUP
+                && previous == SellDeliveryMethod.COURIER_PICKUP
+                && request.isCourierFeePaid()) {
+            return new SellDeliveryResponse(toResponse(request), null);
+        }
         boolean methodChanged = previous != null && previous != method;
         if (methodChanged) {
             request.setPreviousInboundDeliveryMethod(previous);
@@ -356,10 +364,25 @@ public class SellService {
         if (method != SellDeliveryMethod.COURIER_RETURN && method != SellDeliveryMethod.STORE_PICKUP) {
             throw new IllegalArgumentException("Return delivery must be COURIER_RETURN or STORE_PICKUP.");
         }
+        SellDeliveryMethod previousReturn = request.getReturnDeliveryMethod();
+        // Re-choosing the courier when its fee is ALREADY PAID must not mint another charge
+        // (and silently reset the paid one) — the leg is booked; nothing to do. The unpaid
+        // same-method call stays open on purpose: it is the retry path for an abandoned fee.
+        if (method == SellDeliveryMethod.COURIER_RETURN
+                && previousReturn == SellDeliveryMethod.COURIER_RETURN
+                && request.isCourierFeePaid()) {
+            return new SellDeliveryResponse(toResponse(request), null);
+        }
         request.setReturnDeliveryMethod(method);
         if (method == SellDeliveryMethod.STORE_PICKUP) {
-            request.setCourierFeeAmount(null);
-            request.setCourierFeeCurrency(null);
+            if (previousReturn == SellDeliveryMethod.COURIER_RETURN && request.isCourierFeePaid()) {
+                // The fee was collected for a courier that will now never run — keep the
+                // amount on record and flag it so the team settles the refund manually.
+                request.setCourierFeeRefundDue(true);
+            } else {
+                request.setCourierFeeAmount(null);
+                request.setCourierFeeCurrency(null);
+            }
             request.setCourierFeePaid(false);
             request.setAdminUnread(true);
             request = sellRepo.save(request);

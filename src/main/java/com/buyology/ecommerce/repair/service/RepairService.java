@@ -330,10 +330,25 @@ public class RepairService {
         if (method != RepairDeliveryMethod.COURIER_RETURN && method != RepairDeliveryMethod.STORE_PICKUP) {
             throw new IllegalArgumentException("Return delivery must be COURIER_RETURN or STORE_PICKUP.");
         }
+        RepairDeliveryMethod previousReturn = request.getReturnDeliveryMethod();
+        // Re-choosing the courier when its fee is ALREADY PAID must not mint another charge
+        // (and silently reset the paid one) — the leg is booked; nothing to do. The unpaid
+        // same-method call stays open on purpose: it is the retry path for an abandoned fee.
+        if (method == RepairDeliveryMethod.COURIER_RETURN
+                && previousReturn == RepairDeliveryMethod.COURIER_RETURN
+                && request.isCourierFeePaid()) {
+            return new RepairDeliveryResponse(toResponse(request), null);
+        }
         request.setReturnDeliveryMethod(method);
         if (method == RepairDeliveryMethod.STORE_PICKUP) {
-            request.setCourierFeeAmount(null);
-            request.setCourierFeeCurrency(null);
+            if (previousReturn == RepairDeliveryMethod.COURIER_RETURN && request.isCourierFeePaid()) {
+                // The fee was collected for a courier that will now never run — keep the
+                // amount on record and flag it so the team settles the refund manually.
+                request.setCourierFeeRefundDue(true);
+            } else {
+                request.setCourierFeeAmount(null);
+                request.setCourierFeeCurrency(null);
+            }
             request.setCourierFeePaid(false);
             request.setAdminUnread(true);
             request = repairRepo.save(request);
