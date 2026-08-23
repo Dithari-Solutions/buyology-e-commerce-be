@@ -829,8 +829,9 @@ public class ProductService {
         }
 
         // toResponse() is expensive PER product (per-product association queries), so
-        // only map the requested page — never the whole catalog in one response.
-        int pageSize = Math.max(1, size);
+        // only map the requested page — never the whole catalog in one response. The ceiling
+        // matches the admin path: an uncapped ?size= would let one request map everything.
+        int pageSize = Math.min(100, Math.max(1, size));
         long skip = (long) Math.max(0, page) * pageSize;
         List<Product> products = all.stream().skip(skip).limit(pageSize).toList();
 
