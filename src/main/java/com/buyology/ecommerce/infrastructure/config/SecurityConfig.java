@@ -214,7 +214,17 @@ public class SecurityConfig {
             // guarantee is really for.
             "https://buyology.online",
             // Carries the AI assistant widget. A separate site from the shop, and it stays.
-            "https://v2.buyology.online");
+            "https://v2.buyology.online",
+            // The per-region storefronts: one subdomain per served market, plus the global
+            // landing for visitors from countries we don't serve. Same first-party app,
+            // different hosts — geo routing decides which one a visitor may use.
+            "https://in.buyology.online",
+            "https://sa.buyology.online",
+            "https://bh.buyology.online",
+            "https://qa.buyology.online",
+            "https://om.buyology.online",
+            "https://az.buyology.online",
+            "https://web.buyology.online");
 
     /**
      * The effective allowlist: whatever the environment configured, plus {@link
