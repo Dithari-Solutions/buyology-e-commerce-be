@@ -41,7 +41,8 @@ class SecurityConfigCorsTest {
                 "https://admin.buyology.online," + SHOP);
 
         assertEquals(1, allowed.stream().filter(SHOP::equals).count());
-        assertEquals(3, allowed.size(), "one configured origin plus both built-ins");
+        assertEquals(1 + SecurityConfig.BUILT_IN_ALLOWED_ORIGINS.size(), allowed.size(),
+                "one configured origin plus every built-in — derived, so the list can grow");
     }
 
     @Test
