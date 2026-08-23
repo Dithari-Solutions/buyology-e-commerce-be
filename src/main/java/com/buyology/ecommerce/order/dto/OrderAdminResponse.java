@@ -18,6 +18,13 @@ public class OrderAdminResponse extends OrderResponse {
     private Instant deliveryProofTakenAt;
     private UUID storeId;
 
+    // ── Payment identity (admin-only) ─────────────────────────────────────────
+    /** CARD / TABBY / TAMARA / B2B_CREDIT, from the settling transaction. */
+    private String paymentMethodType;
+    /** Masked card tail, when Paymob reported it. Never anything close to a full PAN. */
+    private String cardLast4;
+    private String cardBrand;
+
     // ── Quiqup delivery dispatch ──────────────────────────────────────────────
     // Admin-only, deliberately: an operator needs to know whether an order reached the carrier and
     // why it did not, and a customer needs neither. Without these the dispatch state lived only on
@@ -75,6 +82,12 @@ public class OrderAdminResponse extends OrderResponse {
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }
+    public String getPaymentMethodType() { return paymentMethodType; }
+    public void setPaymentMethodType(String paymentMethodType) { this.paymentMethodType = paymentMethodType; }
+    public String getCardLast4() { return cardLast4; }
+    public void setCardLast4(String cardLast4) { this.cardLast4 = cardLast4; }
+    public String getCardBrand() { return cardBrand; }
+    public void setCardBrand(String cardBrand) { this.cardBrand = cardBrand; }
 
     public String getQuiqupCancelStatus() { return quiqupCancelStatus; }
     public void setQuiqupCancelStatus(String v) { this.quiqupCancelStatus = v; }

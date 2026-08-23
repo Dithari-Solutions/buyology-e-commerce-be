@@ -1195,6 +1195,16 @@ public class OrderService {
 
         OrderAdminResponse res = toAdminOrderResponse(order);
 
+        // What paid: the settling transaction's method and masked card tail, so an operator
+        // answers "how was this paid?" without a database console.
+        if (order.getPaymentTransactionId() != null) {
+            paymentTransactionRepo.findById(order.getPaymentTransactionId()).ifPresent(tx -> {
+                res.setPaymentMethodType(tx.getMethodType() != null ? tx.getMethodType().name() : null);
+                res.setCardLast4(tx.getCardLast4());
+                res.setCardBrand(tx.getCardBrand());
+            });
+        }
+
         // Prefer admin-uploaded proof images (new flow). Fall back to courier-backend
         // proof only for legacy orders that have a deliveryOrderId set.
         if (order.getPickupProofImageKey() != null) {
@@ -1714,6 +1724,20 @@ public class OrderService {
                 try { emailService.sendRefundInitiatedOnCancelEmail(email, name, orderNo, refundAmount.toPlainString(), refundCurrency); }
                 catch (Exception e) { log.warn("[ORDER] refund-initiated email failed for {}: {}", order.getId(), e.getMessage()); }
             }
+        }
+
+        // Superadmins learn about every real cancellation — exactly once: the refund-gated
+        // path returned above on its first pass and reaches here only via the retry, and
+        // supersede-cancellations never come through this method at all.
+        try {
+            java.util.Map<String, String> data = java.util.Map.of(
+                    "orderId", order.getId().toString(), "type", "ORDER_CANCELLED");
+            String body = "Order BUY-" + order.getId().toString().substring(0, 8).toUpperCase()
+                    + " was cancelled" + (reason != null && !reason.isBlank() ? ": " + reason : ".");
+            userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
+                    pushService.sendToUser(uid, "Order cancelled", body, "ORDER_CANCELLED", data));
+        } catch (Exception e) {
+            log.warn("[ORDER] Could not notify superadmins of cancellation {}: {}", order.getId(), e.getMessage());
         }
     }
 

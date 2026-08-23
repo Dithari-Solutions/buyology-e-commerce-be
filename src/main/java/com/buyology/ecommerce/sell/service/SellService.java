@@ -89,6 +89,9 @@ public class SellService {
     @Value("${app.web-base-url:https://buyology.online}")
     private String webBaseUrl;
 
+    private final com.buyology.ecommerce.notification.service.PushNotificationService pushService;
+    private final com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository;
+
     public SellService(SellRequestRepository sellRepo,
                        AuthCredentialRepository authCredentialRepository,
                        UserRepository userRepository,
@@ -98,7 +101,11 @@ public class SellService {
                        CurrencyExchangeService currencyExchangeService,
                        EmailService emailService,
                        PaymentService paymentService,
-                       ApplicationEventPublisher eventPublisher) {
+                       ApplicationEventPublisher eventPublisher,
+                                com.buyology.ecommerce.notification.service.PushNotificationService pushService,
+                                com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository) {
+        this.pushService = pushService;
+        this.userRoleRepository = userRoleRepository;
         this.sellRepo = sellRepo;
         this.authCredentialRepository = authCredentialRepository;
         this.userRepository = userRepository;
@@ -198,6 +205,15 @@ public class SellService {
         // Kicks off the advisory AI buy-back valuation. Consumed AFTER_COMMIT on another thread, so
         // it neither delays this response nor can it fail the submission.
         eventPublisher.publishEvent(new SellRequestSubmittedEvent(saved.getId()));
+        // The dashboard bell must not miss this — every superadmin gets a feed row.
+        try {
+            java.util.Map<String, String> data = java.util.Map.of("id", saved.getId().toString(), "type", "SELL_REQUEST");
+            userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
+                    pushService.sendToUser(uid, "New sell request", "Sell " + saved.getReference() + " submitted: " + saved.getProductName() + ".", "SELL_REQUEST", data));
+        } catch (Exception e) {
+            log.warn("[NOTIFY] superadmin fan-out failed: {}", e.getMessage());
+        }
+
 
         return toResponse(request);
     }

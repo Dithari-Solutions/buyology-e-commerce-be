@@ -43,6 +43,15 @@ public class PushTokenController {
     }
 
     /**
+     * Mark every notification in the caller's history as read.
+     */
+    @PutMapping("/history/read-all")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Integer>> markAllRead(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.success(historyRepository.markAllRead(userId), "All notifications marked read");
+    }
+
+    /**
      * Mark a notification as read.
      */
     @PutMapping("/history/{id}/read")

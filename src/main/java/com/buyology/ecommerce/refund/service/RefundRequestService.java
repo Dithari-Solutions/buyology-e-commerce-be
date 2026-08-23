@@ -71,6 +71,9 @@ public class RefundRequestService {
     private final PaymobProperties paymobProperties;
     private final PaymentService paymentService;
 
+    private final com.buyology.ecommerce.notification.service.PushNotificationService pushService;
+    private final com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository;
+
     public RefundRequestService(RefundRequestRepository repository,
                                 RefundSettingService settingService,
                                 OrderRepository orderRepository,
@@ -82,7 +85,11 @@ public class RefundRequestService {
                                 EmailService emailService,
                                 PaymobClient paymobClient,
                                 PaymobProperties paymobProperties,
-                                PaymentService paymentService) {
+                                PaymentService paymentService,
+                                com.buyology.ecommerce.notification.service.PushNotificationService pushService,
+                                com.buyology.ecommerce.role.repository.UserRoleRepository userRoleRepository) {
+        this.pushService = pushService;
+        this.userRoleRepository = userRoleRepository;
         this.repository = repository;
         this.settingService = settingService;
         this.orderRepository = orderRepository;
@@ -174,6 +181,15 @@ public class RefundRequestService {
         req = repository.save(req);
 
         notifyRequestReceived(req, order);
+        // The dashboard bell must not miss this — every superadmin gets a feed row.
+        try {
+            java.util.Map<String, String> data = java.util.Map.of("id", req.getId().toString(), "type", "REFUND_REQUEST");
+            userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
+                    pushService.sendToUser(uid, "New refund request", "Refund requested for order BUY-" + req.getOrderId().toString().substring(0, 8).toUpperCase() + ".", "REFUND_REQUEST", data));
+        } catch (Exception e) {
+            log.warn("[NOTIFY] superadmin fan-out failed: {}", e.getMessage());
+        }
+
         return toResponse(req);
     }
 
