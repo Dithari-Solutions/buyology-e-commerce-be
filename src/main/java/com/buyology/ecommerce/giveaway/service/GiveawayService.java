@@ -9,6 +9,7 @@ import com.buyology.ecommerce.giveaway.repository.GiveawayEntryRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import com.buyology.ecommerce.user.service.UserProfileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,10 +38,12 @@ import java.util.regex.Pattern;
  *       NORMALISED handle, so {@code @Buyology}, {@code buyology} and
  *       {@code instagram.com/buyology/} are all the same row. This is what stops one person
  *       registering several site accounts and pointing them at the same Instagram.</li>
- *   <li><b>A verified phone number on the account</b> — the only cheap-to-fake identity here
- *       is an email address; phone numbers cost real money and effort, so requiring one
- *       verified by SMS OTP is what actually caps how many accounts one person can make.
- *       Enforced as an eligibility gate the UI can explain up front.</li>
+ *   <li><b>A reachable, verified account</b> — a delivery address plus a phone number verified
+ *       by SMS OTP. Partly practical (a prize has to be delivered to someone), partly the
+ *       anti-abuse teeth: the only cheap-to-fake identity here is an email address, while phone
+ *       numbers cost real money and effort, so requiring a verified one is what actually caps
+ *       how many accounts one person can make. Enforced on the write and advertised by the
+ *       status endpoint so the UI can explain the gap up front.</li>
  * </ol>
  *
  * Both uniqueness rules exist as DB constraints as well as service checks: two concurrent
@@ -54,21 +57,22 @@ public class GiveawayService {
     /** Instagram's own rule: 1-30 chars of letters, digits, period, underscore. */
     private static final Pattern HANDLE = Pattern.compile("^[A-Za-z0-9._]{1,30}$");
 
-    public static final String REASON_PHONE_UNVERIFIED = "PHONE_UNVERIFIED";
-
     private final GiveawayEntryRepository repository;
     private final AuthCredentialRepository authCredentialRepository;
     private final UserRepository userRepository;
     private final UserProfilesRepository userProfilesRepository;
+    private final UserProfileService userProfileService;
 
     public GiveawayService(GiveawayEntryRepository repository,
                            AuthCredentialRepository authCredentialRepository,
                            UserRepository userRepository,
-                           UserProfilesRepository userProfilesRepository) {
+                           UserProfilesRepository userProfilesRepository,
+                           UserProfileService userProfileService) {
         this.repository = repository;
         this.authCredentialRepository = authCredentialRepository;
         this.userRepository = userRepository;
         this.userProfilesRepository = userProfilesRepository;
+        this.userProfileService = userProfileService;
     }
 
     // =========================================================================
@@ -85,9 +89,8 @@ public class GiveawayService {
         if (existing.isPresent()) {
             return GiveawayStatusResponse.from(existing.get(), total);
         }
-        boolean phoneVerified = hasVerifiedPhone(userId);
         return GiveawayStatusResponse.notEntered(
-                phoneVerified, phoneVerified ? null : REASON_PHONE_UNVERIFIED, total);
+                userProfileService.missingForContactableAction(userId), total);
     }
 
     /**
@@ -105,9 +108,14 @@ public class GiveawayService {
             throw new IllegalArgumentException(
                     "That does not look like an Instagram username. Use the name from your profile URL, e.g. buyology.online.");
         }
-        if (!hasVerifiedPhone(userId)) {
+        // A prize has to reach a real person at a real address, and the verified phone is also
+        // what caps how many accounts one person can make — so this is checked on the write, not
+        // just advertised by the status endpoint.
+        List<String> missing = userProfileService.missingForContactableAction(userId);
+        if (!missing.isEmpty()) {
             throw new IllegalStateException(
-                    "Please verify your phone number on your account first — it keeps the draw to one entry per person.");
+                    "Please complete your account first (" + String.join(", ", missing)
+                            + ") so we can reach you if you win.");
         }
         if (repository.findByCampaignAndUserId(GiveawayEntry.DEFAULT_CAMPAIGN, userId).isPresent()) {
             throw new IllegalStateException("You are already entered in this giveaway.");
@@ -170,12 +178,6 @@ public class GiveawayService {
         if (value.startsWith("@")) value = value.substring(1);
         value = value.trim().toLowerCase(Locale.ROOT);
         return HANDLE.matcher(value).matches() ? value : null;
-    }
-
-    private boolean hasVerifiedPhone(UUID userId) {
-        return userProfilesRepository.findByUserId(userId)
-                .map(UserProfiles::isPhoneVerified)
-                .orElse(false);
     }
 
     private String phoneOf(UUID userId) {

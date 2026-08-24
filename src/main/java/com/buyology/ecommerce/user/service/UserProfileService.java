@@ -329,6 +329,24 @@ public class UserProfileService {
         return res;
     }
 
+    /**
+     * What a customer still has to fill in before an action that needs to REACH them — today the
+     * giveaway, where a prize has to be delivered to a real address and a real phone.
+     *
+     * Deliberately the same vocabulary as {@link #computeMissingFields} ("phoneNumber",
+     * "phoneVerification", "deliveryAddress") so one set of labels serves every gate in the UI.
+     * Name is not required here: a winner is contacted, not invoiced.
+     */
+    public List<String> missingForContactableAction(UUID userId) {
+        Users user = findUser(userId);
+        UserProfiles profile = findOrCreateProfile(user);
+        List<String> missing = new ArrayList<>();
+        if (isBlank(profile.getPhoneNumber()))   missing.add("phoneNumber");
+        else if (!profile.isPhoneVerified())     missing.add("phoneVerification");
+        if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
+        return missing;
+    }
+
     private List<String> computeMissingFields(Users user, UserProfiles profile) {
         List<String> missing = new ArrayList<>();
         if (isBlank(user.getFirstName()))      missing.add("firstName");
