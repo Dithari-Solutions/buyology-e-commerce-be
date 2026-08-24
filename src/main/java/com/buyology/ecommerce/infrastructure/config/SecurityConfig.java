@@ -181,6 +181,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/cart/**").authenticated()
                         .requestMatchers("/api/favorites/**").authenticated()
                         .requestMatchers("/api/users/**").authenticated()
+                        .requestMatchers("/api/giveaway/**").authenticated()
                         .requestMatchers("/api/membership/**").authenticated()
                         .requestMatchers("/api/game/**").authenticated()
                         // Review/question reads are public; writes are gated by

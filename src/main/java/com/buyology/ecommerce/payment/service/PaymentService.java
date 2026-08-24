@@ -259,7 +259,15 @@ public class PaymentService {
         UserAddress address = req.getAddressId() != null
                 ? addressRepo.findById(req.getAddressId()).orElse(null)
                 : null;
-        ObjectNode billingData = buildBillingData(req, address);
+        // The ORDER is the last-resort source for billing data, and in practice the usual one:
+        // storefront clients send appOrderId without addressId, and Paymob's hosted page then
+        // showed "NA" for street/city/apartment on every checkout even though the order carried
+        // the customer's full address all along. Same entity in the same transaction, so this is
+        // an identity-map hit rather than a second query.
+        var billingOrder = req.getAppOrderId() != null
+                ? orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null)
+                : null;
+        ObjectNode billingData = buildBillingData(req, address, billingOrder);
 
         ObjectNode customer = objectMapper.createObjectNode();
         customer.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
@@ -1049,30 +1057,59 @@ public class PaymentService {
         } catch (Exception e) { return null; }
     }
 
-    private ObjectNode buildBillingData(InitiatePaymentRequest req, UserAddress address) {
-        // Paymob rejects null billing fields ("This field may not be null"). The simplified
-        // address form leaves state/postalCode (and others) blank, so coalesce EVERY field to
-        // a non-blank fallback — never put a raw address value that could be null.
-        String[] nameParts = req.getBillingName() != null ? req.getBillingName().split(" ", 2) : new String[]{"NA", "NA"};
+    /**
+     * Billing details for Paymob's hosted page, filled from the best source available.
+     *
+     * Precedence per field: what the client explicitly sent, then the saved address it named,
+     * then <b>the order's own address snapshot</b>, then a non-blank placeholder. Paymob rejects
+     * nulls outright ("This field may not be null"), so every field is coalesced — but a
+     * placeholder is a last resort, not a default: the order snapshot means a customer who
+     * checked out to a real address sees that address on the payment page, which is also what
+     * their card issuer checks it against.
+     *
+     * {@code addressLine2} maps to {@code apartment} because that is what it holds in this
+     * product — flat/villa/floor detail typed on the second line of the address form. Paymob's
+     * separate floor/building fields have no counterpart in our address model, so they stay
+     * placeholders unless a client sends them.
+     */
+    private ObjectNode buildBillingData(InitiatePaymentRequest req, UserAddress address,
+                                        com.buyology.ecommerce.order.domain.Order order) {
+        String billingName = req.getBillingName();
+        if ((billingName == null || billingName.isBlank()) && order != null) {
+            billingName = ((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName())
+                    + " " + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim();
+        }
+        String[] nameParts = (billingName != null && !billingName.isBlank())
+                ? billingName.split(" ", 2) : new String[]{"NA", "NA"};
+
         String addrPhone   = address != null ? address.getPhoneNumber() : null;
         String addrStreet  = address != null ? address.getAddressLine1() : null;
+        String addrLine2   = address != null ? address.getAddressLine2() : null;
         String addrCity    = address != null ? address.getCity() : null;
         String addrState   = address != null ? address.getState() : null;
         String addrPostal  = address != null ? address.getPostalCode() : null;
         String addrCountry = address != null ? address.getCountry() : null;
 
+        String ordPhone   = order != null ? order.getRecipientPhone() : null;
+        String ordStreet  = order != null ? order.getAddressLine1() : null;
+        String ordLine2   = order != null ? order.getAddressLine2() : null;
+        String ordCity    = order != null ? order.getCity() : null;
+        String ordState   = order != null ? order.getState() : null;
+        String ordPostal  = order != null ? order.getPostalCode() : null;
+        String ordCountry = order != null ? order.getCountry() : null;
+
         ObjectNode n = objectMapper.createObjectNode();
         n.put("first_name", coalesce(nameParts[0], "NA"));
         n.put("last_name", coalesce(nameParts.length > 1 ? nameParts[1] : null, "NA"));
-        n.put("phone_number", coalesce(req.getCustomerPhone(), addrPhone, "NA"));
-        n.put("apartment", coalesce(req.getBillingApartment(), "NA"));
+        n.put("phone_number", coalesce(req.getCustomerPhone(), addrPhone, ordPhone, "NA"));
+        n.put("apartment", coalesce(req.getBillingApartment(), addrLine2, ordLine2, "NA"));
         n.put("floor", coalesce(req.getBillingFloor(), "NA"));
-        n.put("street", coalesce(req.getBillingStreet(), addrStreet, "NA"));
+        n.put("street", coalesce(req.getBillingStreet(), addrStreet, ordStreet, "NA"));
         n.put("building", coalesce(req.getBillingBuilding(), "NA"));
-        n.put("city", coalesce(req.getBillingCity(), addrCity, "NA"));
-        n.put("country", coalesce(req.getBillingCountry(), addrCountry, "AE"));
-        n.put("state", coalesce(req.getBillingState(), addrState, addrCity, "NA"));
-        n.put("postal_code", coalesce(req.getBillingPostalCode(), addrPostal, "NA"));
+        n.put("city", coalesce(req.getBillingCity(), addrCity, ordCity, "NA"));
+        n.put("country", coalesce(req.getBillingCountry(), addrCountry, ordCountry, "AE"));
+        n.put("state", coalesce(req.getBillingState(), addrState, ordState, addrCity, ordCity, "NA"));
+        n.put("postal_code", coalesce(req.getBillingPostalCode(), addrPostal, ordPostal, "NA"));
         n.put("email", coalesce(req.getCustomerEmail(), "NA"));
         return n;
     }
