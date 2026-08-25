@@ -608,14 +608,26 @@ public class PaymentService {
             maybeMoid = obj.get("order").get("merchant_order_id").asText();
         }
 
-        // 1. TRUE IDEMPOTENCY (INSERT-first). Reserve this event in the ledger
-        //    before doing any work. The unique key is the numeric Paymob
-        //    transaction id when present, else the merchant_order_id. A
-        //    duplicate/replayed delivery collides on the UNIQUE constraint and
-        //    is skipped — protecting both the normal and CRED- branches from
-        //    double-processing (e.g. double-credit on the payback flow).
-        String eventKey = providerTxnIdStr != null ? providerTxnIdStr : maybeMoid;
-        if (eventKey == null) {
+        // 1. TRUE IDEMPOTENCY (INSERT-first). Reserve this event in the ledger before doing any
+        //    work. A duplicate/replayed delivery collides on the UNIQUE constraint and is skipped
+        //    — protecting both the normal and CRED- branches from double-processing (e.g. double
+        //    credit on the payback flow).
+        //
+        //    The key is the transaction id PLUS THE OUTCOME IT REPORTS, and the outcome half is
+        //    not optional. Paymob sends one terminal webhook for a card, but an instalment payment
+        //    (Tabby, Tamara) reports pending first and success later, on the SAME transaction id.
+        //    Keyed on the id alone, that success collided with the earlier pending row and was
+        //    discarded as a replay: the money was taken, the transaction stayed PROCESSING and the
+        //    order sat in PENDING_PAYMENT forever — never dispatched, never acknowledged. Only
+        //    BNPL was affected, which is exactly how it presented.
+        //
+        //    Including the outcome keeps genuine replays idempotent (the same event carries the
+        //    same outcome) while letting a real state change through. The terminal-status check
+        //    below is the second guard: a success that arrives twice still only lands once.
+        String outcomeKey = webhookOutcome(obj);
+        String baseKey = providerTxnIdStr != null ? providerTxnIdStr : maybeMoid;
+        String eventKey = baseKey == null ? null : baseKey + ":" + outcomeKey;
+        if (baseKey == null) {
             log.error("[WEBHOOK] No event key (txn id / merchant_order_id) in payload. raw={}", rawPayload);
             saveWebhookEvent(provider, null, null, true, rawPayload, "No event key");
             return;
@@ -817,6 +829,19 @@ public class PaymentService {
      * letting two concurrently-delivered copies serialize: the loser sees the
      * {@link DataIntegrityViolationException} and bails out.
      */
+    /**
+     * The outcome a webhook reports, as a short stable token for the idempotency key:
+     * {@code success}, {@code pending} or {@code failed}. Mirrors exactly how
+     * {@link #applyWebhookToTransaction} reads the same two flags, so the key changes precisely
+     * when the resulting status would.
+     */
+    static String webhookOutcome(JsonNode obj) {
+        boolean success = obj.has("success") && obj.get("success").asBoolean();
+        if (success) return "success";
+        boolean pending = obj.has("pending") && obj.get("pending").asBoolean();
+        return pending ? "pending" : "failed";
+    }
+
     private boolean reserveEventKey(String eventKey) {
         try {
             processedWebhookEventRepo.saveAndFlush(new ProcessedWebhookEvent(eventKey));

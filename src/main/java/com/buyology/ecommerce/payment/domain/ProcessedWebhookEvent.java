@@ -7,9 +7,15 @@ import java.util.UUID;
 
 /**
  * Idempotency ledger for Paymob webhooks. Exactly one row may exist per
- * provider event key (the numeric Paymob transaction id, or the
- * merchant_order_id for flows that do not carry a transaction id, e.g. the
- * {@code CRED-} B2B credit-payback branch).
+ * provider event key: the numeric Paymob transaction id (or the merchant_order_id for flows
+ * that do not carry one, e.g. the {@code CRED-} B2B credit-payback branch), followed by the
+ * OUTCOME that delivery reported — {@code "<id>:success"}, {@code "<id>:pending"},
+ * {@code "<id>:failed"}.
+ *
+ * <p>The outcome half exists because an instalment payment (Tabby, Tamara) reports pending
+ * first and success later on the same transaction id. Keyed on the id alone, the success
+ * collided with the pending row and was thrown away as a replay, leaving a paid order stuck
+ * in PENDING_PAYMENT. A true replay still carries the same outcome and is still rejected.
  *
  * Processing is INSERT-first: a row is written before any state is mutated.
  * A duplicate/replayed webhook collides on the UNIQUE constraint and is
