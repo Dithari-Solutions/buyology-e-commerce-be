@@ -138,9 +138,45 @@ public class PaymobClient {
         return response.get("id").asText();
     }
 
+    /**
+     * Ask Paymob what a transaction's real state is.
+     *
+     * <p>The reply carries the same fields as the webhook body ({@code success}, {@code pending},
+     * {@code amount_cents}, {@code currency}, {@code order.merchant_order_id}), which is the point:
+     * a recovery path can feed it through exactly the same settlement logic a webhook takes,
+     * rather than a second, subtly different one that decides on its own what "paid" means.
+     */
+    public JsonNode getTransaction(String secretKey, String baseUrl, String paymobTransactionId) {
+        return get(baseUrl + "/api/acceptance/transactions/" + paymobTransactionId,
+                "Token " + secretKey);
+    }
+
     // -------------------------------------------------------------------------
     // Internal helper
     // -------------------------------------------------------------------------
+
+    private JsonNode get(String url, String authHeader) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            if (authHeader != null) {
+                headers.set(HttpHeaders.AUTHORIZATION, authHeader);
+            }
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            return objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            String responseBody = e.getResponseBodyAsString();
+            log.error("[PAYMOB] {} from {} — body={}", e.getStatusCode(), url, responseBody);
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Payment provider rejected the request (" + e.getStatusCode() + "): "
+                            + (responseBody == null || responseBody.isBlank() ? e.getMessage() : responseBody),
+                    e);
+        } catch (Exception e) {
+            log.error("[PAYMOB] Call to {} failed", url, e);
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Could not reach the payment provider: " + e.getMessage(), e);
+        }
+    }
 
     private JsonNode post(String url, ObjectNode body, String authHeader) {
         try {

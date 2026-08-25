@@ -685,50 +685,7 @@ public class PaymentService {
 
             log.info("[WEBHOOK] Transaction {} updated to {}", transaction.getId(), transaction.getStatus());
 
-            boolean isRefundCourierFee = transaction.getPurpose() == PaymentPurpose.COURIER_RETURN_FEE;
-            boolean isRepairCourierFee = transaction.getPurpose() == PaymentPurpose.REPAIR_COURIER_FEE;
-            boolean isSellCourierFee = transaction.getPurpose() == PaymentPurpose.SELL_COURIER_FEE;
-            boolean isCourierFee = isRefundCourierFee || isRepairCourierFee || isSellCourierFee;
-            if (transaction.getStatus() == PaymentStatus.SUCCESS) {
-                if (isRefundCourierFee) {
-                    log.info("[WEBHOOK] Courier return fee paid for refund {}. Publishing CourierFeePaidEvent.",
-                            transaction.getRefundRequestId());
-                    eventPublisher.publishEvent(new CourierFeePaidEvent(
-                            transaction.getRefundRequestId(), transaction.getId(),
-                            transaction.getAmount(), transaction.getCurrency()));
-                } else if (isRepairCourierFee) {
-                    log.info("[WEBHOOK] Repair courier fee paid for repair {}. Publishing RepairCourierFeePaidEvent.",
-                            transaction.getRepairId());
-                    eventPublisher.publishEvent(new RepairCourierFeePaidEvent(
-                            transaction.getRepairId(), transaction.getId(),
-                            transaction.getAmount(), transaction.getCurrency()));
-                } else if (isSellCourierFee) {
-                    log.info("[WEBHOOK] Sell courier fee paid for sell request {}. Publishing SellCourierFeePaidEvent.",
-                            transaction.getSellRequestId());
-                    eventPublisher.publishEvent(new SellCourierFeePaidEvent(
-                            transaction.getSellRequestId(), transaction.getId(),
-                            transaction.getAmount(), transaction.getCurrency()));
-                } else {
-                    log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
-                    eventPublisher.publishEvent(new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
-                }
-            } else if (transaction.getStatus() == PaymentStatus.FAILED
-                    || transaction.getStatus() == PaymentStatus.CANCELLED) {
-                if (isCourierFee) {
-                    // No order to fail — the refund/repair/sell request simply stays fee-pending so
-                    // the customer can retry the fee payment or switch to the free option.
-                    log.info("[WEBHOOK] Courier fee charge {} for {}.", transaction.getStatus(),
-                            isRepairCourierFee ? "repair " + transaction.getRepairId()
-                                    : isSellCourierFee ? "sell request " + transaction.getSellRequestId()
-                                    : "refund " + transaction.getRefundRequestId());
-                } else {
-                    log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
-                    eventPublisher.publishEvent(new PaymentFailedEvent(
-                            transaction.getAppOrderId(),
-                            transaction.getId(),
-                            transaction.getFailureReason()));
-                }
-            }
+            publishSettlementEvents(transaction);
 
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, null);
         } catch (Exception e) {
@@ -829,6 +786,133 @@ public class PaymentService {
      * letting two concurrently-delivered copies serialize: the loser sees the
      * {@link DataIntegrityViolationException} and bails out.
      */
+    /**
+     * Ask Paymob what an order's payment really did, and settle the order if it was paid.
+     *
+     * <p>The recovery path for a payment the gateway took but our side never recorded — a lost or
+     * blocked webhook, or (until it was fixed) an instalment settlement discarded as a duplicate.
+     * The customer has paid; the order is sitting in PENDING_PAYMENT; nothing but a human noticing
+     * will ever move it.
+     *
+     * <p>It deliberately reuses the webhook's own logic end to end: the same money-match guard,
+     * the same status mapping, the same events. Paymob's answer to a transaction query carries the
+     * same fields as its webhook body, so it can be fed straight in. This does NOT trust the
+     * caller's opinion that a payment succeeded — only what the gateway says, checked against what
+     * the transaction was supposed to cost.
+     *
+     * <p>Idempotent: a transaction already in a terminal state is returned untouched, so pressing
+     * the button twice cannot dispatch an order twice.
+     */
+    @Transactional
+    public RecheckResult recheckOrderPayment(UUID orderId) {
+        PaymentTransaction tx = transactionRepo
+                .findFirstByAppOrderIdAndStatusIn(orderId,
+                        List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
+                .orElse(null);
+        if (tx == null) {
+            // Nothing unsettled to re-check: either the order was never paid for, or it already is.
+            PaymentTransaction settled = transactionRepo
+                    .findFirstByAppOrderIdAndStatusIn(orderId, List.of(PaymentStatus.SUCCESS))
+                    .orElse(null);
+            return settled != null
+                    ? new RecheckResult(true, PaymentStatus.SUCCESS.name(),
+                            "This order already has a settled payment.")
+                    : new RecheckResult(false, null,
+                            "No pending payment found for this order — nothing to re-check.");
+        }
+        if (tx.getPaymobTransactionId() == null) {
+            // The gateway never told us its transaction id, so there is nothing to ask about.
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "This payment has no provider transaction id yet — the customer never reached "
+                            + "the payment page, so there is nothing for Paymob to confirm.");
+        }
+
+        PaymentProvider provider = tx.getMethodConfig() != null
+                ? tx.getMethodConfig().getProvider()
+                : providerRepo.findFirstByIsActiveTrue().orElse(null);
+        if (provider == null) {
+            throw new IllegalStateException("No payment provider configured for this transaction");
+        }
+
+        JsonNode obj = paymobClient.getTransaction(
+                provider.getSecretKey(), provider.getBaseUrl(),
+                String.valueOf(tx.getPaymobTransactionId()));
+
+        applyWebhookToTransaction(tx, obj, tx.getPaymobTransactionId());
+        transactionRepo.saveAndFlush(tx);
+        publishSettlementEvents(tx);
+
+        log.warn("[RECHECK] Order {} payment re-checked against Paymob — transaction {} is now {}",
+                orderId, tx.getId(), tx.getStatus());
+
+        String message = switch (tx.getStatus()) {
+            case SUCCESS -> "Paymob confirms this payment. The order has been settled.";
+            case PROCESSING -> "Paymob still reports this payment as pending.";
+            case FAILED -> "Paymob reports this payment as failed"
+                    + (tx.getFailureReason() == null ? "." : ": " + tx.getFailureReason());
+            default -> "Paymob reports this payment as " + tx.getStatus() + ".";
+        };
+        return new RecheckResult(tx.getStatus() == PaymentStatus.SUCCESS, tx.getStatus().name(), message);
+    }
+
+    /** Outcome of an admin re-check: what the gateway said, in words an admin can act on. */
+    public record RecheckResult(boolean settled, String status, String message) {}
+
+    /**
+     * Publishes the events a settled (or failed) payment must trigger — the order's paid path,
+     * or a courier fee's own module event.
+     *
+     * <p>Shared by the webhook and by the admin re-check on purpose. A recovery path that decided
+     * for itself what "paid" means would drift from the real one, and the drift would only show up
+     * as an order that is marked paid but never dispatched, or dispatched twice.
+     */
+    private void publishSettlementEvents(PaymentTransaction transaction) {
+        boolean isRefundCourierFee = transaction.getPurpose() == PaymentPurpose.COURIER_RETURN_FEE;
+        boolean isRepairCourierFee = transaction.getPurpose() == PaymentPurpose.REPAIR_COURIER_FEE;
+        boolean isSellCourierFee = transaction.getPurpose() == PaymentPurpose.SELL_COURIER_FEE;
+        boolean isCourierFee = isRefundCourierFee || isRepairCourierFee || isSellCourierFee;
+        if (transaction.getStatus() == PaymentStatus.SUCCESS) {
+            if (isRefundCourierFee) {
+                log.info("[WEBHOOK] Courier return fee paid for refund {}. Publishing CourierFeePaidEvent.",
+                        transaction.getRefundRequestId());
+                eventPublisher.publishEvent(new CourierFeePaidEvent(
+                        transaction.getRefundRequestId(), transaction.getId(),
+                        transaction.getAmount(), transaction.getCurrency()));
+            } else if (isRepairCourierFee) {
+                log.info("[WEBHOOK] Repair courier fee paid for repair {}. Publishing RepairCourierFeePaidEvent.",
+                        transaction.getRepairId());
+                eventPublisher.publishEvent(new RepairCourierFeePaidEvent(
+                        transaction.getRepairId(), transaction.getId(),
+                        transaction.getAmount(), transaction.getCurrency()));
+            } else if (isSellCourierFee) {
+                log.info("[WEBHOOK] Sell courier fee paid for sell request {}. Publishing SellCourierFeePaidEvent.",
+                        transaction.getSellRequestId());
+                eventPublisher.publishEvent(new SellCourierFeePaidEvent(
+                        transaction.getSellRequestId(), transaction.getId(),
+                        transaction.getAmount(), transaction.getCurrency()));
+            } else {
+                log.info("[WEBHOOK] SUCCESS! Publishing PaymentSucceededEvent.");
+                eventPublisher.publishEvent(new PaymentSucceededEvent(transaction.getAppOrderId(), transaction.getId()));
+            }
+        } else if (transaction.getStatus() == PaymentStatus.FAILED
+                || transaction.getStatus() == PaymentStatus.CANCELLED) {
+            if (isCourierFee) {
+                // No order to fail — the refund/repair/sell request simply stays fee-pending so
+                // the customer can retry the fee payment or switch to the free option.
+                log.info("[WEBHOOK] Courier fee charge {} for {}.", transaction.getStatus(),
+                        isRepairCourierFee ? "repair " + transaction.getRepairId()
+                                : isSellCourierFee ? "sell request " + transaction.getSellRequestId()
+                                : "refund " + transaction.getRefundRequestId());
+            } else {
+                log.info("[WEBHOOK] FAILED/CANCELLED. Publishing PaymentFailedEvent.");
+                eventPublisher.publishEvent(new PaymentFailedEvent(
+                        transaction.getAppOrderId(),
+                        transaction.getId(),
+                        transaction.getFailureReason()));
+            }
+        }
+    }
+
     /**
      * The outcome a webhook reports, as a short stable token for the idempotency key:
      * {@code success}, {@code pending} or {@code failed}. Mirrors exactly how
