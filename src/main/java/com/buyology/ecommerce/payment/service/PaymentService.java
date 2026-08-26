@@ -268,10 +268,17 @@ public class PaymentService {
         var billingOrder = req.getAppOrderId() != null
                 ? orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null)
                 : null;
-        ObjectNode billingData = buildBillingData(req, address, billingOrder);
+        // One resolution for both blocks below. Paymob validates this field, and "NA" — the
+        // placeholder every other billing field safely degrades to — is not a valid address, so an
+        // absent email does not blank a line on the hosted page, it fails the whole intention.
+        String payerEmail = firstNonBlank(
+                req.getCustomerEmail(),
+                billingOrder != null ? accountEmailFor(billingOrder.getUserId()) : null);
+
+        ObjectNode billingData = buildBillingData(req, address, billingOrder, payerEmail);
 
         ObjectNode customer = objectMapper.createObjectNode();
-        customer.put("email", req.getCustomerEmail() != null ? req.getCustomerEmail() : "NA");
+        customer.put("email", coalesce(payerEmail, "NA"));
         String[] nameParts = req.getBillingName() != null
                 ? req.getBillingName().split(" ", 2)
                 : new String[]{"NA", "NA"};
@@ -347,12 +354,32 @@ public class PaymentService {
         ip.setMethodType(req.getMethodType());
         ip.setAmount(order.getTotalAmount());
         ip.setCurrency(order.getCurrency());
+        // Left null-safe on purpose: initiatePayment resolves the payer's email from the order
+        // when the caller sends none, which is exactly this path. "Pay again" never sent one, and
+        // Paymob rejects the "NA" placeholder as an invalid address rather than ignoring it, so
+        // every repay attempt failed at the gateway.
         ip.setCustomerEmail(req.getCustomerEmail());
         ip.setCustomerPhone(order.getRecipientPhone());
         ip.setBillingName(((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName())
                 + " " + (order.getRecipientLastName() == null ? "" : order.getRecipientLastName())).trim());
         ip.setRedirectionUrl(req.getRedirectionUrl());
         return initiatePayment(ip);
+    }
+
+    /** The account email for an order's owner — what the customer actually receives receipts at. */
+    private String accountEmailFor(UUID userId) {
+        if (userId == null) return null;
+        return authCredentialRepo.findByUserId(userId).stream()
+                .map(com.buyology.ecommerce.auth.domain.AuthCredentials::getEmail)
+                .filter(e -> e != null && !e.isBlank())
+                .findFirst().orElse(null);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
     }
 
     /**
@@ -1268,7 +1295,8 @@ public class PaymentService {
      * placeholders unless a client sends them.
      */
     private ObjectNode buildBillingData(InitiatePaymentRequest req, UserAddress address,
-                                        com.buyology.ecommerce.order.domain.Order order) {
+                                        com.buyology.ecommerce.order.domain.Order order,
+                                        String payerEmail) {
         String billingName = req.getBillingName();
         if ((billingName == null || billingName.isBlank()) && order != null) {
             billingName = ((order.getRecipientFirstName() == null ? "" : order.getRecipientFirstName())
@@ -1305,7 +1333,7 @@ public class PaymentService {
         n.put("country", coalesce(req.getBillingCountry(), addrCountry, ordCountry, "AE"));
         n.put("state", coalesce(req.getBillingState(), addrState, ordState, addrCity, ordCity, "NA"));
         n.put("postal_code", coalesce(req.getBillingPostalCode(), addrPostal, ordPostal, "NA"));
-        n.put("email", coalesce(req.getCustomerEmail(), "NA"));
+        n.put("email", coalesce(payerEmail, req.getCustomerEmail(), "NA"));
         return n;
     }
 
