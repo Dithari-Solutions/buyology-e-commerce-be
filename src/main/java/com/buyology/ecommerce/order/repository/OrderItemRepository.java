@@ -123,7 +123,14 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     // Refunds are counted from payment_refunds with status='SUCCESS' (money actually
     // returned via Paymob). This captures BOTH customer refund requests AND order-
     // cancellation auto-refunds (which create a PaymentRefund but no RefundRequest) —
-    // a PENDING Paymob refund is not yet counted. A scope's (platform or one supplier)
+    // a PENDING Paymob refund is not yet counted.
+    //
+    // The order-status filter below MUST match the revenue queries' exactly. Without it a
+    // cancelled order's refund was subtracted from revenue the same order had never been allowed
+    // to contribute (revenue excludes CANCELLED), so one cancelled-and-refunded order dragged a
+    // month's net BELOW zero — AED 999 gross against AED 1,039 of refunds. Refunds on live orders
+    // (a return on a DELIVERED order) still count: there is no separate refunded status, so those
+    // orders stay inside the filter. A scope's (platform or one supplier)
     // share is allocated proportionally to its items' value: refund_amount *
     // scope_item_total / order_total, bucketed by order item created_at.
 
@@ -138,6 +145,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             WHERE oi.supplier_id IS NULL
               AND oi.created_at >= :from
               AND oi.created_at < :to
+              AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY 1
             ORDER BY 1
@@ -159,6 +167,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             WHERE oi.supplier_id = :supplierId
               AND oi.created_at >= :from
               AND oi.created_at < :to
+              AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
             GROUP BY 1
             ORDER BY 1
             """, nativeQuery = true)
@@ -179,6 +188,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
             WHERE oi.supplier_id IS NOT NULL
               AND oi.created_at >= :from
               AND oi.created_at < :to
+              AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
             GROUP BY oi.supplier_id
             """, nativeQuery = true)
     List<Object[]> supplierRefundTotals(
