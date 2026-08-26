@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -804,27 +805,42 @@ public class PaymentService {
      * the button twice cannot dispatch an order twice.
      */
     @Transactional
-    public RecheckResult recheckOrderPayment(UUID orderId) {
-        PaymentTransaction tx = transactionRepo
-                .findFirstByAppOrderIdAndStatusIn(orderId,
-                        List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING))
+    public RecheckResult recheckOrderPayment(UUID orderId, String providerTransactionIdOverride) {
+        List<PaymentTransaction> all = transactionRepo.findAllByAppOrderId(orderId);
+        if (all.stream().anyMatch(t -> t.getStatus() == PaymentStatus.SUCCESS)) {
+            return new RecheckResult(true, PaymentStatus.SUCCESS.name(),
+                    "This order already has a settled payment.");
+        }
+
+        // An order can carry several unsettled attempts — a card try, then an instalment try, or a
+        // reload of the payment page. Prefer the one the gateway actually acknowledged (it has a
+        // provider transaction id) and, among those, the newest. Picking arbitrarily meant
+        // re-checking an abandoned attempt and reporting "no provider transaction id" for an order
+        // that had genuinely been paid on another attempt.
+        List<PaymentStatus> unsettled = List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING);
+        PaymentTransaction tx = all.stream()
+                .filter(t -> unsettled.contains(t.getStatus()))
+                .sorted(Comparator
+                        .comparing((PaymentTransaction t) -> t.getPaymobTransactionId() != null)
+                        .thenComparing(t -> t.getCreatedAt() == null ? Instant.EPOCH : t.getCreatedAt())
+                        .reversed())
+                .findFirst()
                 .orElse(null);
         if (tx == null) {
-            // Nothing unsettled to re-check: either the order was never paid for, or it already is.
-            PaymentTransaction settled = transactionRepo
-                    .findFirstByAppOrderIdAndStatusIn(orderId, List.of(PaymentStatus.SUCCESS))
-                    .orElse(null);
-            return settled != null
-                    ? new RecheckResult(true, PaymentStatus.SUCCESS.name(),
-                            "This order already has a settled payment.")
-                    : new RecheckResult(false, null,
-                            "No pending payment found for this order — nothing to re-check.");
+            return new RecheckResult(false, null,
+                    "No pending payment found for this order — nothing to re-check.");
         }
-        if (tx.getPaymobTransactionId() == null) {
-            // The gateway never told us its transaction id, so there is nothing to ask about.
+
+        // The id to ask Paymob about: what the gateway told us, or what an admin read off the
+        // Paymob dashboard for a payment whose webhook never reached us at all.
+        String providerTxnId = tx.getPaymobTransactionId() != null
+                ? String.valueOf(tx.getPaymobTransactionId())
+                : (providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim());
+        if (providerTxnId == null || providerTxnId.isBlank()) {
             return new RecheckResult(false, tx.getStatus().name(),
-                    "This payment has no provider transaction id yet — the customer never reached "
-                            + "the payment page, so there is nothing for Paymob to confirm.");
+                    "No webhook ever reached us for this payment, so we have no Paymob transaction "
+                            + "id to ask about. Open the transaction in the Paymob dashboard and "
+                            + "enter its transaction id here to settle the order.");
         }
 
         PaymentProvider provider = tx.getMethodConfig() != null
@@ -835,10 +851,33 @@ public class PaymentService {
         }
 
         JsonNode obj = paymobClient.getTransaction(
-                provider.getSecretKey(), provider.getBaseUrl(),
-                String.valueOf(tx.getPaymobTransactionId()));
+                provider.getSecretKey(), provider.getBaseUrl(), providerTxnId);
 
-        applyWebhookToTransaction(tx, obj, tx.getPaymobTransactionId());
+        // A hand-entered id must be proven to belong to THIS payment before it can settle it.
+        // The money guard inside applyWebhookToTransaction already refuses a mismatched amount or
+        // currency; this additionally holds Paymob's own merchant_order_id to our transaction, so
+        // a typo cannot mark someone else's order paid.
+        if (tx.getPaymobTransactionId() == null) {
+            String claimedMoid = obj.has("order") && obj.get("order").hasNonNull("merchant_order_id")
+                    ? obj.get("order").get("merchant_order_id").asText()
+                    : null;
+            if (claimedMoid != null && tx.getMerchantOrderId() != null
+                    && !claimedMoid.equals(tx.getMerchantOrderId())) {
+                return new RecheckResult(false, tx.getStatus().name(),
+                        "That Paymob transaction belongs to a different order (" + claimedMoid
+                                + "). Nothing was changed.");
+            }
+        }
+
+        Long numericTxnId;
+        try {
+            numericTxnId = Long.valueOf(providerTxnId);
+        } catch (NumberFormatException e) {
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "\"" + providerTxnId + "\" is not a Paymob transaction id.");
+        }
+
+        applyWebhookToTransaction(tx, obj, numericTxnId);
         transactionRepo.saveAndFlush(tx);
         publishSettlementEvents(tx);
 

@@ -7,6 +7,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
@@ -37,8 +38,11 @@ public class AdminPaymentController {
      */
     @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/orders/{orderId}/recheck")
-    public ResponseEntity<ApiResponse<PaymentService.RecheckResult>> recheck(@PathVariable UUID orderId) {
-        PaymentService.RecheckResult result = paymentService.recheckOrderPayment(orderId);
+    public ResponseEntity<ApiResponse<PaymentService.RecheckResult>> recheck(
+            @PathVariable UUID orderId,
+            @RequestParam(name = "providerTransactionId", required = false) String providerTransactionId) {
+        PaymentService.RecheckResult result =
+                paymentService.recheckOrderPayment(orderId, providerTransactionId);
         return ApiResponse.success(result, result.message());
     }
 }
