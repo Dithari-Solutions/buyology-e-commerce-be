@@ -171,6 +171,44 @@ public class PaymobClient {
         }
     }
 
+    /**
+     * Ask Paymob about a payment using <em>our</em> reference for it, when we never learned theirs.
+     *
+     * <p>{@link #getTransaction} needs a Paymob transaction id, which only ever reaches us in a
+     * webhook. When no webhook arrives at all — the failure that left a paid Tabby order sitting in
+     * PENDING_PAYMENT — there is no id to ask about, and the payment is invisible to every
+     * automatic recovery path. The merchant order id is the one handle we always hold, because we
+     * generated it ourselves when we created the intention.
+     *
+     * <p>Returns {@code null} rather than throwing when Paymob has nothing under that reference:
+     * for a sweep over many candidates, "this checkout was genuinely abandoned" is the ordinary
+     * case and must not read as a failure.
+     */
+    public JsonNode inquireByMerchantOrderId(String apiKey, String baseUrl, String merchantOrderId) {
+        if (apiKey == null || apiKey.isBlank() || merchantOrderId == null || merchantOrderId.isBlank()) {
+            return null;
+        }
+        ObjectNode authBody = objectMapper.createObjectNode();
+        authBody.put("api_key", apiKey);
+        JsonNode auth = post(baseUrl + "/api/auth/tokens", authBody, null);
+        String token = auth.hasNonNull("token") ? auth.get("token").asText() : null;
+        if (token == null || token.isBlank()) return null;
+
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("auth_token", token);
+        body.put("merchant_order_id", merchantOrderId);
+        try {
+            JsonNode result = post(baseUrl + "/api/ecommerce/orders/transaction_inquiry", body, null);
+            // An empty envelope, or one with no id, means Paymob has no such transaction — the
+            // shopper never got as far as paying. Not an error, just nothing to settle.
+            return result != null && result.hasNonNull("id") ? result : null;
+        } catch (RuntimeException notFound) {
+            log.debug("[PAYMOB] No transaction under merchant order id {}: {}",
+                    merchantOrderId, notFound.getMessage());
+            return null;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internal helper
     // -------------------------------------------------------------------------

@@ -836,18 +836,38 @@ public class PaymentService {
         String providerTxnId = tx.getPaymobTransactionId() != null
                 ? String.valueOf(tx.getPaymobTransactionId())
                 : (providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim());
-        if (providerTxnId == null || providerTxnId.isBlank()) {
-            return new RecheckResult(false, tx.getStatus().name(),
-                    "No webhook ever reached us for this payment, so we have no Paymob transaction "
-                            + "id to ask about. Open the transaction in the Paymob dashboard and "
-                            + "enter its transaction id here to settle the order.");
-        }
 
         PaymentProvider provider = tx.getMethodConfig() != null
                 ? tx.getMethodConfig().getProvider()
                 : providerRepo.findFirstByIsActiveTrue().orElse(null);
         if (provider == null) {
             throw new IllegalStateException("No payment provider configured for this transaction");
+        }
+
+        if (providerTxnId == null || providerTxnId.isBlank()) {
+            // No webhook ever reached us, so we never learned Paymob's id for this payment. Ask
+            // them by OUR reference instead before giving up — this is the case that left a paid
+            // Tabby order unsettled, and it is recoverable without a human reading the dashboard.
+            JsonNode found = null;
+            try {
+                found = paymobClient.inquireByMerchantOrderId(
+                        provider.getApiKey(), provider.getBaseUrl(), tx.getMerchantOrderId());
+            } catch (RuntimeException gatewayFailure) {
+                log.warn("[RECHECK] Merchant-order inquiry failed for order {} ({}): {}",
+                        orderId, tx.getMerchantOrderId(), gatewayFailure.getMessage());
+            }
+            if (found != null && found.hasNonNull("id")) {
+                providerTxnId = found.get("id").asText();
+                log.warn("[RECHECK] Recovered Paymob transaction {} for order {} by merchant order "
+                        + "id {} — no webhook had ever arrived", providerTxnId, orderId,
+                        tx.getMerchantOrderId());
+            } else {
+                return new RecheckResult(false, tx.getStatus().name(),
+                        "No webhook reached us for this payment and Paymob has no transaction under "
+                                + "our reference (" + tx.getMerchantOrderId() + "), which normally "
+                                + "means the shopper never completed payment. If the Paymob "
+                                + "dashboard shows otherwise, enter its transaction id here.");
+            }
         }
 
         JsonNode obj;

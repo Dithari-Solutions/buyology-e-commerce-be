@@ -68,6 +68,39 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     List<PaymentTransaction> findUnreviewedSettledOrderPayments(@Param("cutoff") Instant cutoff,
                                                                 @Param("limit") int limit);
 
+    /**
+     * Order payments the gateway acknowledged but never finished telling us about.
+     *
+     * <p>Instalment providers (Tabby, Tamara) settle in two steps: Paymob reports the transaction
+     * as {@code pending} the moment the shopper is approved, then sends a second {@code success}
+     * webhook once the provider confirms. If that second webhook is lost — dropped in transit,
+     * rejected while we were deploying, or never sent — the customer has paid and the order sits
+     * in PENDING_PAYMENT with nobody watching. Nothing else in the system asks the gateway about
+     * a payment in this state, so this query is what makes the recovery sweep possible.
+     *
+     * <p>The floor keeps the sweep off ancient abandoned checkouts: a shopper who closed the tab
+     * two months ago is not a lost payment, and re-querying every one of them forever would be a
+     * standing load on Paymob for no benefit.
+     */
+    @Query(value = """
+            SELECT pt.* FROM payment_transactions pt
+            JOIN orders o ON o.id = pt.app_order_id
+            WHERE pt.purpose = 'ORDER'
+              AND pt.status IN ('PENDING', 'PROCESSING')
+              AND o.status = 'PENDING_PAYMENT'
+              AND o.deleted_at IS NULL
+              AND pt.created_at < :cutoff
+              AND pt.created_at > :floor
+              AND NOT EXISTS (SELECT 1 FROM payment_transactions s
+                              WHERE s.app_order_id = pt.app_order_id
+                                AND s.status = 'SUCCESS')
+            ORDER BY pt.created_at DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<PaymentTransaction> findUnsettledOrderPayments(@Param("cutoff") Instant cutoff,
+                                                        @Param("floor") Instant floor,
+                                                        @Param("limit") int limit);
+
     /** Latest courier-fee charge for a refund in any of the given statuses (for resume/idempotency). */
     Optional<PaymentTransaction> findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
             UUID refundRequestId, PaymentPurpose purpose, List<PaymentStatus> statuses);
