@@ -1254,6 +1254,37 @@ public class EmailService {
         return nullToEmpty(currency) + " " + a.toPlainString();
     }
 
+    /**
+     * Sends an admin's own message to a customer about a payment that did not complete.
+     *
+     * <p>Deliberately synchronous and returning whether it sent, unlike the @Async notifications
+     * around it. An admin clicked send and is watching, and the outreach log records "email sent"
+     * against this result — a fire-and-forget call would make that record a guess, and a log that
+     * claims we contacted someone we didn't is worse than a slower button.
+     */
+    public boolean sendOrderPaymentMessageEmail(String toEmail, String customerName, String subject,
+                                                String messageBody, String orderNumber,
+                                                String orderTotal, String repayUrl) {
+        try {
+            // The body is typed into a plain-text box by an admin. Escaping here rather than
+            // trusting the caller means a stray "<" in "under <100 AED" renders as text instead of
+            // silently swallowing the rest of the sentence.
+            String bodyHtml = escapeHtml(messageBody).replace("\n", "<br />");
+            String html = loadTemplate("static/order-payment-message.html")
+                    .replace("{{SUBJECT}}", escapeHtml(subject))
+                    .replace("{{CUSTOMER_NAME}}", escapeHtml(safeName(customerName)))
+                    .replace("{{MESSAGE_BODY}}", bodyHtml)
+                    .replace("{{ORDER_NUMBER}}", escapeHtml(nullToEmpty(orderNumber)))
+                    .replace("{{ORDER_TOTAL}}", escapeHtml(nullToEmpty(orderTotal)))
+                    .replace("{{REPAY_URL}}", nullToEmpty(repayUrl));
+            send(toEmail, subject, html);
+            return true;
+        } catch (Exception e) {
+            log.warn("Could not send order payment message to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
     private static String escapeHtml(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");

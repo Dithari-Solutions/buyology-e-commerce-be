@@ -320,6 +320,11 @@ public final class PermissionConstants {
     // Assign one of the store's couriers to an express order.
     public static final String ORDER_COURIER_ASSIGN = "order:courier:assign";
 
+    // Message a customer about a payment that did not complete, from their order. Separate from
+    // order:read because writing to a customer in the store's name is a different act from
+    // looking at their order, and a read-only support role must not acquire it by accident.
+    public static final String ORDER_PAYMENT_CONTACT = "order:payment:contact";
+
     // ── Payments, Refunds & Payouts ───────────────────────────────────────────────
     // Issue a full or partial refund against a successful payment transaction directly at the
     // payment gateway.

@@ -758,10 +758,14 @@ public class PaymentService {
         if (params.get("source_data.type") != null) src.put("type", params.get("source_data.type"));
         obj.set("source_data", src);
 
-        // data.message feeds the failure reason on declined transactions (not signed).
-        if (params.get("data.message") != null) {
+        // data.message / data.txn_response_code feed the failure reason and code on declined
+        // transactions (neither is signed — they are diagnostic only and never authorize anything).
+        if (params.get("data.message") != null || params.get("data.txn_response_code") != null) {
             ObjectNode data = objectMapper.createObjectNode();
-            data.put("message", params.get("data.message"));
+            if (params.get("data.message") != null) data.put("message", params.get("data.message"));
+            if (params.get("data.txn_response_code") != null) {
+                data.put("txn_response_code", params.get("data.txn_response_code"));
+            }
             obj.set("data", data);
         }
 
@@ -1138,6 +1142,16 @@ public class PaymentService {
             tx.setStatus(PaymentStatus.FAILED);
             if (obj.has("data") && obj.get("data").has("message")) {
                 tx.setFailureReason(obj.get("data").get("message").asText());
+            }
+            // The code is what makes a stall diagnosable. The message beside it is free English
+            // the gateway can reword at any time; matching on that would break silently and take
+            // the customer-facing explanation with it.
+            JsonNode data = obj.path("data");
+            String code = data.hasNonNull("txn_response_code") ? data.get("txn_response_code").asText()
+                    : data.hasNonNull("acq_response_code") ? data.get("acq_response_code").asText()
+                    : null;
+            if (code != null && !code.isBlank()) {
+                tx.setFailureCode(code.trim());
             }
         }
     }
