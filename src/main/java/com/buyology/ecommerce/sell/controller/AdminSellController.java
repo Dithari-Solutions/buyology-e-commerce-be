@@ -70,14 +70,12 @@ public class AdminSellController {
     @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('sell:update') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/{id}/ai-estimate")
     public ResponseEntity<ApiResponse<SellRequestResponse>> generateEstimate(@PathVariable UUID id) {
-        if (!aiEstimateService.isEnabled()) {
-            // estimate() returns quietly when the feature is off, which would look to an admin like
-            // a device nothing could be said about rather than a key nobody has set.
-            throw new IllegalStateException(
-                    "Automatic valuation is switched off on this server, so no estimate can be "
-                            + "produced. Set ANTHROPIC_API_KEY and redeploy, then try again.");
+        // estimate() returns quietly whatever goes wrong, which would look to an admin like a
+        // device nothing could be said about rather than a key nobody set or a call that failed.
+        String problem = aiEstimateService.explainEstimate(id);
+        if (problem != null) {
+            throw new IllegalStateException(problem);
         }
-        aiEstimateService.estimate(id);
         return ApiResponse.success(sellService.getByIdAdmin(id), "Valuation generated");
     }
 

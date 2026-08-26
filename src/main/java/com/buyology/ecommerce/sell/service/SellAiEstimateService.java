@@ -213,18 +213,38 @@ public class SellAiEstimateService {
      * overwrites); returns quietly when the feature is off or the request no longer exists.
      */
     public void estimate(UUID sellRequestId) {
-        if (!isEnabled() || sellRequestId == null) {
-            return;
+        explainEstimate(sellRequestId);
+    }
+
+    /**
+     * The same valuation, but it says what happened.
+     *
+     * <p>{@link #estimate} deliberately swallows everything: for a customer submitting a device the
+     * valuation is advisory, and a failure must never surface to them or change their request. That
+     * silence is wrong for someone who pressed a button and is waiting — an off switch, an expired
+     * key and a model that returned nothing were all indistinguishable from "this device cannot be
+     * valued", with nothing to act on in either the page or the response.
+     *
+     * @return {@code null} when the valuation was produced and saved, otherwise why it was not
+     */
+    public String explainEstimate(UUID sellRequestId) {
+        if (!isEnabled()) {
+            return "Automatic valuation is switched off on this server — ANTHROPIC_API_KEY is not "
+                    + "set, or sell.ai-estimate.enabled is false.";
+        }
+        if (sellRequestId == null) {
+            return "No sell request was given.";
         }
         SellRequest request = sellRepo.findById(sellRequestId).orElse(null);
         if (request == null) {
-            return;
+            return "That sell request no longer exists.";
         }
         try {
             SellValuation valuation = callClaude(request);
             if (valuation == null) {
                 log.warn("[SELL-AI] No valuation returned for sell request {}.", sellRequestId);
-                return;
+                return "The valuation came back empty for this device — usually too little to go on "
+                        + "in the photos or the description.";
             }
             apply(request, valuation);
             sellRepo.save(request);
@@ -232,9 +252,13 @@ public class SellAiEstimateService {
                     request.getReference(), ESTIMATE_CURRENCY,
                     request.getAiEstimateMinPrice(), request.getAiEstimateMaxPrice(),
                     request.getAiEstimateConfidence(), request.getAiEstimateCondition());
+            return null;
         } catch (Exception e) {
             // Advisory feature — a failure must never surface to the customer or change the request.
             log.error("[SELL-AI] Valuation failed for sell request {}.", sellRequestId, e);
+            return "The valuation call failed: "
+                    + (e.getMessage() == null || e.getMessage().isBlank()
+                            ? e.getClass().getSimpleName() : e.getMessage());
         }
     }
 

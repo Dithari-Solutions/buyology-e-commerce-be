@@ -22,6 +22,17 @@ public interface UserAddressRepository extends JpaRepository<UserAddress, UUID> 
 
     Optional<UserAddress> findByUserAndIsDefaultTrue(Users user);
 
+    /**
+     * A user's addresses, their default first, by users.id rather than the entity.
+     *
+     * <p>For callers that hold only the id and have no reason to load the whole user — the courier
+     * fee charge, which needs a billing address for the Paymob page and previously sent "NA" for
+     * every line of it.
+     */
+    @Query("SELECT a FROM UserAddress a WHERE a.user.id = :userId "
+            + "ORDER BY a.isDefault DESC, a.createdAt ASC")
+    List<UserAddress> findByUserIdPreferringDefault(@Param("userId") UUID userId);
+
     /** Batch-load all addresses for a set of users — for enriching admin user/order lists without an N+1. */
     @Query("SELECT a FROM UserAddress a WHERE a.user.id IN :userIds")
     List<UserAddress> findByUserIds(@Param("userIds") Collection<UUID> userIds);

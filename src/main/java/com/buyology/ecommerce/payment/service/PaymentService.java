@@ -449,10 +449,16 @@ public class PaymentService {
                 .setScale(0, java.math.RoundingMode.HALF_UP)
                 .longValueExact();
 
-        ObjectNode billingData = buildCourierFeeBilling(req);
+        // The courier collects FROM the customer's address, so we know it — there was never a
+        // reason to send Paymob "NA" for every line of it. Default address first; any address
+        // beats none on the checkout page.
+        UserAddress feeAddress = addressRepo.findByUserIdPreferringDefault(ownerUserId).stream()
+                .findFirst().orElse(null);
+        String feeEmail = firstNonBlank(req.customerEmail(), accountEmailFor(ownerUserId));
+        ObjectNode billingData = buildCourierFeeBilling(req, feeAddress, feeEmail);
 
         ObjectNode customer = objectMapper.createObjectNode();
-        customer.put("email", req.customerEmail() != null ? req.customerEmail() : "NA");
+        customer.put("email", coalesce(feeEmail, "NA"));
         String[] nameParts = req.billingName() != null ? req.billingName().split(" ", 2) : new String[]{"NA", "NA"};
         customer.put("first_name", nameParts[0]);
         customer.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
@@ -537,21 +543,32 @@ public class PaymentService {
         return tx;
     }
 
-    private ObjectNode buildCourierFeeBilling(CourierFeeChargeRequest req) {
+    /**
+     * Billing block for a standalone courier fee.
+     *
+     * <p>Every address line here used to be the literal string "NA", so a customer paying for a
+     * device pickup saw a Paymob page with no address on it at all — which reads as a broken or
+     * spoofed checkout at exactly the moment they are asked to enter card details. The fee is for a
+     * courier coming to their door, so the address is not merely available, it is the whole point.
+     */
+    private ObjectNode buildCourierFeeBilling(CourierFeeChargeRequest req, UserAddress address,
+                                              String payerEmail) {
         String[] nameParts = req.billingName() != null ? req.billingName().split(" ", 2) : new String[]{"NA", "NA"};
         ObjectNode n = objectMapper.createObjectNode();
         n.put("first_name", nameParts[0]);
         n.put("last_name", nameParts.length > 1 ? nameParts[1] : "NA");
-        n.put("phone_number", req.customerPhone() != null ? req.customerPhone() : "NA");
-        n.put("apartment", "NA");
+        n.put("phone_number", coalesce(req.customerPhone(),
+                address != null ? address.getPhoneNumber() : null, "NA"));
+        n.put("apartment", coalesce(address != null ? address.getAddressLine2() : null, "NA"));
         n.put("floor", "NA");
-        n.put("street", "NA");
+        n.put("street", coalesce(address != null ? address.getAddressLine1() : null, "NA"));
         n.put("building", "NA");
-        n.put("city", "NA");
-        n.put("country", "AE");
-        n.put("state", "NA");
-        n.put("postal_code", "NA");
-        n.put("email", req.customerEmail() != null ? req.customerEmail() : "NA");
+        n.put("city", coalesce(address != null ? address.getCity() : null, "NA"));
+        n.put("country", coalesce(address != null ? address.getCountry() : null, "AE"));
+        n.put("state", coalesce(address != null ? address.getState() : null,
+                address != null ? address.getCity() : null, "NA"));
+        n.put("postal_code", coalesce(address != null ? address.getPostalCode() : null, "NA"));
+        n.put("email", coalesce(payerEmail, req.customerEmail(), "NA"));
         return n;
     }
 

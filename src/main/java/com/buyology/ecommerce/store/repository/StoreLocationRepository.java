@@ -20,6 +20,18 @@ public interface StoreLocationRepository extends JpaRepository<StoreLocation, UU
     /** Active store branches in a country (alpha-3 code) — drives the repair drop-off picker. */
     List<StoreLocation> findAllByCountryAndIsActive(String country, Boolean isActive);
 
+    /**
+     * Branches in any of several spellings of the same country.
+     *
+     * <p>Store locations are not written with one consistent country code. The dashboard's map
+     * picker fills the field from Nominatim's {@code country_code}, which is alpha-2 ("AE"), while
+     * the storefront asks for the alpha-3 the rest of the platform uses ("UAE" — our own historical
+     * spelling of ARE). Matching one against the other found nothing, and the sell flow told
+     * customers in Dubai that there were "no stores available in your region yet".
+     */
+    List<StoreLocation> findAllByCountryInAndIsActive(java.util.Collection<String> countries,
+                                                      Boolean isActive);
+
     List<StoreLocation> findAllByIsActive(Boolean isActive);
 
     Optional<StoreLocation> findByStoreIdAndIsPrimary(UUID storeId, Boolean isPrimary);

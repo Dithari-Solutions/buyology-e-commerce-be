@@ -476,9 +476,36 @@ public class SellService {
         if (country == null || country.isBlank()) {
             return List.of();
         }
-        return storeLocationRepository.findAllByCountryAndIsActive(country.trim().toUpperCase(), true).stream()
+        // Ask for every spelling of the country, not just the one the caller used. Branch rows
+        // carry whatever the dashboard's map picker captured — Nominatim's alpha-2 ("AE") — while
+        // the storefront asks with the alpha-3 the rest of the platform speaks ("UAE"). Comparing
+        // one to the other matched nothing, so a customer standing in Dubai was told there were no
+        // stores in their region and the free drop-off option was unusable.
+        return storeLocationRepository
+                .findAllByCountryInAndIsActive(countrySpellings(country), true).stream()
                 .map(SellStoreOptionResponse::from)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Every code that means the same country across our data: ISO alpha-2, ISO alpha-3, and the
+     * non-standard alpha-3 the platform has always used for the UAE ("UAE" rather than "ARE").
+     * Unknown input is passed through as itself so a country not listed here still resolves.
+     */
+    static java.util.Set<String> countrySpellings(String country) {
+        String c = country.trim().toUpperCase();
+        List<List<String>> groups = List.of(
+                List.of("AE", "ARE", "UAE"),
+                List.of("SA", "SAU"),
+                List.of("IN", "IND"),
+                List.of("BH", "BHR"),
+                List.of("QA", "QAT"),
+                List.of("OM", "OMN"),
+                List.of("AZ", "AZE"));
+        for (List<String> group : groups) {
+            if (group.contains(c)) return new java.util.LinkedHashSet<>(group);
+        }
+        return java.util.Set.of(c);
     }
 
     // =========================================================================
