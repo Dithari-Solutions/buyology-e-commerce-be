@@ -69,6 +69,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY 1, o.currency
             ORDER BY 1
@@ -91,6 +92,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
             GROUP BY 1, o.currency
             ORDER BY 1
             """, nativeQuery = true)
@@ -112,6 +114,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
             GROUP BY oi.supplier_id, o.currency
             ORDER BY 4 DESC
             """, nativeQuery = true)
@@ -146,6 +149,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY 1
             ORDER BY 1
@@ -168,6 +172,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
             GROUP BY 1
             ORDER BY 1
             """, nativeQuery = true)
@@ -189,6 +194,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
             GROUP BY oi.supplier_id
             """, nativeQuery = true)
     List<Object[]> supplierRefundTotals(
@@ -216,6 +222,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
               AND (CAST(:storeId AS uuid) IS NULL OR oi.store_id = CAST(:storeId AS uuid))
             GROUP BY o.id, o.total_amount, o.currency
             ORDER BY MIN(oi.created_at) DESC
@@ -242,6 +249,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
               AND oi.created_at >= :from
               AND oi.created_at < :to
               AND o.status NOT IN ('PENDING_PAYMENT', 'CANCELLED', 'FAILED')
+              AND o.deleted_at IS NULL
             GROUP BY o.id, o.total_amount, o.currency
             ORDER BY MIN(oi.created_at) DESC
             """, nativeQuery = true)

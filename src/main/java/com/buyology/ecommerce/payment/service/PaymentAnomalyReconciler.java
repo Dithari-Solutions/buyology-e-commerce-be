@@ -91,6 +91,12 @@ public class PaymentAnomalyReconciler {
             Order order = tx.getAppOrderId() == null
                     ? null : orderRepo.findById(tx.getAppOrderId()).orElse(null);
             if (order == null) {
+                // A trashed order still exists; it is only hidden from Hibernate by the entity's
+                // SQLRestriction. Alarming here would report every deliberate deletion as a lost
+                // payment, so the row's real absence is what must be checked.
+                if (tx.getAppOrderId() != null && orderRepo.existsIncludingTrash(tx.getAppOrderId())) {
+                    continue;
+                }
                 anomalyService.recordAndAlert(PaymentAnomalyKind.ORPHANED_NO_ORDER, tx,
                         tx.getAppOrderId(), null,
                         "sweep: SUCCESS payment references a missing order row", "RECONCILER");

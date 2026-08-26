@@ -181,4 +181,70 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      */
     @Query(value = "SELECT * FROM orders WHERE CAST(id AS text) LIKE :prefix || '%'", nativeQuery = true)
     List<Order> findByIdPrefix(@Param("prefix") String prefix);
+
+    // ── Trash ─────────────────────────────────────────────────────────────────
+    // Every method here is a NATIVE query on purpose: the @SQLRestriction on Order hides deleted
+    // rows from all Hibernate-generated SQL, which is exactly what these need to see past.
+
+    /** Move an order to the trash. Returns 0 if it was already there. */
+    @Modifying
+    @Query(value = """
+            UPDATE orders SET deleted_at = :at, deleted_by = :by
+            WHERE id = :id AND deleted_at IS NULL
+            """, nativeQuery = true)
+    int softDelete(@Param("id") UUID id, @Param("by") UUID by, @Param("at") Instant at);
+
+    /** Restore an order from the trash. Returns 0 if it was not in the trash. */
+    @Modifying
+    @Query(value = """
+            UPDATE orders SET deleted_at = NULL, deleted_by = NULL
+            WHERE id = :id AND deleted_at IS NOT NULL
+            """, nativeQuery = true)
+    int restoreDeleted(@Param("id") UUID id);
+
+    /** The trash, newest deletion first. */
+    @Query(value = """
+            SELECT id, deleted_at, deleted_by, status, total_amount, currency, created_at
+            FROM orders
+            WHERE deleted_at IS NOT NULL
+            ORDER BY deleted_at DESC
+            LIMIT :limit OFFSET :offset
+            """, nativeQuery = true)
+    List<Object[]> findTrashed(@Param("limit") int limit, @Param("offset") int offset);
+
+    @Query(value = "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL", nativeQuery = true)
+    long countTrashed();
+
+    /**
+     * Orders whose 30 days are up. Orders with a settled payment are deliberately excluded — see
+     * OrderService.purgeExpiredTrash for why a background job must not destroy the record of an
+     * order someone actually paid for.
+     */
+    @Query(value = """
+            SELECT o.id FROM orders o
+            WHERE o.deleted_at IS NOT NULL
+              AND o.deleted_at < :cutoff
+              AND NOT EXISTS (
+                    SELECT 1 FROM payment_transactions pt
+                    WHERE pt.app_order_id = o.id AND pt.status = 'SUCCESS')
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<UUID> findPurgeableTrash(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
+
+    /** Does this order exist AT ALL, trashed or not? Used where a missing row would raise an alarm. */
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM orders WHERE id = :id)", nativeQuery = true)
+    boolean existsIncludingTrash(@Param("id") UUID id);
+
+    // A native DELETE bypasses the JPA cascade, so the children go first and explicitly.
+    @Modifying
+    @Query(value = "DELETE FROM order_tracking_events WHERE order_id IN (:ids)", nativeQuery = true)
+    void purgeTrackingEvents(@Param("ids") List<UUID> ids);
+
+    @Modifying
+    @Query(value = "DELETE FROM order_items WHERE order_id IN (:ids)", nativeQuery = true)
+    void purgeItems(@Param("ids") List<UUID> ids);
+
+    @Modifying
+    @Query(value = "DELETE FROM orders WHERE id IN (:ids)", nativeQuery = true)
+    int purgeOrders(@Param("ids") List<UUID> ids);
 }

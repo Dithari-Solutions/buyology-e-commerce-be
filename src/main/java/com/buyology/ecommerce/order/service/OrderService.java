@@ -69,6 +69,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -2480,6 +2481,107 @@ public class OrderService {
         if (promoted > 0) {
             log.warn("[RECONCILE] Promoted {} stuck PENDING_PAYMENT order(s) to PAID via webhook recovery", promoted);
         }
+    }
+
+    // =========================================================================
+    // Trash (superadmin)
+    // =========================================================================
+
+    /** How long a deleted order can still be recovered. */
+    private static final java.time.Duration TRASH_RETENTION = java.time.Duration.ofDays(30);
+
+    /**
+     * Move an order to the trash.
+     *
+     * <p>Not a DELETE: an order is the record of a real transaction, and a mis-click that
+     * vaporises one is unrecoverable. It vanishes from every list immediately (the entity's
+     * SQLRestriction sees to that, including the customer's own order history and the revenue
+     * report) and is destroyed for good after {@link #TRASH_RETENTION} unless restored.
+     */
+    @Transactional
+    public void trashOrder(UUID orderId, UUID adminUserId) {
+        if (!orderRepo.existsIncludingTrash(orderId)) {
+            throw new NoSuchElementException("Order not found: " + orderId);
+        }
+        if (orderRepo.softDelete(orderId, adminUserId, Instant.now()) == 0) {
+            throw new IllegalStateException("This order is already in the trash.");
+        }
+        log.warn("[ORDER-TRASH] Order {} moved to trash by {}", orderId, adminUserId);
+    }
+
+    /** Bring an order back out of the trash. */
+    @Transactional
+    public void restoreOrder(UUID orderId) {
+        if (orderRepo.restoreDeleted(orderId) == 0) {
+            throw new NoSuchElementException("That order is not in the trash.");
+        }
+        log.warn("[ORDER-TRASH] Order {} restored", orderId);
+    }
+
+    /** The trash, newest first. */
+    @Transactional(readOnly = true)
+    public TrashPage listTrash(int page, int size) {
+        int limit = Math.min(Math.max(1, size), 100);
+        int offset = Math.max(0, page) * limit;
+        List<TrashedOrder> rows = orderRepo.findTrashed(limit, offset).stream()
+                .map(r -> {
+                    Instant deletedAt = toInstant(r[1]);
+                    return new TrashedOrder(
+                            (UUID) r[0],
+                            deletedAt,
+                            (UUID) r[2],
+                            r[3] == null ? null : r[3].toString(),
+                            (BigDecimal) r[4],
+                            r[5] == null ? null : r[5].toString(),
+                            toInstant(r[6]),
+                            deletedAt == null ? null : deletedAt.plus(TRASH_RETENTION));
+                })
+                .toList();
+        return new TrashPage(rows, orderRepo.countTrashed(), page, limit);
+    }
+
+    /** One trashed order as the trash view shows it, including when it will be destroyed. */
+    public record TrashedOrder(UUID id, Instant deletedAt, UUID deletedBy, String status,
+                               BigDecimal totalAmount, String currency, Instant createdAt,
+                               Instant purgeAt) {}
+
+    public record TrashPage(List<TrashedOrder> content, long totalElements, int page, int size) {}
+
+    /**
+     * A timestamptz out of a native query, whichever shape the driver hands back. Casting to one
+     * of Timestamp / OffsetDateTime is a coin-flip across driver and Hibernate versions, and the
+     * wrong guess is a ClassCastException at runtime rather than a compile error.
+     */
+    private static Instant toInstant(Object value) {
+        if (value == null) return null;
+        if (value instanceof Instant i) return i;
+        if (value instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (value instanceof java.time.OffsetDateTime odt) return odt.toInstant();
+        if (value instanceof java.time.LocalDateTime ldt) return ldt.toInstant(java.time.ZoneOffset.UTC);
+        return null;
+    }
+
+    /**
+     * Destroy trashed orders whose 30 days are up, with their items and tracking history.
+     *
+     * <p>Orders with a SETTLED payment are deliberately left in the trash instead. Destroying the
+     * record of an order somebody actually paid for is not a decision a background job should
+     * take on its own: it breaks the trail from a payment to what it bought, and it would leave
+     * that payment looking orphaned to the anomaly sweep, raising an alarm about a deletion that
+     * was intentional. Those stay recoverable until a human decides otherwise.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(
+            fixedDelayString = "${order.trash-purge-interval-ms:86400000}")
+    @Transactional
+    public void purgeExpiredTrash() {
+        List<UUID> due = orderRepo.findPurgeableTrash(Instant.now().minus(TRASH_RETENTION), 200);
+        if (due.isEmpty()) return;
+        // Children first: a native DELETE does not run the JPA cascade.
+        orderRepo.purgeTrackingEvents(due);
+        orderRepo.purgeItems(due);
+        int purged = orderRepo.purgeOrders(due);
+        log.warn("[ORDER-TRASH] Permanently deleted {} order(s) whose {} days in the trash expired",
+                purged, TRASH_RETENTION.toDays());
     }
 
     // =========================================================================

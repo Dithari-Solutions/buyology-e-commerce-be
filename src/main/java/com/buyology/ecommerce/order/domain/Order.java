@@ -20,6 +20,7 @@ import java.util.UUID;
  * - trackingCode / carrierName are set by admin when marking an order as SHIPPED.
  */
 @Entity
+@org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 @Table(name = "orders", indexes = {
         @Index(name = "idx_orders_user_id",    columnList = "user_id"),
         @Index(name = "idx_orders_status",     columnList = "status"),
@@ -344,6 +345,24 @@ public class Order {
     @Column(name = "quiqup_dispatch_claimed_at")
     private Instant quiqupDispatchClaimedAt;
 
+    // ── Trash ─────────────────────────────────────────────────────────────────
+
+    /**
+     * When a superadmin moved this order to the trash. Null for every live order.
+     *
+     * <p>The @SQLRestriction on this class hides deleted orders from EVERY Hibernate query —
+     * admin lists, the customer's own history, courier lookups — without each of those queries
+     * having to remember. Code that must still see a trashed order (the trash view, restore, the
+     * purge job, and the payment reconciler's existence check) uses native queries, which the
+     * restriction does not touch.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    /** users.id of the admin who deleted it. */
+    @Column(name = "deleted_by")
+    private UUID deletedBy;
+
     // ── Relations ─────────────────────────────────────────────────────────────
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -524,6 +543,12 @@ public class Order {
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+
+    public UUID getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(UUID deletedBy) { this.deletedBy = deletedBy; }
 
     public List<OrderItem> getItems() { return items; }
     public void setItems(List<OrderItem> items) { this.items = items; }
