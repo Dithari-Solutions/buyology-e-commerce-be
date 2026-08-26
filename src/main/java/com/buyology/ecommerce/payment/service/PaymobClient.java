@@ -146,9 +146,29 @@ public class PaymobClient {
      * a recovery path can feed it through exactly the same settlement logic a webhook takes,
      * rather than a second, subtly different one that decides on its own what "paid" means.
      */
-    public JsonNode getTransaction(String secretKey, String baseUrl, String paymobTransactionId) {
-        return get(baseUrl + "/api/acceptance/transactions/" + paymobTransactionId,
-                "Token " + secretKey);
+    public JsonNode getTransaction(String secretKey, String apiKey, String baseUrl,
+                                   String paymobTransactionId) {
+        String url = baseUrl + "/api/acceptance/transactions/" + paymobTransactionId;
+        try {
+            // Same credential style the refund call uses, so if refunds work this does too.
+            return get(url, "Token " + secretKey);
+        } catch (RuntimeException secretKeyFailure) {
+            if (apiKey == null || apiKey.isBlank()) throw secretKeyFailure;
+            // Paymob's older acceptance endpoints want a short-lived auth token minted from the
+            // API key instead. Which of the two a merchant account accepts is not something we
+            // can know from here, so try the other one before giving up on a payment the customer
+            // has already made.
+            log.warn("[PAYMOB] Secret-key lookup of transaction {} failed ({}); retrying with an "
+                    + "auth token", paymobTransactionId, secretKeyFailure.getMessage());
+            ObjectNode authBody = objectMapper.createObjectNode();
+            authBody.put("api_key", apiKey);
+            JsonNode auth = post(baseUrl + "/api/auth/tokens", authBody, null);
+            String token = auth.hasNonNull("token") ? auth.get("token").asText() : null;
+            if (token == null || token.isBlank()) {
+                throw secretKeyFailure;
+            }
+            return get(url, "Bearer " + token);
+        }
     }
 
     // -------------------------------------------------------------------------

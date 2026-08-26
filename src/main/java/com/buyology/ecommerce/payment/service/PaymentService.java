@@ -850,8 +850,21 @@ public class PaymentService {
             throw new IllegalStateException("No payment provider configured for this transaction");
         }
 
-        JsonNode obj = paymobClient.getTransaction(
-                provider.getSecretKey(), provider.getBaseUrl(), providerTxnId);
+        JsonNode obj;
+        try {
+            obj = paymobClient.getTransaction(
+                    provider.getSecretKey(), provider.getApiKey(), provider.getBaseUrl(), providerTxnId);
+        } catch (RuntimeException gatewayFailure) {
+            // Do NOT bubble this out as a 502. An admin holding a transaction id from Paymob's own
+            // dashboard needs to read what Paymob said — "not found", "unauthorised" — because that
+            // is the difference between a wrong id and a credential problem. An opaque gateway
+            // error tells them nothing and leaves a paid order unsettled.
+            log.error("[RECHECK] Paymob lookup failed for order {} / transaction {}",
+                    orderId, providerTxnId, gatewayFailure);
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "Paymob would not answer for transaction " + providerTxnId + ": "
+                            + gatewayFailure.getMessage());
+        }
 
         // A hand-entered id must be proven to belong to THIS payment before it can settle it.
         // The money guard inside applyWebhookToTransaction already refuses a mismatched amount or
