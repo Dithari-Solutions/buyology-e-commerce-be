@@ -2,9 +2,11 @@ package com.buyology.ecommerce.giveaway.service;
 
 import com.buyology.ecommerce.auth.domain.AuthCredentials;
 import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
+import com.buyology.ecommerce.giveaway.domain.GiveawayCampaign;
 import com.buyology.ecommerce.giveaway.domain.GiveawayEntry;
 import com.buyology.ecommerce.giveaway.dto.GiveawayEntryAdminResponse;
 import com.buyology.ecommerce.giveaway.dto.GiveawayStatusResponse;
+import com.buyology.ecommerce.giveaway.repository.GiveawayCampaignRepository;
 import com.buyology.ecommerce.giveaway.repository.GiveawayEntryRepository;
 import com.buyology.ecommerce.user.domain.UserProfiles;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
@@ -18,6 +20,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -58,21 +61,79 @@ public class GiveawayService {
     private static final Pattern HANDLE = Pattern.compile("^[A-Za-z0-9._]{1,30}$");
 
     private final GiveawayEntryRepository repository;
+    private final GiveawayCampaignRepository campaignRepository;
     private final AuthCredentialRepository authCredentialRepository;
     private final UserRepository userRepository;
     private final UserProfilesRepository userProfilesRepository;
     private final UserProfileService userProfileService;
 
     public GiveawayService(GiveawayEntryRepository repository,
+                           GiveawayCampaignRepository campaignRepository,
                            AuthCredentialRepository authCredentialRepository,
                            UserRepository userRepository,
                            UserProfilesRepository userProfilesRepository,
                            UserProfileService userProfileService) {
         this.repository = repository;
+        this.campaignRepository = campaignRepository;
         this.authCredentialRepository = authCredentialRepository;
         this.userRepository = userRepository;
         this.userProfilesRepository = userProfilesRepository;
         this.userProfileService = userProfileService;
+    }
+
+    // =========================================================================
+    // Campaign state
+    // =========================================================================
+
+    /**
+     * The campaign row, created open on first read.
+     *
+     * <p>Created rather than absent-means-closed: a giveaway that silently switched itself off
+     * because nobody had inserted a row yet would be the worst possible default, and the seed in
+     * V46 only covers databases that ran the migration with the table already present.
+     */
+    @Transactional
+    public GiveawayCampaign campaign() {
+        return campaignRepository.findByCampaign(GiveawayEntry.DEFAULT_CAMPAIGN)
+                .orElseGet(() -> {
+                    GiveawayCampaign fresh = new GiveawayCampaign();
+                    fresh.setCampaign(GiveawayEntry.DEFAULT_CAMPAIGN);
+                    fresh.setOpen(true);
+                    return campaignRepository.save(fresh);
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isOpen() {
+        return campaignRepository.findByCampaign(GiveawayEntry.DEFAULT_CAMPAIGN)
+                .map(GiveawayCampaign::isOpen)
+                .orElse(true);
+    }
+
+    /** Entry count and open/closed, for callers with no account — the home banner decides on this. */
+    @Transactional(readOnly = true)
+    public GiveawayStatusResponse publicStatus() {
+        GiveawayStatusResponse dto = GiveawayStatusResponse.notEntered(
+                List.of(), repository.countByCampaign(GiveawayEntry.DEFAULT_CAMPAIGN));
+        dto.setOpen(isOpen());
+        // Nobody is eligible to enter a closed campaign, whatever their account looks like.
+        dto.setEligible(dto.isOpen());
+        return dto;
+    }
+
+    /** Opens or closes the campaign. Entries are never touched — closing stops intake, nothing else. */
+    @Transactional
+    public GiveawayCampaign setOpen(boolean open, UUID adminUserId) {
+        GiveawayCampaign c = campaign();
+        if (c.isOpen() != open) {
+            c.setClosedAt(open ? null : Instant.now());
+        }
+        c.setOpen(open);
+        c.setUpdatedBy(adminUserId);
+        GiveawayCampaign saved = campaignRepository.save(c);
+        log.warn("[GIVEAWAY] Campaign {} is now {} (by {})",
+                saved.getCampaign(), open ? "OPEN" : "CLOSED", adminUserId);
+        return saved;
     }
 
     // =========================================================================
@@ -84,13 +145,21 @@ public class GiveawayService {
     public GiveawayStatusResponse status(UUID principal) {
         UUID userId = resolveUsersId(principal);
         long total = repository.countByCampaign(GiveawayEntry.DEFAULT_CAMPAIGN);
+        boolean open = isOpen();
         Optional<GiveawayEntry> existing =
                 repository.findByCampaignAndUserId(GiveawayEntry.DEFAULT_CAMPAIGN, userId);
         if (existing.isPresent()) {
-            return GiveawayStatusResponse.from(existing.get(), total);
+            // Someone already in stays in when the doors close — their entry still counts.
+            GiveawayStatusResponse dto = GiveawayStatusResponse.from(existing.get(), total);
+            dto.setOpen(open);
+            return dto;
         }
-        return GiveawayStatusResponse.notEntered(
+        GiveawayStatusResponse dto = GiveawayStatusResponse.notEntered(
                 userProfileService.missingForContactableAction(userId), total);
+        dto.setOpen(open);
+        // A complete account does not make a closed campaign enterable.
+        if (!open) dto.setEligible(false);
+        return dto;
     }
 
     /**
@@ -102,6 +171,12 @@ public class GiveawayService {
     public GiveawayStatusResponse enter(UUID principal, String rawHandle) {
         UUID userId = resolveUsersId(principal);
         UUID credentialId = resolveCredentialId(principal);
+
+        // Checked first: a closed campaign is not a validation problem with their handle, and
+        // telling them their username is malformed when the draw is simply over would be wrong.
+        if (!isOpen()) {
+            throw new IllegalStateException("This giveaway has closed — entries are no longer being accepted.");
+        }
 
         String handle = normalizeHandle(rawHandle);
         if (handle == null) {

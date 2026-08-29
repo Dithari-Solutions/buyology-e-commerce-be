@@ -117,6 +117,9 @@ public class SecurityConfig {
                         // Public return/refund policy (window days) for the storefront. The
                         // admin read/write lives under /api/admin/refund-settings (authenticated).
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/refund-settings").permitAll()
+                        // Open/closed only — no entry data. The banner a signed-out visitor sees
+                        // has to be able to disappear when the draw ends.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/giveaway/campaign").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/questions/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news").permitAll()
                         // Stories: reads + view/like (like/unlike self-enforce auth in-controller)

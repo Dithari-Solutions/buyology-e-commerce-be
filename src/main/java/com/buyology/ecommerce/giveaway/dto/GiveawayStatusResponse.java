@@ -20,6 +20,8 @@ public class GiveawayStatusResponse {
     /** Field names still to fill: phoneNumber, phoneVerification, deliveryAddress. */
     private List<String> missing = List.of();
     private long totalEntries;
+    /** False once an admin has closed the campaign — every entry surface hides on this. */
+    private boolean open = true;
 
     public static GiveawayStatusResponse notEntered(List<String> missing, long totalEntries) {
         GiveawayStatusResponse dto = new GiveawayStatusResponse();
@@ -29,6 +31,10 @@ public class GiveawayStatusResponse {
         dto.totalEntries = totalEntries;
         return dto;
     }
+
+    public boolean isOpen() { return open; }
+    public void setOpen(boolean open) { this.open = open; }
+    public void setEligible(boolean eligible) { this.eligible = eligible; }
 
     public static GiveawayStatusResponse from(GiveawayEntry entry, long totalEntries) {
         GiveawayStatusResponse dto = new GiveawayStatusResponse();
