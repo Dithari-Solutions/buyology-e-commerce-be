@@ -331,11 +331,18 @@ public class UserProfileService {
 
     /**
      * What a customer still has to fill in before an action that needs to REACH them — today the
-     * giveaway, where a prize has to be delivered to a real address and a real phone.
+     * giveaway, where a winner has to be contactable on a real, verified phone.
      *
-     * Deliberately the same vocabulary as {@link #computeMissingFields} ("phoneNumber",
-     * "phoneVerification", "deliveryAddress") so one set of labels serves every gate in the UI.
-     * Name is not required here: a winner is contacted, not invoiced.
+     * <p>A delivery address is deliberately NOT required. Entering costs the customer nothing, so
+     * every field demanded at the door turns people away from a campaign whose whole purpose is
+     * reach; the address only matters once somebody has actually won, and it can be collected then
+     * from the one person who needs to give it. The verified phone stays because it is not really
+     * a contact detail here — it is the thing that caps how many accounts one person can enter
+     * from, which is the rule the giveaway is built on.
+     *
+     * <p>Deliberately the same vocabulary as {@link #computeMissingFields} ("phoneNumber",
+     * "phoneVerification") so one set of labels serves every gate in the UI. Name is not required
+     * either: a winner is contacted, not invoiced.
      */
     public List<String> missingForContactableAction(UUID userId) {
         Users user = findUser(userId);
@@ -343,7 +350,6 @@ public class UserProfileService {
         List<String> missing = new ArrayList<>();
         if (isBlank(profile.getPhoneNumber()))   missing.add("phoneNumber");
         else if (!profile.isPhoneVerified())     missing.add("phoneVerification");
-        if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
         return missing;
     }
 

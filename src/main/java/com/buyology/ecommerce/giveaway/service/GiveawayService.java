@@ -108,9 +108,10 @@ public class GiveawayService {
             throw new IllegalArgumentException(
                     "That does not look like an Instagram username. Use the name from your profile URL, e.g. buyology.online.");
         }
-        // A prize has to reach a real person at a real address, and the verified phone is also
-        // what caps how many accounts one person can make — so this is checked on the write, not
-        // just advertised by the status endpoint.
+        // Checked on the write, not just advertised by the status endpoint. The verified phone is
+        // the anti-abuse rule rather than a courtesy: it is what stops one person entering from
+        // several accounts. No address is asked for — a winner can be asked for one when there is
+        // a winner.
         List<String> missing = userProfileService.missingForContactableAction(userId);
         if (!missing.isEmpty()) {
             throw new IllegalStateException(
