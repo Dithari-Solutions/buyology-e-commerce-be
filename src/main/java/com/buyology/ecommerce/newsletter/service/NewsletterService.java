@@ -98,12 +98,14 @@ public class NewsletterService {
 
     @Transactional
     public NewsArticleResponse createArticle(CreateNewsArticleRequest req, UUID adminId,
-                                             MultipartFile image) {
+                                             MultipartFile image, List<MultipartFile> gallery) {
         NewsArticle article = new NewsArticle();
         article.setTitle(req.getTitle());
         article.setSummary(req.getSummary());
         article.setContent(req.getContent());
         article.setCreatedBy(adminId);
+
+        article.setSlug(uniqueSlug(req.getTitle()));
 
         if (image != null && !image.isEmpty()) {
             FileValidationUtils.validateImage(image);
@@ -113,7 +115,61 @@ public class NewsletterService {
             article.setImageKey(storedKey);
         }
 
+        if (gallery != null && !gallery.isEmpty()) {
+            List<String> keys = new ArrayList<>();
+            for (MultipartFile g : gallery) {
+                if (g == null || g.isEmpty()) continue;
+                FileValidationUtils.validateImage(g);
+                keys.add(contaboObjectService.uploadFile(
+                        "news/" + UUID.randomUUID() + "/" + g.getOriginalFilename(), g));
+            }
+            if (!keys.isEmpty()) article.setGalleryKeys(String.join("\n", keys));
+        }
+
         return toResponse(articleRepo.save(article));
+    }
+
+    /**
+     * A readable, unique URL segment.
+     *
+     * <p>Suffixed with a short random block rather than checked-and-retried: two articles can
+     * legitimately share a title ("December giveaway" every year), and a slug collision at save
+     * time would surface as a constraint violation on a unique index rather than anything a
+     * publisher could act on.
+     */
+    private String uniqueSlug(String title) {
+        String base = (title == null ? "" : title).toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s-]", "")
+                .replaceAll("\\s+", "-")
+                .replaceAll("-{2,}", "-")
+                .replaceAll("^-|-$", "");
+        if (base.isBlank()) base = "article";
+        if (base.length() > 280) base = base.substring(0, 280);
+        String slug = base + "-" + UUID.randomUUID().toString().substring(0, 8);
+        return articleRepo.findBySlug(slug).isPresent()
+                ? base + "-" + UUID.randomUUID().toString().substring(0, 8)
+                : slug;
+    }
+
+    /** One published article by its slug — what the public detail page reads. */
+    public NewsArticleResponse getPublishedBySlug(String slug) {
+        NewsArticle article = articleRepo.findBySlug(slug)
+                .filter(a -> a.getStatus() == NewsArticle.ArticleStatus.PUBLISHED)
+                .orElseThrow(() -> new NoSuchElementException("Article not found: " + slug));
+        return toResponse(article);
+    }
+
+    /**
+     * How many articles were published after a given moment.
+     *
+     * <p>Drives the header badge. The client holds the timestamp it last read, so the server keeps
+     * no per-visitor state for something that only needs to say "there are three you have not
+     * seen" — and it works for signed-out visitors, who are most of the audience for news.
+     */
+    public long countPublishedSince(Instant since) {
+        return articleRepo.countByStatusAndPublishedAtAfter(
+                NewsArticle.ArticleStatus.PUBLISHED,
+                since == null ? Instant.EPOCH : since);
     }
 
     public List<NewsArticleResponse> listAllArticles() {
@@ -162,9 +218,20 @@ public class NewsletterService {
         r.setStatus(a.getStatus());
         r.setPublishedAt(a.getPublishedAt());
         r.setCreatedAt(a.getCreatedAt());
+        r.setSlug(a.getSlug());
         if (a.getImageKey() != null) {
             try { r.setImageUrl(contaboObjectService.getPresignedUrl(a.getImageKey())); }
             catch (Exception ignored) {}
+        }
+        if (a.getGalleryKeys() != null && !a.getGalleryKeys().isBlank()) {
+            List<String> urls = new ArrayList<>();
+            for (String key : a.getGalleryKeys().split("\n")) {
+                if (key.isBlank()) continue;
+                // One bad key must not cost the article its whole gallery.
+                try { urls.add(contaboObjectService.getPresignedUrl(key.trim())); }
+                catch (Exception ignored) {}
+            }
+            r.setGalleryUrls(urls);
         }
         return r;
     }

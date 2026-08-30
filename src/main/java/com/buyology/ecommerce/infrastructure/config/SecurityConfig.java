@@ -122,6 +122,10 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/giveaway/campaign").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/questions/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news").permitAll()
+                        // The article page and the header badge are both read by signed-out
+                        // visitors — news is the one part of the site aimed at people without an
+                        // account. /api/admin/news stays authenticated as before.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news/**").permitAll()
                         // Stories: reads + view/like (like/unlike self-enforce auth in-controller)
                         .requestMatchers("/api/story/**").permitAll()
                         // Newsletter subscribe/unsubscribe (unsubscribe is an emailed GET link)
