@@ -88,6 +88,32 @@ public class NewsletterController {
                 "Article created");
     }
 
+    /** Edit an article. Same permission as creating one — both are authoring. */
+    @PutMapping("/api/admin/news/{id}")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:create') or @rbacPolicy.legacyAdmin()")
+    public ResponseEntity<ApiResponse<NewsArticleResponse>> updateArticle(
+            @PathVariable UUID id,
+            @Valid @RequestPart("request") CreateNewsArticleRequest req,
+            @RequestPart(value = "image", required = false) MultipartFile image,
+            @RequestPart(value = "gallery", required = false) List<MultipartFile> gallery) {
+        return ApiResponse.success(newsletterService.updateArticle(id, req, image, gallery),
+                "Article updated");
+    }
+
+    /**
+     * Delete an article.
+     *
+     * <p>Gated on moderate rather than create: publishing and unpublishing are the same kind of
+     * decision, and someone trusted to draft copy is not automatically trusted to remove something
+     * already sent to every subscriber.
+     */
+    @DeleteMapping("/api/admin/news/{id}")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:moderate') or @rbacPolicy.legacyAdmin()")
+    public ResponseEntity<ApiResponse<Void>> deleteArticle(@PathVariable UUID id) {
+        newsletterService.deleteArticle(id);
+        return ApiResponse.success(null, "Article deleted");
+    }
+
     @GetMapping("/api/admin/news")
     @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('newsletter:article:read') or @rbacPolicy.legacyAdmin()")
     public ResponseEntity<ApiResponse<List<NewsArticleResponse>>> listAll() {

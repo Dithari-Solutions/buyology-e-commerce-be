@@ -172,6 +172,63 @@ public class NewsletterService {
                 since == null ? Instant.EPOCH : since);
     }
 
+    /**
+     * Edits an article in place.
+     *
+     * <p>The slug deliberately does not follow the title. Once an article is published its URL has
+     * been shared, indexed and linked; regenerating the slug on every title fix would break all of
+     * that silently. A typo in a headline is worth less than a working link.
+     *
+     * <p>Images are replaced only when a new file is supplied — sending the form without one keeps
+     * what is already there, so fixing a sentence does not require re-uploading the artwork.
+     */
+    @Transactional
+    public NewsArticleResponse updateArticle(UUID id, CreateNewsArticleRequest req,
+                                             MultipartFile image, List<MultipartFile> gallery) {
+        NewsArticle article = articleRepo.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Article not found: " + id));
+
+        article.setTitle(req.getTitle());
+        article.setSummary(req.getSummary());
+        article.setContent(req.getContent());
+
+        if (image != null && !image.isEmpty()) {
+            FileValidationUtils.validateImage(image);
+            article.setImageKey(contaboObjectService.uploadFile(
+                    "news/" + UUID.randomUUID() + "/" + image.getOriginalFilename(), image));
+        }
+
+        if (gallery != null && !gallery.isEmpty()) {
+            List<String> keys = new ArrayList<>();
+            for (MultipartFile g : gallery) {
+                if (g == null || g.isEmpty()) continue;
+                FileValidationUtils.validateImage(g);
+                keys.add(contaboObjectService.uploadFile(
+                        "news/" + UUID.randomUUID() + "/" + g.getOriginalFilename(), g));
+            }
+            // Supplying a gallery REPLACES the old one; that is what "choose these images" means.
+            if (!keys.isEmpty()) article.setGalleryKeys(String.join("\n", keys));
+        }
+
+        return toResponse(articleRepo.save(article));
+    }
+
+    /**
+     * Removes an article.
+     *
+     * <p>A published article that has already gone out by email cannot be unsent, so deleting one
+     * takes it off the site without pretending it was never sent. The stored images are left in
+     * object storage rather than deleted: they may be referenced from an email already in
+     * somebody's inbox, and an orphaned file costs less than a broken image in a newsletter.
+     */
+    @Transactional
+    public void deleteArticle(UUID id) {
+        NewsArticle article = articleRepo.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Article not found: " + id));
+        articleRepo.delete(article);
+        log.warn("[NEWS] Article '{}' ({}) deleted", article.getTitle(), id);
+    }
+
     public List<NewsArticleResponse> listAllArticles() {
         return articleRepo.findAllByOrderByCreatedAtDesc().stream()
                 .map(this::toResponse)
