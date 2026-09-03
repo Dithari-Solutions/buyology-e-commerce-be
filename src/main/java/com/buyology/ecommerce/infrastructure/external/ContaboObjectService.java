@@ -1,6 +1,9 @@
 package com.buyology.ecommerce.infrastructure.external;
 
 import com.buyology.ecommerce.infrastructure.config.ContaboProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -16,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,6 +30,21 @@ public class ContaboObjectService {
     // editorial) and users/ (avatars), refunds/ (evidence), documents (licenses)
     // must NOT be altered.
     private static final List<String> WATERMARK_PREFIXES = List.of("products/");
+
+    /**
+     * Key prefixes whose URLs are held steady rather than re-signed per call.
+     *
+     * <p>These are the images every visitor is shown, and a signature that changes on each
+     * render defeats every cache between the object store and the screen. The home banner was
+     * the clearest case: signed fresh on every page render, so the largest image on the busiest
+     * page was downloaded from storage and re-encoded for each visitor, every time.
+     *
+     * <p>They are all replaceable at the same key, which is what kept them off this list
+     * before. That is handled properly now — {@link #evictPresignedUrl(String)} drops the
+     * cached URL the moment an object is overwritten or deleted.
+     */
+    private static final List<String> CACHEABLE_PREFIXES =
+            List.of("products/", "banners/", "stories/", "news/");
 
     // Presigned GET URLs are signed with the current timestamp, so a fresh call
     // produces a DIFFERENT URL for the same object every time — which busts the
@@ -40,6 +59,25 @@ public class ContaboObjectService {
             "public, max-age=" + Duration.ofHours(6).toSeconds();
     private static final int PRESIGN_CACHE_MAX_ENTRIES = 20_000;
 
+    /**
+     * Shared presign cache, so every host signs a product image to the SAME url.
+     *
+     * <p>The in-memory cache below keeps a url stable on ONE host, which is all it can do.
+     * We run two, and the load balancer alternates between them, so the same photo was being
+     * handed out under two different signatures — and everything downstream keys on the full
+     * url. Two browser cache entries, two Cloudflare entries, two image-optimizer encodes, for
+     * one photo. A restart re-signed everything and lost the lot again.
+     *
+     * <p>Redis makes the signature a shared decision instead of a per-host one: whoever signs
+     * first wins, everyone else serves the winner's url, and it survives a deploy. The version
+     * suffix is here so a change to how we sign can invalidate the old entries by rename.
+     */
+    private static final String PRESIGN_REDIS_PREFIX = "img:presign:v1:";
+    /** A url from Redis whose remaining lifetime we cannot read: hold it briefly, then re-ask. */
+    private static final Duration PRESIGN_UNKNOWN_TTL = Duration.ofMinutes(5);
+
+    private static final Logger log = LoggerFactory.getLogger(ContaboObjectService.class);
+
     private record CachedUrl(String url, Instant expiresAt) {}
 
     private final Map<String, CachedUrl> presignedUrlCache = new ConcurrentHashMap<>();
@@ -48,13 +86,16 @@ public class ContaboObjectService {
     private final S3Presigner s3Presigner;
     private final ContaboProperties properties;
     private final WatermarkService watermarkService;
+    private final StringRedisTemplate redis;
 
     public ContaboObjectService(S3Client s3Client, S3Presigner s3Presigner,
-                                ContaboProperties properties, WatermarkService watermarkService) {
+                                ContaboProperties properties, WatermarkService watermarkService,
+                                StringRedisTemplate redis) {
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.properties = properties;
         this.watermarkService = watermarkService;
+        this.redis = redis;
     }
 
     /**
@@ -129,6 +170,7 @@ public class ContaboObjectService {
                 .contentType(contentType)
                 .build();
         s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+        evictPresignedUrl(key);
     }
 
     /**
@@ -143,6 +185,7 @@ public class ContaboObjectService {
                 .build();
 
         s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+        evictPresignedUrl(key);
         return key;
     }
 
@@ -233,11 +276,10 @@ public class ContaboObjectService {
             cleanKey = cleanKey.substring(0, queryIdx);
         }
 
-        // Only product catalog images get the long-lived, browser-cacheable URL.
-        // Other assets (avatars, refund evidence, stories, banners, documents)
-        // are MUTABLE — a user can replace an avatar at the same key — so they
-        // keep the original fresh-presign-per-call behavior with no long cache.
-        if (!cleanKey.startsWith("products/")) {
+        // Public catalogue and editorial imagery gets the long-lived, cacheable URL. Private
+        // assets (avatars, refund evidence, licences, support attachments) do not: they are seen
+        // by one person, so a stable URL buys nothing, and a leaked one would stay valid.
+        if (!isPubliclyCacheable(cleanKey)) {
             return presignGet(cleanKey, null, Duration.ofHours(2));
         }
 
@@ -249,18 +291,84 @@ public class ContaboObjectService {
             presignedUrlCache.values().removeIf(c -> c.expiresAt().isBefore(now));
         }
 
-        // compute() runs the remap atomically per key, so concurrent misses sign
-        // the URL exactly once (presigning is local/no network) and reuse it
-        // across requests until the cache window lapses — keeping the URL (and
-        // therefore the browser's image cache) byte-identical.
-        CachedUrl entry = presignedUrlCache.compute(productKey, (k, existing) -> {
-            if (existing != null && existing.expiresAt().isAfter(now)) {
-                return existing;
+        // The in-memory copy is the fast path — a product list asks for fifty of these, and none
+        // of them should cost a Redis round trip once this host has seen the key.
+        CachedUrl local = presignedUrlCache.get(productKey);
+        if (local != null && local.expiresAt().isAfter(now)) {
+            return local.url();
+        }
+
+        // Deliberately NOT inside compute(): that holds a bin lock, and this does network I/O.
+        // Two threads racing the same key is harmless — Redis settles which url they both use.
+        CachedUrl resolved = sharedPresign(productKey, now);
+        presignedUrlCache.put(productKey, resolved);
+        return resolved.url();
+    }
+
+    /**
+     * The url for a product key, agreed across hosts through Redis.
+     *
+     * <p>Its local expiry tracks what Redis says is LEFT of the shared entry, not a fresh window —
+     * caching a url for four more hours when the shared copy expires in ten minutes would leave
+     * this host serving a signature the others have already rotated away from, and eventually one
+     * that has expired outright.
+     *
+     * <p>If Redis cannot be reached the image still loads: we sign locally and carry on. A cache
+     * being down is a performance problem, and must never become a broken-photo problem.
+     */
+    private CachedUrl sharedPresign(String productKey, Instant now) {
+        String redisKey = PRESIGN_REDIS_PREFIX + productKey;
+        try {
+            String shared = redis.opsForValue().get(redisKey);
+            if (shared != null) {
+                return new CachedUrl(shared, now.plus(remainingTtl(redisKey)));
             }
-            String signed = presignGet(k, IMAGE_CACHE_CONTROL, PRESIGN_SIGNATURE_TTL);
+
+            String signed = presignGet(productKey, IMAGE_CACHE_CONTROL, PRESIGN_SIGNATURE_TTL);
+            // setIfAbsent, not set: if another host signed this key a moment ago, its url is
+            // already in browsers and CDN caches. Ours would be a second one for the same photo.
+            Boolean won = redis.opsForValue().setIfAbsent(redisKey, signed, PRESIGN_CACHE_TTL);
+            if (Boolean.FALSE.equals(won)) {
+                String winner = redis.opsForValue().get(redisKey);
+                if (winner != null) {
+                    return new CachedUrl(winner, now.plus(remainingTtl(redisKey)));
+                }
+            }
             return new CachedUrl(signed, now.plus(PRESIGN_CACHE_TTL));
-        });
-        return entry.url();
+        } catch (RuntimeException redisUnavailable) {
+            log.warn("Presign cache unreachable, signing {} locally: {}", productKey,
+                    redisUnavailable.toString());
+            return new CachedUrl(presignGet(productKey, IMAGE_CACHE_CONTROL, PRESIGN_SIGNATURE_TTL),
+                    now.plus(PRESIGN_CACHE_TTL));
+        }
+    }
+
+    private static boolean isPubliclyCacheable(String cleanKey) {
+        return CACHEABLE_PREFIXES.stream().anyMatch(cleanKey::startsWith);
+    }
+
+    /**
+     * Forgets the cached URL for a key, so the next read signs a fresh one.
+     *
+     * <p>Called whenever an object is written or removed. Without it, replacing a banner would
+     * leave up to four hours of visitors looking at the image it replaced — the cost of making
+     * these URLs stable, paid back at the one moment it matters.
+     */
+    private void evictPresignedUrl(String key) {
+        if (key == null || key.isBlank()) return;
+        presignedUrlCache.remove(key);
+        try {
+            redis.delete(PRESIGN_REDIS_PREFIX + key);
+        } catch (RuntimeException redisUnavailable) {
+            // The entry lapses on its own within the window; nothing here is worth failing an
+            // upload over.
+            log.warn("Could not evict presign cache for {}: {}", key, redisUnavailable.toString());
+        }
+    }
+
+    private Duration remainingTtl(String redisKey) {
+        Long seconds = redis.getExpire(redisKey, TimeUnit.SECONDS);
+        return (seconds != null && seconds > 0) ? Duration.ofSeconds(seconds) : PRESIGN_UNKNOWN_TTL;
     }
 
     /**
@@ -328,6 +436,7 @@ public class ContaboObjectService {
                 .key(key)
                 .build();
         s3Client.deleteObject(deleteObjectRequest);
+        evictPresignedUrl(key);
     }
 
     /**
@@ -357,6 +466,7 @@ public class ContaboObjectService {
                     .build();
 
             s3Client.deleteObjects(deleteRequest);
+            identifiers.forEach(id -> evictPresignedUrl(id.key()));
         }
     }
 }
