@@ -16,6 +16,7 @@ import com.buyology.ecommerce.user.dto.UpdateProfileRequest;
 import com.buyology.ecommerce.user.repository.UserAddressRepository;
 import com.buyology.ecommerce.user.repository.UserProfilesRepository;
 import com.buyology.ecommerce.user.repository.UserRepository;
+import com.buyology.ecommerce.verification.service.PhoneVerificationGuard;
 import com.buyology.ecommerce.verification.service.TwilioVerifyService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,7 @@ public class UserProfileService {
     private final CountryRepository countryRepo;
     private final ContaboObjectService contaboObjectService;
     private final TwilioVerifyService twilioVerifyService;
+    private final PhoneVerificationGuard phoneVerificationGuard;
     private final B2bMembershipApplicationRepository b2bApplicationRepo;
 
     public UserProfileService(UserRepository userRepo,
@@ -45,6 +47,7 @@ public class UserProfileService {
                                CountryRepository countryRepo,
                                ContaboObjectService contaboObjectService,
                                TwilioVerifyService twilioVerifyService,
+                              PhoneVerificationGuard phoneVerificationGuard,
                                B2bMembershipApplicationRepository b2bApplicationRepo) {
         this.userRepo = userRepo;
         this.profilesRepo = profilesRepo;
@@ -53,6 +56,7 @@ public class UserProfileService {
         this.countryRepo = countryRepo;
         this.contaboObjectService = contaboObjectService;
         this.twilioVerifyService = twilioVerifyService;
+        this.phoneVerificationGuard = phoneVerificationGuard;
         this.b2bApplicationRepo = b2bApplicationRepo;
     }
 
@@ -151,7 +155,11 @@ public class UserProfileService {
         Users user = findUser(userId);
         UserProfiles profile = findOrCreateProfile(user);
 
-        String phone = phoneNumber.trim();
+        // Validated, destination-checked and quota-counted BEFORE anything is persisted or sent —
+        // an SMS costs real money, and this endpoint was drained by an SMS-pumping attack when it
+        // had none of those checks. Returns the normalised number, which is what we store.
+        String phone = phoneVerificationGuard.check(userId, phoneNumber);
+
         if (!phone.equals(profile.getPhoneNumber())) {
             profile.setPhoneNumber(phone);
             profile.setPhoneVerified(false);

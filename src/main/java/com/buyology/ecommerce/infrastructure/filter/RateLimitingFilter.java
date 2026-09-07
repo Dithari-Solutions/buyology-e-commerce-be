@@ -339,6 +339,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 || path.contains("reset-password")
                 || path.contains("resend-otp")
                 || path.contains("verify-otp")
+                // "send-otp" matched none of the patterns above — not "verify-otp", not
+                // "resend-otp" — so the one endpoint here that SPENDS MONEY per call sat in
+                // a weaker tier than the ones that merely check a code. That is the gap an
+                // SMS-pumping attack was run through.
+                || path.contains("send-otp")
                 || path.startsWith("/api/supplier/auth/")     // supplier login / password setup
                 || path.startsWith("/api/membership/auth/")) { // B2B token-gated password setup
             return RateLimitTier.AUTH_SENSITIVE;
