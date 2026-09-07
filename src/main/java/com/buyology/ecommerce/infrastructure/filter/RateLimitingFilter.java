@@ -350,6 +350,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 // step-1 creates the application AND sends the first message, so it was sitting in
                 // the 300/min public tier with no account required to reach it.
                 || path.startsWith("/api/supplier/apply/")
+                // The public contact-verification endpoints. /api/verify/phone/start is permitAll
+                // and spends money on every call, and its path contains neither "send-otp" nor
+                // "verify-otp", so it was falling through to the 300/min public tier.
+                || path.startsWith("/api/verify/")
                 || path.startsWith("/api/membership/auth/")) { // B2B token-gated password setup
             return RateLimitTier.AUTH_SENSITIVE;
         }

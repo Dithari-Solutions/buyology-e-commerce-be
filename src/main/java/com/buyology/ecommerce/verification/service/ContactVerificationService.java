@@ -34,16 +34,19 @@ public class ContactVerificationService {
     private final TwilioVerifyService twilioVerify;
     private final EmailService emailService;
     private final OtpProperties otpProperties;
+    private final PhoneVerificationGuard guard;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public ContactVerificationService(ContactVerificationRepository repo,
                                       TwilioVerifyService twilioVerify,
                                       EmailService emailService,
-                                      OtpProperties otpProperties) {
+                                      OtpProperties otpProperties,
+                                      PhoneVerificationGuard guard) {
         this.repo = repo;
         this.twilioVerify = twilioVerify;
         this.emailService = emailService;
         this.otpProperties = otpProperties;
+        this.guard = guard;
     }
 
     // ── Email ─────────────────────────────────────────────────────────────────
@@ -111,9 +114,23 @@ public class ContactVerificationService {
 
     // ── Phone (Twilio Verify) ──────────────────────────────────────────────────
 
+    /**
+     * Sends a verification code to a phone number for an anonymous caller.
+     *
+     * <p>This is the most exposed money-spending path in the application: POST /api/verify/phone/start
+     * is permitAll, so anyone on the internet can reach it without an account, and it was matched by
+     * none of the rate limiter's credential patterns. It is the shape the SMS-pumping attack needed,
+     * and it survived the first round of fixes because those covered the two callers that had a user
+     * id to point at.
+     *
+     * <p>Having no account is exactly why it needs the guard most, so the quota subject is the number
+     * itself: the per-subject daily cap then acts as a second, stricter ceiling on top of the hourly
+     * per-number one. The country allow-list does the heavy lifting either way.
+     */
     @Transactional
     public void startPhone(String phoneRaw) {
-        twilioVerify.startVerification(normalizePhone(phoneRaw));
+        String phone = guard.check("public-verify:" + normalizePhone(phoneRaw), phoneRaw);
+        twilioVerify.startVerification(phone);
     }
 
     @Transactional
