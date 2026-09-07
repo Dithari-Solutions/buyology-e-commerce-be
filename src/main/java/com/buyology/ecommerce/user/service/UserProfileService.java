@@ -158,7 +158,7 @@ public class UserProfileService {
         // Validated, destination-checked and quota-counted BEFORE anything is persisted or sent —
         // an SMS costs real money, and this endpoint was drained by an SMS-pumping attack when it
         // had none of those checks. Returns the normalised number, which is what we store.
-        String phone = phoneVerificationGuard.check(userId, phoneNumber);
+        String phone = phoneVerificationGuard.check(String.valueOf(userId), phoneNumber);
 
         if (!phone.equals(profile.getPhoneNumber())) {
             profile.setPhoneNumber(phone);

@@ -367,7 +367,7 @@ public class SupplierApplicationService {
             otp.setChannel(OtpChannel.PHONE);
             otp.setTarget(app.getPhoneNumber());
             otpRepository.save(otp);
-            smsService.sendOtp(app.getPhoneNumber(), otpCode);
+            smsService.sendOtp(app.getPhoneNumber(), otpCode, String.valueOf(app.getId()));
         } else {
             otp.setChannel(OtpChannel.EMAIL);
             otp.setTarget(app.getEmail());

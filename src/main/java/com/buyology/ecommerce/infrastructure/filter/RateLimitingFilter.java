@@ -345,6 +345,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 // SMS-pumping attack was run through.
                 || path.contains("send-otp")
                 || path.startsWith("/api/supplier/auth/")     // supplier login / password setup
+                // ...and the APPLY form, which is permitAll and sends an SMS to whatever number it
+                // is handed. Only its resend-otp/verify-otp steps matched the patterns above;
+                // step-1 creates the application AND sends the first message, so it was sitting in
+                // the 300/min public tier with no account required to reach it.
+                || path.startsWith("/api/supplier/apply/")
                 || path.startsWith("/api/membership/auth/")) { // B2B token-gated password setup
             return RateLimitTier.AUTH_SENSITIVE;
         }

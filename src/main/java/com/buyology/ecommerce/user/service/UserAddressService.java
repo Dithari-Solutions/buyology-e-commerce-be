@@ -82,7 +82,7 @@ public class UserAddressService {
         otp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
         phoneOtpRepo.save(otp);
 
-        smsService.sendOtp(phoneNumber, otpCode);
+        smsService.sendOtp(phoneNumber, otpCode, String.valueOf(internalUserId));
     }
 
     // =========================================================================

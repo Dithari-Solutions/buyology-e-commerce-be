@@ -11,7 +11,6 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -87,11 +86,14 @@ public class PhoneVerificationGuard {
     /**
      * Normalises the number and throws unless this send is allowed.
      *
+     * @param quotaSubject whoever is accountable: a user id for a signed-in customer, an
+     *                     application id for the unauthenticated supplier form. Both must be
+     *                     counted — that form needs no account at all.
      * @return the normalised E.164 number to send to, which is what should be persisted
      * @throws IllegalArgumentException if the number is unusable or the destination is not served
      * @throws IllegalStateException    if a quota is exhausted or the counters cannot be read
      */
-    public String check(UUID userId, String rawPhoneNumber) {
+    public String check(String quotaSubject, String rawPhoneNumber) {
         String phone = normalise(rawPhoneNumber);
 
         if (!E164.matcher(phone).matches()) {
@@ -104,8 +106,8 @@ public class PhoneVerificationGuard {
         }
 
         if (allowedCountryCodes.stream().noneMatch(cc -> phone.startsWith("+" + cc))) {
-            log.warn("[OTP-GUARD] Blocked send to unserved destination {} for user {}",
-                    mask(phone), userId);
+            log.warn("[OTP-GUARD] Blocked send to unserved destination {} for {}",
+                    mask(phone), quotaSubject);
             throw new IllegalArgumentException(
                     "We can only send verification codes to UAE numbers at the moment.");
         }
@@ -113,7 +115,7 @@ public class PhoneVerificationGuard {
         // Quotas last: they cost a Redis round trip, and the two checks above are free.
         consume(NUMBER_PREFIX + phone, maxPerNumberPerHour, NUMBER_WINDOW,
                 "Too many codes requested for this number. Please wait an hour and try again.");
-        consume(ACCOUNT_PREFIX + userId, maxPerAccountPerDay, DAY,
+        consume(ACCOUNT_PREFIX + quotaSubject, maxPerAccountPerDay, DAY,
                 "You have requested too many verification codes today. Please try again tomorrow.");
         consume(GLOBAL_PREFIX + LocalDate.now(ZoneOffset.UTC), maxGlobalPerDay, DAY,
                 "Verification is temporarily unavailable. Please try again later.");
