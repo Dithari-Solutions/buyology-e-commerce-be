@@ -26,9 +26,9 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li><b>Shape</b> — a number that is not valid E.164 never reaches Twilio. A malformed number
  *       used to cost a live API round trip to learn what a regex knows for free.</li>
- *   <li><b>Destination</b> — only allow-listed country codes. Pumping is only profitable to
- *       expensive destinations, and Buyology sells in one country. This is the gate that makes the
- *       attack unprofitable rather than merely slower.</li>
+ *   <li><b>Destination</b> — only allow-listed country codes. Pumping pays out on expensive
+ *       destinations, and none of the ones it was aimed at are markets of ours. This is the gate
+ *       that makes the attack unprofitable rather than merely slower.</li>
  *   <li><b>Quota</b> — per number, per account, and a global daily ceiling. The first two stop the
  *       obvious loops; the global cap is a circuit breaker, so the worst case of a bypass nobody
  *       has thought of yet is one bounded day of spend rather than an open tap.</li>
@@ -57,9 +57,14 @@ public class PhoneVerificationGuard {
     private final StringRedisTemplate redis;
 
     /**
-     * Country codes we will send to, without the +. Defaults to the UAE alone because that is
-     * where Buyology sells; widening it is a property change, not a deploy. Every entry added
-     * here is a destination an attacker may target, so add deliberately.
+     * Country codes we will send to, without the +. Defaults to the markets Buyology actually
+     * serves — the GCC, India and Azerbaijan — and widening it is a property change, not a deploy.
+     *
+     * <p>The list is a security control rather than a formality: every entry is a destination an
+     * attacker can aim at, so a country belongs here when it has customers, not in case it might.
+     * It still defeats the attack it was written for, because the pumped traffic went to Zimbabwe,
+     * Afghanistan, Tajikistan, Myanmar, Libya, Uzbekistan, Slovenia and Malaysia — none of them
+     * anywhere we sell.
      */
     private final List<String> allowedCountryCodes;
 
@@ -69,7 +74,7 @@ public class PhoneVerificationGuard {
 
     public PhoneVerificationGuard(
             StringRedisTemplate redis,
-            @Value("${verification.allowed-country-codes:971}") String allowedCountryCodes,
+            @Value("${verification.allowed-country-codes:971,966,973,965,968,974,91,994}") String allowedCountryCodes,
             @Value("${verification.max-sends-per-number-per-hour:3}") int maxPerNumberPerHour,
             @Value("${verification.max-sends-per-account-per-day:5}") int maxPerAccountPerDay,
             @Value("${verification.max-sends-per-day:500}") int maxGlobalPerDay) {
@@ -109,7 +114,8 @@ public class PhoneVerificationGuard {
             log.warn("[OTP-GUARD] Blocked send to unserved destination {} for {}",
                     mask(phone), quotaSubject);
             throw new IllegalArgumentException(
-                    "We can only send verification codes to UAE numbers at the moment.");
+                    "We cannot send a verification code to that country yet. "
+                            + "Please use a number from a country we deliver to.");
         }
 
         // Quotas last: they cost a Redis round trip, and the two checks above are free.
