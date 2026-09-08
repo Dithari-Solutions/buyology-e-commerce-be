@@ -252,7 +252,12 @@ public class UserProfileService {
         // (paymentReady=true) but payment-init throws on a missing lastName.
         if (isBlank(user.getFirstName()))         missing.add("firstName");
         if (isBlank(profile.getPhoneNumber()))    missing.add("phoneNumber");
-        else if (!profile.isPhoneVerified())      missing.add("phoneVerification");
+        // Only demand a VERIFIED phone while we can actually send a code. With SMS switched off,
+        // requiring it would bar every customer from the giveaway at a step that cannot be
+        // completed — the number is still collected, it is simply not confirmed yet.
+        else if (!profile.isPhoneVerified() && phoneVerificationGuard.isPhoneOtpEnabled()) {
+            missing.add("phoneVerification");
+        }
         if (requireAddress && addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
 
         if (!missing.isEmpty()) {

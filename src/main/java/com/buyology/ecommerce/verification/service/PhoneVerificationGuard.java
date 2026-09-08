@@ -68,17 +68,29 @@ public class PhoneVerificationGuard {
      */
     private final List<String> allowedCountryCodes;
 
+    /**
+     * Master switch for outbound verification SMS.
+     *
+     * <p>Turned off while the Twilio account is suspended after an SMS-pumping attack, so nothing
+     * can attempt a send — and, more importantly, so no customer is stopped at a step that cannot
+     * succeed. It lives here because this guard is the one place every SMS path already passes
+     * through: the profile OTP, the public contact-verification endpoint and SmsService's callers.
+     */
+    private final boolean phoneOtpEnabled;
+
     private final int maxPerNumberPerHour;
     private final int maxPerAccountPerDay;
     private final int maxGlobalPerDay;
 
     public PhoneVerificationGuard(
             StringRedisTemplate redis,
+            @Value("${verification.phone-otp-enabled:true}") boolean phoneOtpEnabled,
             @Value("${verification.allowed-country-codes:971,966,973,965,968,974,91,994}") String allowedCountryCodes,
             @Value("${verification.max-sends-per-number-per-hour:3}") int maxPerNumberPerHour,
             @Value("${verification.max-sends-per-account-per-day:5}") int maxPerAccountPerDay,
             @Value("${verification.max-sends-per-day:500}") int maxGlobalPerDay) {
         this.redis = redis;
+        this.phoneOtpEnabled = phoneOtpEnabled;
         this.allowedCountryCodes = Arrays.stream(allowedCountryCodes.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
@@ -99,6 +111,11 @@ public class PhoneVerificationGuard {
      * @throws IllegalStateException    if a quota is exhausted or the counters cannot be read
      */
     public String check(String quotaSubject, String rawPhoneNumber) {
+        if (!phoneOtpEnabled) {
+            throw new IllegalStateException(
+                    "Phone verification is temporarily unavailable. You do not need it right now.");
+        }
+
         String phone = normalise(rawPhoneNumber);
 
         if (!E164.matcher(phone).matches()) {
@@ -127,6 +144,11 @@ public class PhoneVerificationGuard {
                 "Verification is temporarily unavailable. Please try again later.");
 
         return phone;
+    }
+
+    /** Whether verification SMS is switched on at all — callers gate their own requirements on this. */
+    public boolean isPhoneOtpEnabled() {
+        return phoneOtpEnabled;
     }
 
     /**
