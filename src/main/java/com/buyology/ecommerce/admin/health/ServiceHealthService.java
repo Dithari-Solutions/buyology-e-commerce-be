@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.admin.health;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +12,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,13 +53,16 @@ public class ServiceHealthService {
 
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
+    private final MeterRegistry meters;
     private final int otpDailyCap;
 
     public ServiceHealthService(JdbcTemplate jdbc,
                                 StringRedisTemplate redis,
+                                MeterRegistry meters,
                                 @Value("${verification.max-sends-per-day:500}") int otpDailyCap) {
         this.jdbc = jdbc;
         this.redis = redis;
+        this.meters = meters;
         this.otpDailyCap = otpDailyCap;
     }
 
@@ -65,6 +72,8 @@ public class ServiceHealthService {
         out.put("signupClusters", signupClusters());
         out.put("payments", payments());
         out.put("integrations", integrations());
+        out.put("http", http());
+        out.put("checkout", checkout());
         return out;
     }
 
@@ -202,6 +211,147 @@ public class ServiceHealthService {
                 "SELECT COALESCE(ROUND(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 60), -1) "
                         + "FROM orders WHERE status = 'PAID' AND quiqup_order_id IS NULL "
                         + "AND created_at >= NOW() - INTERVAL '7 days'", "undispatched orders"));
+        return m;
+    }
+
+
+    // ── HTTP status codes ─────────────────────────────────────────────────────
+
+    /**
+     * What the application has actually been answering, by status code.
+     *
+     * <p>Read from Micrometer's {@code http.server.requests} rather than by scraping our own
+     * /actuator/prometheus over HTTP — same numbers, no round trip, and it cannot be affected by the
+     * thread starvation it is meant to reveal.
+     *
+     * <p>These are CUMULATIVE SINCE JVM START, which is why uptime is reported alongside them. A
+     * count without a window is not a rate, and presenting it as one would be the same false
+     * precision this page exists to avoid. The ratios are the part worth reading: 5xx as a share of
+     * all traffic, and which endpoints produce them.
+     *
+     * <p>Three codes get called out by name because each is a different kind of warning. 5xx is us
+     * breaking. 401 in bulk on one endpoint is credential stuffing or an integration with a stale
+     * token. 429 is the rate limiter doing its job — which, spiking, is the earliest cheap signal of
+     * exactly the abuse that drained the Twilio balance.
+     */
+    private Map<String, Object> http() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        try {
+            Collection<Timer> timers = meters.find("http.server.requests").timers();
+            if (timers.isEmpty()) {
+                m.put("available", false);
+                m.put("note", "No request metrics yet — the application has served nothing since start.");
+                return m;
+            }
+
+            long total = 0, c2xx = 0, c3xx = 0, c4xx = 0, c5xx = 0;
+            long unauthorized = 0, forbidden = 0, throttled = 0;
+            Map<String, Long> serverErrorsByUri = new LinkedHashMap<>();
+            Map<String, Long> unauthorizedByUri = new LinkedHashMap<>();
+
+            for (Timer t : timers) {
+                long n = t.count();
+                if (n == 0) continue;
+                total += n;
+                String status = t.getId().getTag("status");
+                String uri = t.getId().getTag("uri");
+                if (status == null) continue;
+
+                switch (status.charAt(0)) {
+                    case '2' -> c2xx += n;
+                    case '3' -> c3xx += n;
+                    case '4' -> c4xx += n;
+                    case '5' -> c5xx += n;
+                    default -> { }
+                }
+                if ("401".equals(status)) {
+                    unauthorized += n;
+                    if (uri != null) unauthorizedByUri.merge(uri, n, Long::sum);
+                } else if ("403".equals(status)) {
+                    forbidden += n;
+                } else if ("429".equals(status)) {
+                    throttled += n;
+                }
+                if (status.startsWith("5") && uri != null) {
+                    serverErrorsByUri.merge(uri, n, Long::sum);
+                }
+            }
+
+            m.put("available", true);
+            m.put("uptimeHours", uptimeHours());
+            m.put("total", total);
+            m.put("status2xx", c2xx);
+            m.put("status3xx", c3xx);
+            m.put("status4xx", c4xx);
+            m.put("status5xx", c5xx);
+            m.put("serverErrorRatePercent", total == 0 ? 0 : Math.round(c5xx * 10000.0 / total) / 100.0);
+            m.put("unauthorized401", unauthorized);
+            m.put("forbidden403", forbidden);
+            m.put("throttled429", throttled);
+            m.put("topServerErrors", topN(serverErrorsByUri, 8));
+            m.put("topUnauthorized", topN(unauthorizedByUri, 8));
+            m.put("caveat", "Counts are cumulative since the application started, not a rate. "
+                    + "Read them against uptime, and watch the ratios rather than the totals.");
+        } catch (Exception e) {
+            log.warn("[HEALTH] HTTP metrics unavailable: {}", e.getMessage());
+            m.put("available", false);
+        }
+        return m;
+    }
+
+    private double uptimeHours() {
+        try {
+            var gauge = meters.find("process.uptime").gauge();
+            return gauge == null ? -1 : Math.round(gauge.value() / 36.0) / 100.0;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** The busiest offenders first — a long tail of one-offs is noise, a concentrated spike is not. */
+    private List<Map<String, Object>> topN(Map<String, Long> counts, int n) {
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder()))
+                .limit(n)
+                .map(e -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("uri", e.getKey());
+                    row.put("count", e.getValue());
+                    return row;
+                })
+                .toList();
+    }
+
+    // ── Checkout that never completed ────────────────────────────────────────
+
+    /**
+     * Orders that reached checkout and stopped there.
+     *
+     * <p>Distinct from the settlement backlog above: that panel asks whether WE failed to record a
+     * payment the gateway took, this one asks how many customers walked away mid-payment. Both
+     * matter and they are not the same number — an order can be abandoned by the customer, or
+     * stranded by a webhook we never processed, and only the pair distinguishes them.
+     *
+     * <p>Paid and failed counts sit alongside deliberately, because "18 pending" means nothing
+     * without knowing whether 20 or 2000 orders were placed today.
+     */
+    private Map<String, Object> checkout() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("pendingPaymentTotal", scalar(
+                "SELECT COUNT(*) FROM orders WHERE status = 'PENDING_PAYMENT'", "pending orders"));
+        m.put("pendingPayment24h", scalar(
+                "SELECT COUNT(*) FROM orders WHERE status = 'PENDING_PAYMENT' "
+                        + "AND created_at >= NOW() - INTERVAL '24 hours'", "pending orders 24h"));
+        m.put("oldestPendingHours", scalar(
+                "SELECT COALESCE(ROUND(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 3600), -1) "
+                        + "FROM orders WHERE status = 'PENDING_PAYMENT'", "oldest pending order"));
+        m.put("paid24h", scalar(
+                "SELECT COUNT(*) FROM orders WHERE status <> 'PENDING_PAYMENT' AND status <> 'CANCELLED' "
+                        + "AND status <> 'FAILED' AND created_at >= NOW() - INTERVAL '24 hours'",
+                "paid orders 24h"));
+        m.put("failed24h", scalar(
+                "SELECT COUNT(*) FROM orders WHERE status = 'FAILED' "
+                        + "AND created_at >= NOW() - INTERVAL '24 hours'", "failed orders 24h"));
         return m;
     }
 
