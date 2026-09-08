@@ -310,6 +310,7 @@ public class UserProfileService {
         res.setLastName(user.getLastName());
         res.setPhoneNumber(profile.getPhoneNumber());
         res.setPhoneVerified(profile.isPhoneVerified());
+        res.setPhoneVerificationAvailable(phoneVerificationGuard.isPhoneOtpEnabled());
         res.setDateOfBirth(profile.getDateOfBirth());
         String avatarUrl = null;
         if (profile.getAvatarUrl() != null) {

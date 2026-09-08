@@ -13,6 +13,15 @@ public class ProfileResponse {
     private String lastName;
     private String phoneNumber;
     private boolean phoneVerified;
+
+    /**
+     * Whether the customer can DO anything about an unverified number right now.
+     *
+     * <p>Separate from {@link #phoneVerified} on purpose: while verification SMS is switched off,
+     * a number stays unverified and the account page must still say so — but offering a "Verify"
+     * button that cannot succeed is worse than saying plainly that it is unavailable.
+     */
+    private boolean phoneVerificationAvailable;
     private LocalDate dateOfBirth;
     private String avatarUrl;
 
@@ -78,6 +87,11 @@ public class ProfileResponse {
 
     public boolean isPhoneVerified() { return phoneVerified; }
     public void setPhoneVerified(boolean phoneVerified) { this.phoneVerified = phoneVerified; }
+
+    public boolean isPhoneVerificationAvailable() { return phoneVerificationAvailable; }
+    public void setPhoneVerificationAvailable(boolean phoneVerificationAvailable) {
+        this.phoneVerificationAvailable = phoneVerificationAvailable;
+    }
 
     public LocalDate getDateOfBirth() { return dateOfBirth; }
     public void setDateOfBirth(LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
