@@ -78,6 +78,7 @@ public class AdminUserService {
     private final AuthCredentialRepository authCredentialRepository;
     private final UserAddressRepository userAddressRepository;
     private final FavoriteRepository favoriteRepository;
+    private final com.buyology.ecommerce.giveaway.repository.GiveawayEntryRepository giveawayEntryRepository;
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
     private final CartItemSpecSelectionRepository specSelectionRepository;
@@ -91,6 +92,7 @@ public class AdminUserService {
                             AuthCredentialRepository authCredentialRepository,
                             UserAddressRepository userAddressRepository,
                             FavoriteRepository favoriteRepository,
+                             com.buyology.ecommerce.giveaway.repository.GiveawayEntryRepository giveawayEntryRepository,
                             CartRepository cartRepository,
                             CartItemRepository cartItemRepository,
                             CartItemSpecSelectionRepository specSelectionRepository,
@@ -103,6 +105,7 @@ public class AdminUserService {
         this.authCredentialRepository = authCredentialRepository;
         this.userAddressRepository = userAddressRepository;
         this.favoriteRepository = favoriteRepository;
+        this.giveawayEntryRepository = giveawayEntryRepository;
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
@@ -757,6 +760,20 @@ public class AdminUserService {
         detail.setRegistrationDevice(user.getRegistrationDevice());
         detail.setFavorites(favoriteListResponse);
         detail.setActiveCart(cartResponse);
+
+        // Whether they are in the draw, and as whom. Absent for most customers, so it is looked up
+        // rather than joined — and a failure here must not cost the whole page.
+        try {
+            giveawayEntryRepository.findByCampaignAndUserId(
+                    com.buyology.ecommerce.giveaway.domain.GiveawayEntry.DEFAULT_CAMPAIGN, user.getId())
+                    .ifPresent(entry -> {
+                        detail.setInstagramHandle(entry.getInstagramHandle());
+                        detail.setInstagramHandleRaw(entry.getInstagramHandleRaw());
+                        detail.setGiveawayEnteredAt(entry.getCreatedAt());
+                    });
+        } catch (Exception e) {
+            log.warn("Could not read giveaway entry for user {}: {}", user.getId(), e.getMessage());
+        }
 
         return ApiResponse.success(detail, "User detail retrieved");
     }

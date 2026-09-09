@@ -34,6 +34,18 @@ public class AdminUserDetailResponse {
     // ── Active cart ───────────────────────────────────────────────────────────
     private CartResponse activeCart;
 
+    /**
+     * The customer's giveaway entry, when they have one.
+     *
+     * <p>The handle lives on the entry rather than the profile, so it exists only for people who
+     * actually completed entry — support asking "did they enter, and as whom" has nowhere else to
+     * look. Null means no entry, which is not the same as no Instagram account.
+     */
+    private String instagramHandle;
+    /** Exactly what the customer typed, before normalisation, so a support query can be matched. */
+    private String instagramHandleRaw;
+    private Instant giveawayEnteredAt;
+
     public AdminUserDetailResponse() {
     }
 
@@ -81,4 +93,13 @@ public class AdminUserDetailResponse {
 
     public CartResponse getActiveCart() { return activeCart; }
     public void setActiveCart(CartResponse activeCart) { this.activeCart = activeCart; }
+
+    public String getInstagramHandle() { return instagramHandle; }
+    public void setInstagramHandle(String instagramHandle) { this.instagramHandle = instagramHandle; }
+
+    public String getInstagramHandleRaw() { return instagramHandleRaw; }
+    public void setInstagramHandleRaw(String v) { this.instagramHandleRaw = v; }
+
+    public Instant getGiveawayEnteredAt() { return giveawayEnteredAt; }
+    public void setGiveawayEnteredAt(Instant giveawayEnteredAt) { this.giveawayEnteredAt = giveawayEnteredAt; }
 }
