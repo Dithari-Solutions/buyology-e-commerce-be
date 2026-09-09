@@ -228,6 +228,11 @@ public final class PermissionConstants {
     public static final String QUIQUP_EVENT_DELETE = "quiqup:event:delete";
 
     // ── Marketing ─────────────────────────────────────────────────────────────────
+    // Compose and send an email to customers, either a selected set or everyone.
+    // Kept separate from every other marketing permission because it is the only one that reaches
+    // customers directly and cannot be undone once sent.
+    public static final String MARKETING_EMAIL_SEND = "marketing:email:send";
+
     // View giveaway entrants: who entered, their Instagram handle and contact details.
     // Entrant rows carry customer email and phone, which is why reading them is separable from
     // running the draw.

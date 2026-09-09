@@ -111,6 +111,36 @@ public class EmailService {
         }
     }
 
+    /**
+     * Sends one campaign email and reports whether the provider accepted it.
+     *
+     * <p>Deliberately NOT {@code @Async} and deliberately not swallowing the failure, unlike its
+     * newsletter sibling below. The caller is a campaign worker that records an outcome per
+     * recipient, and a method that returns void after logging a warning would make that record a
+     * guess — "sent 600" would mean "iterated 600 times", which is what the existing broadcasts
+     * report today.
+     *
+     * <p>{@code {{CONTENT}}} is substituted LAST so that an admin body containing the literal text
+     * of another token cannot be rewritten by a later replace.
+     *
+     * @return true only if SendGrid accepted the message
+     */
+    public boolean sendCustomerCampaignEmail(String toEmail, String subject, String htmlContent,
+                                             String unsubscribeUrl) {
+        try {
+            String template = loadTemplate("static/newsletter-email.html");
+            String html = template
+                    .replace("{{TITLE}}", subject == null ? "" : subject)
+                    .replace("{{UNSUBSCRIBE_URL}}", unsubscribeUrl == null ? "" : unsubscribeUrl)
+                    .replace("{{CONTENT}}", htmlContent == null ? "" : htmlContent);
+            send(toEmail, subject, html);
+            return true;
+        } catch (Exception e) {
+            log.warn("Campaign email to {} failed: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
     @Async
     public void sendNewsletterEmail(String toEmail, String title, String htmlContent, String unsubscribeUrl) {
         try {

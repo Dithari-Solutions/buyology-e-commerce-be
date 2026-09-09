@@ -135,6 +135,7 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.GAME_QUIZ_UPDATE,
             PermissionConstants.GAME_QUIZ_DELETE,
             PermissionConstants.GAME_REWARD_UPDATE,
+            PermissionConstants.MARKETING_EMAIL_SEND,
             PermissionConstants.GIVEAWAY_ENTRY_READ,
             PermissionConstants.GIVEAWAY_CAMPAIGN_UPDATE,
             PermissionConstants.NEWSLETTER_ARTICLE_READ,
