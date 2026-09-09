@@ -189,6 +189,8 @@ services:
       CONTABO_S3_SECRET_KEY: ${CONTABO_S3_SECRET_KEY}
       CONTABO_S3_BUCKET_NAME: ${CONTABO_S3_BUCKET_NAME}
       CONTABO_S3_PUBLIC_URL: ${CONTABO_S3_PUBLIC_URL}
+      # Optional: unset means images keep being served straight from the object store.
+      CONTABO_CDN_URL: ${CONTABO_CDN_URL:-}
 
       # ── Courier service integration ──
       COURIER_SERVICE_PRIVATE_KEY: ${COURIER_SERVICE_PRIVATE_KEY}
