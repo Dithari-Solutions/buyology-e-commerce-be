@@ -9,6 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import org.springframework.beans.factory.annotation.Qualifier;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
@@ -84,15 +85,19 @@ public class ContaboObjectService {
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
+    /** Signs browser-facing GET URLs, for the CDN hostname when one is configured. */
+    private final S3Presigner cdnPresigner;
     private final ContaboProperties properties;
     private final WatermarkService watermarkService;
     private final StringRedisTemplate redis;
 
     public ContaboObjectService(S3Client s3Client, S3Presigner s3Presigner,
+                                @Qualifier("cdnPresigner") S3Presigner cdnPresigner,
                                 ContaboProperties properties, WatermarkService watermarkService,
                                 StringRedisTemplate redis) {
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
+        this.cdnPresigner = cdnPresigner;
         this.properties = properties;
         this.watermarkService = watermarkService;
         this.redis = redis;
@@ -238,42 +243,8 @@ public class ContaboObjectService {
                 .getObjectRequest(getObjectRequest)
                 .build();
 
-        return toCdn(s3Presigner.presignGetObject(presignRequest).url().toString());
-    }
-
-    /**
-     * Swaps the object store's hostname for our own CDN hostname, leaving the path and query
-     * untouched.
-     *
-     * <p>Two problems, one change. The browser was negotiating TLS directly with
-     * contabostorage.com, whose chain roots in Sectigo R46 — a CA that only reached Android's
-     * trust store in 14 and iOS in 16.1, so older devices silently failed every image while the
-     * site itself loaded fine. And nothing between the object store and the screen was caching,
-     * because the object store is not a CDN.
-     *
-     * <p>The SigV4 signature covers the Host header, so this only works because the edge rewrites
-     * Host back to the object store before forwarding: the signature is computed for the origin
-     * hostname, the browser never sees it, and the store validates against what it was signed
-     * with. Uploads are deliberately NOT rewritten — a presigned PUT goes direct, where no edge
-     * body-size limit applies.
-     *
-     * <p>The query string is preserved by string surgery rather than URI reassembly on purpose:
-     * re-encoding a signed query is an excellent way to invalidate the signature.
-     */
-    private String toCdn(String presignedUrl) {
-        String cdn = properties.getCdnUrl();
-        if (cdn == null || cdn.isBlank()) return presignedUrl;
-        try {
-            String base = cdn.endsWith("/") ? cdn.substring(0, cdn.length() - 1) : cdn;
-            int schemeEnd = presignedUrl.indexOf("://");
-            if (schemeEnd < 0) return presignedUrl;
-            int pathStart = presignedUrl.indexOf('/', schemeEnd + 3);
-            return pathStart < 0 ? base : base + presignedUrl.substring(pathStart);
-        } catch (Exception e) {
-            // A misconfigured CDN must never cost us every image on the site.
-            log.warn("[CDN] Could not rewrite image host, serving origin URL: {}", e.getMessage());
-            return presignedUrl;
-        }
+        // Origin, not the CDN: this is an admin file export, not an image a browser renders.
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
     /**
@@ -423,7 +394,9 @@ public class ContaboObjectService {
                 .getObjectRequest(getObjectRequest.build())
                 .build();
 
-        return s3Presigner.presignGetObject(presignRequest).url().toString();
+        // Every browser-facing image URL comes from here, so this is the single place the CDN
+        // hostname has to be applied.
+        return cdnPresigner.presignGetObject(presignRequest).url().toString();
     }
 
     /**
