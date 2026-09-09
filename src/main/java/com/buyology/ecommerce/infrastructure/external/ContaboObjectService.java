@@ -238,7 +238,42 @@ public class ContaboObjectService {
                 .getObjectRequest(getObjectRequest)
                 .build();
 
-        return s3Presigner.presignGetObject(presignRequest).url().toString();
+        return toCdn(s3Presigner.presignGetObject(presignRequest).url().toString());
+    }
+
+    /**
+     * Swaps the object store's hostname for our own CDN hostname, leaving the path and query
+     * untouched.
+     *
+     * <p>Two problems, one change. The browser was negotiating TLS directly with
+     * contabostorage.com, whose chain roots in Sectigo R46 — a CA that only reached Android's
+     * trust store in 14 and iOS in 16.1, so older devices silently failed every image while the
+     * site itself loaded fine. And nothing between the object store and the screen was caching,
+     * because the object store is not a CDN.
+     *
+     * <p>The SigV4 signature covers the Host header, so this only works because the edge rewrites
+     * Host back to the object store before forwarding: the signature is computed for the origin
+     * hostname, the browser never sees it, and the store validates against what it was signed
+     * with. Uploads are deliberately NOT rewritten — a presigned PUT goes direct, where no edge
+     * body-size limit applies.
+     *
+     * <p>The query string is preserved by string surgery rather than URI reassembly on purpose:
+     * re-encoding a signed query is an excellent way to invalidate the signature.
+     */
+    private String toCdn(String presignedUrl) {
+        String cdn = properties.getCdnUrl();
+        if (cdn == null || cdn.isBlank()) return presignedUrl;
+        try {
+            String base = cdn.endsWith("/") ? cdn.substring(0, cdn.length() - 1) : cdn;
+            int schemeEnd = presignedUrl.indexOf("://");
+            if (schemeEnd < 0) return presignedUrl;
+            int pathStart = presignedUrl.indexOf('/', schemeEnd + 3);
+            return pathStart < 0 ? base : base + presignedUrl.substring(pathStart);
+        } catch (Exception e) {
+            // A misconfigured CDN must never cost us every image on the site.
+            log.warn("[CDN] Could not rewrite image host, serving origin URL: {}", e.getMessage());
+            return presignedUrl;
+        }
     }
 
     /**

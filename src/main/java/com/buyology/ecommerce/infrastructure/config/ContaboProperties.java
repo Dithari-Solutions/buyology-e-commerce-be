@@ -12,6 +12,13 @@ public class ContaboProperties {
     private String bucketName;
     private String publicUrl;
 
+    /**
+     * Public base URL images are served from, e.g. https://cdn.buyology.online — a CDN hostname
+     * that fronts the object store. Blank means serve straight from Contabo, which is the old
+     * behaviour and the safe default.
+     */
+    private String cdnUrl;
+
     public String getEndpoint() {
         return endpoint;
     }
@@ -42,6 +49,14 @@ public class ContaboProperties {
 
     public void setBucketName(String bucketName) {
         this.bucketName = bucketName;
+    }
+
+    public String getCdnUrl() {
+        return cdnUrl;
+    }
+
+    public void setCdnUrl(String cdnUrl) {
+        this.cdnUrl = cdnUrl;
     }
 
     public String getPublicUrl() {
