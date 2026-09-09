@@ -135,6 +135,8 @@ public class RoleDataInitializer implements ApplicationRunner {
             PermissionConstants.GAME_QUIZ_UPDATE,
             PermissionConstants.GAME_QUIZ_DELETE,
             PermissionConstants.GAME_REWARD_UPDATE,
+            PermissionConstants.GIVEAWAY_ENTRY_READ,
+            PermissionConstants.GIVEAWAY_CAMPAIGN_UPDATE,
             PermissionConstants.NEWSLETTER_ARTICLE_READ,
             PermissionConstants.NEWSLETTER_ARTICLE_CREATE,
             PermissionConstants.NEWSLETTER_ARTICLE_MODERATE,
@@ -449,6 +451,10 @@ public class RoleDataInitializer implements ApplicationRunner {
     private static final List<String> MARKETING_PERMISSIONS = List.of(
             // Campaign work is judged on traffic, so marketing gets the visitor counters.
             PermissionConstants.ANALYTICS_VISITOR_READ,
+            // The giveaway is a marketing campaign, so marketing runs it rather than asking a
+            // superadmin to open and close it.
+            PermissionConstants.GIVEAWAY_ENTRY_READ,
+            PermissionConstants.GIVEAWAY_CAMPAIGN_UPDATE,
             PermissionConstants.PROMO_READ,
             PermissionConstants.PROMO_CREATE,
             PermissionConstants.PROMO_UPDATE,

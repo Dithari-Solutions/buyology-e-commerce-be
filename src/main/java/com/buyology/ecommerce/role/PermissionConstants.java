@@ -228,6 +228,15 @@ public final class PermissionConstants {
     public static final String QUIQUP_EVENT_DELETE = "quiqup:event:delete";
 
     // ── Marketing ─────────────────────────────────────────────────────────────────
+    // View giveaway entrants: who entered, their Instagram handle and contact details.
+    // Entrant rows carry customer email and phone, which is why reading them is separable from
+    // running the draw.
+    public static final String GIVEAWAY_ENTRY_READ = "giveaway:entry:read";
+
+    // Open or close the giveaway. Closing it hides every giveaway surface on the site and in the
+    // app and stops the entry API accepting anyone, so it ends the campaign for real.
+    public static final String GIVEAWAY_CAMPAIGN_UPDATE = "giveaway:campaign:update";
+
     // View promo banners and their details.
     public static final String BANNER_READ = "banner:read";
 

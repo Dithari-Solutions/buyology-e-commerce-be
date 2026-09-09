@@ -31,7 +31,7 @@ public class AdminGiveawayController {
         this.giveawayService = giveawayService;
     }
 
-    @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('giveaway:entry:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/entries")
     public ResponseEntity<ApiResponse<Page<GiveawayEntryAdminResponse>>> entries(
             @RequestParam(defaultValue = "0") int page,
@@ -40,7 +40,7 @@ public class AdminGiveawayController {
     }
 
     /** Current open/closed state, so the dashboard shows the truth before anyone touches it. */
-    @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('giveaway:entry:read') or @rbacPolicy.legacyAdmin()")
     @GetMapping("/campaign")
     public ResponseEntity<ApiResponse<GiveawayCampaign>> campaign() {
         return ApiResponse.success(giveawayService.campaign(), "Giveaway campaign fetched");
@@ -53,7 +53,7 @@ public class AdminGiveawayController {
      * endpoint refuse — but it does not touch the entries themselves. Those are the draw; the point
      * of closing is to stop taking more, not to throw away the ones you have.
      */
-    @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('giveaway:campaign:update') or @rbacPolicy.legacyAdmin()")
     @PutMapping("/campaign")
     public ResponseEntity<ApiResponse<GiveawayCampaign>> setOpen(
             @AuthenticationPrincipal UUID adminId,
