@@ -1340,7 +1340,7 @@ public class ProductService {
                         .toList();
         List<UUID> globalOptionIds = allOptions.stream().map(o -> o.getGlobalSpecOption().getId()).distinct().toList();
         Map<UUID, String> optionValueByGlobalId = new HashMap<>();
-        Map<UUID, String> optionUnitByGlobalId = new HashMap<>();
+        Map<UUID, com.buyology.ecommerce.common.enums.SpecUnit> optionUnitByGlobalId = new HashMap<>();
         if (!globalOptionIds.isEmpty()) {
             for (var ot : globalSpecOptionTranslationRepository.findByOption_IdInAndLanguage(globalOptionIds, language)) {
                 optionValueByGlobalId.putIfAbsent(ot.getOption().getId(), ot.getValue());
