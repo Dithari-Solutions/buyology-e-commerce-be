@@ -1340,9 +1340,18 @@ public class ProductService {
                         .toList();
         List<UUID> globalOptionIds = allOptions.stream().map(o -> o.getGlobalSpecOption().getId()).distinct().toList();
         Map<UUID, String> optionValueByGlobalId = new HashMap<>();
+        Map<UUID, String> optionUnitByGlobalId = new HashMap<>();
         if (!globalOptionIds.isEmpty()) {
             for (var ot : globalSpecOptionTranslationRepository.findByOption_IdInAndLanguage(globalOptionIds, language)) {
                 optionValueByGlobalId.putIfAbsent(ot.getOption().getId(), ot.getValue());
+            }
+            // The unit is batch-loaded here rather than read off the lazy proxy during response
+            // assembly. Reading it there worked only while open-session-in-view held a session open
+            // for the whole request; with that off it threw LazyInitializationException and took the
+            // entire product listing down. Batching is also simply better — it is one query for the
+            // page instead of one per option.
+            for (var g : globalSpecOptionRepository.findAllById(globalOptionIds)) {
+                if (g.getUnit() != null) optionUnitByGlobalId.put(g.getId(), g.getUnit());
             }
         }
         Map<UUID, List<ProductSpecOption>> optionsByGroup = allOptions.stream()
@@ -1386,7 +1395,9 @@ public class ProductService {
                         List<ProductResponse.SpecOptionDto> optionDtos = optionsByGroup.getOrDefault(group.getId(), List.of()).stream()
                                 .map(opt -> new ProductResponse.SpecOptionDto(opt.getId(),
                                         optionValueByGlobalId.getOrDefault(opt.getGlobalSpecOption().getId(), opt.getValue()),
-                                        opt.getGlobalSpecOption().getUnit()))
+                                        // From the batch map, never the proxy: getId() is free on a
+                                        // proxy, getUnit() is not — it initialises it.
+                                        optionUnitByGlobalId.get(opt.getGlobalSpecOption().getId())))
                                 .toList();
                         return new ProductResponse.SpecGroupDto(group.getId(), group.getCode(), groupName, optionDtos);
                     })
@@ -1434,7 +1445,11 @@ public class ProductService {
                                 .findByOption_IdAndLanguage(globalOptionId, finalLanguage)
                                 .map(t -> t.getValue())
                                 .orElse(opt.getValue());
-                        SpecUnit unit = opt.getGlobalSpecOption().getUnit();
+                        // Fetched by id rather than read off the proxy. getId() is free on a lazy
+                        // proxy; getUnit() initialises it, which throws once the session has closed.
+                        SpecUnit unit = globalSpecOptionRepository.findById(globalOptionId)
+                                .map(g -> g.getUnit())
+                                .orElse(null);
                         return new ProductResponse.SpecOptionDto(opt.getId(), optValue, unit);
                     })
                     .toList();
