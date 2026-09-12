@@ -27,6 +27,9 @@ class TokenServiceTest {
 
     private static final String SECRET = "unit-test-signing-secret-which-is-long-enough-1234567890";
 
+    /** Matches the production default. Long enough to absorb a page load's parallel refreshes. */
+    private static final long GRACE_SECONDS = 30;
+
     private RefreshTokenRepository refreshRepo;
     private TokenService svc;
     private AuthCredentials creds;
@@ -42,7 +45,7 @@ class TokenServiceTest {
         when(refreshRepo.save(any(RefreshToken.class))).thenAnswer(i -> i.getArgument(0));
 
         svc = new TokenService(refreshRepo, roleRepo, rolePermRepo, userPermRepo,
-                SECRET, "buyology-ecommerce-service", 15, 7, true);
+                SECRET, "buyology-ecommerce-service", 15, 7, true, GRACE_SECONDS);
 
         creds = new AuthCredentials();
         creds.setId(credId);
@@ -80,7 +83,7 @@ class TokenServiceTest {
         TokenService other = new TokenService(refreshRepo, mock(UserRoleRepository.class),
                 mock(RolePermissionRepository.class), mock(UserPermissionRepository.class),
                 "a-completely-different-secret-also-long-enough-0987654321", "buyology-ecommerce-service",
-                15, 7, true);
+                15, 7, true, GRACE_SECONDS);
         String foreign = other.generateAccessToken(creds, "web");
         assertFalse(svc.validateAccessToken(foreign), "token signed with a different key must not validate");
     }
@@ -122,5 +125,72 @@ class TokenServiceTest {
     void rotate_rejectsUnknownToken() {
         when(refreshRepo.findByToken(any())).thenReturn(Optional.empty());
         assertThrows(SecurityException.class, () -> svc.rotateTokens("whatever", "device", "web"));
+    }
+
+    // ── Concurrent refresh: the reason people were being logged out ──────────
+
+    @Test
+    void rotate_acceptsATokenReusedImmediatelyAfterRotation() {
+        // One page load fires several API calls; they all 401 on the same expired access token and
+        // all present the SAME refresh cookie. Strict single-use rotation rejected every request
+        // after the first, and a 401 on refresh signs the user out — so an ordinary reload logged
+        // people out of both the storefront and the dashboard.
+        String raw = "raced-refresh-token";
+        RefreshToken alreadyRotated = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        alreadyRotated.revoke();                       // stamps updatedAt = now
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw)))
+                .thenReturn(Optional.of(alreadyRotated));
+
+        var result = assertDoesNotThrow(() -> svc.rotateTokens(raw, "device", "web"),
+                "a refresh racing itself must not log the user out");
+        assertNotNull(result);
+        assertNotNull(result.signInResponse().getAccessToken(), "the loser of the race still gets a token");
+    }
+
+    @Test
+    void rotate_doesNotSlideTheGraceWindowForwardOnRepeatedReuse() {
+        // Re-revoking on every reuse would re-stamp updatedAt and extend the window indefinitely,
+        // which would quietly turn single-use rotation into unlimited reuse.
+        String raw = "repeatedly-reused-token";
+        RefreshToken rotated = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        rotated.revoke();
+        Instant revokedAt = rotated.getUpdatedAt();
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw))).thenReturn(Optional.of(rotated));
+
+        svc.rotateTokens(raw, "device", "web");
+        svc.rotateTokens(raw, "device", "web");
+
+        assertEquals(revokedAt, rotated.getUpdatedAt(),
+                "the revocation time must not move, or the window never closes");
+    }
+
+    @Test
+    void rotate_stillRejectsATokenReplayedAfterTheGraceWindow() {
+        // The case single-use rotation exists to catch. A token replayed long after its rotation is
+        // not a client racing itself, and it must still fail.
+        String raw = "stale-replayed-token";
+        RefreshToken longRotated = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        longRotated.revoke();
+        longRotated.setUpdatedAt(Instant.now().minusSeconds(GRACE_SECONDS + 60));
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw)))
+                .thenReturn(Optional.of(longRotated));
+
+        assertThrows(SecurityException.class, () -> svc.rotateTokens(raw, "device", "web"),
+                "a replay outside the grace window must still be refused");
+    }
+
+    @Test
+    void rotate_rejectsAnExpiredTokenEvenInsideTheGraceWindow() {
+        // Expiry is not a race — it is the token's lifetime ending, and no leeway applies to it.
+        String raw = "expired-token";
+        RefreshToken expired = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().minus(1, ChronoUnit.DAYS), "device");
+        expired.revoke();
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw))).thenReturn(Optional.of(expired));
+
+        assertThrows(SecurityException.class, () -> svc.rotateTokens(raw, "device", "web"));
     }
 }

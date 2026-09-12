@@ -54,6 +54,8 @@ public class TokenService {
     private final long accessTokenValidityMinutes;
     private final long refreshTokenValidityDays;
     private final boolean cookieSecure;
+    /** How long after a rotation the superseded token is still accepted. See rotateTokens. */
+    private final long refreshReuseGraceSeconds;
 
     public TokenService(
             RefreshTokenRepository refreshTokenRepository,
@@ -64,7 +66,8 @@ public class TokenService {
             @Value("${jwt.issuer:buyology-ecommerce-service}") String issuer,
             @Value("${jwt.access-token-validity-minutes}") long accessTokenValidityMinutes,
             @Value("${jwt.refresh-token-validity-days}") long refreshTokenValidityDays,
-            @Value("${cookie.secure:true}") boolean cookieSecure) {
+            @Value("${cookie.secure:true}") boolean cookieSecure,
+            @Value("${jwt.refresh-reuse-grace-seconds:30}") long refreshReuseGraceSeconds) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.userRoleRepository = userRoleRepository;
         this.rolePermissionRepository = rolePermissionRepository;
@@ -76,6 +79,7 @@ public class TokenService {
         this.accessTokenValidityMinutes = accessTokenValidityMinutes;
         this.refreshTokenValidityDays = refreshTokenValidityDays;
         this.cookieSecure = cookieSecure;
+        this.refreshReuseGraceSeconds = refreshReuseGraceSeconds;
     }
 
     // ---------------------------
@@ -283,12 +287,41 @@ public class TokenService {
         RefreshToken existing = refreshTokenRepository.findByToken(hashed)
                 .orElseThrow(() -> new SecurityException("Invalid refresh token"));
 
-        if (existing.isRevoked() || existing.isExpired()) {
+        if (existing.isExpired()) {
             throw new SecurityException("Refresh token expired or revoked");
         }
 
-        existing.revoke();
-        refreshTokenRepository.save(existing);
+        if (existing.isRevoked()) {
+            // A token presented after it was already rotated. Strictly single-use rotation treated
+            // this as theft and threw, which logged people out constantly for an entirely innocent
+            // reason: one page load fires several API calls at once, they all get a 401 on the same
+            // expired access token, and they all then present the SAME refresh cookie. The first
+            // rotation revokes it and the rest were rejected — so a simple refresh signed the user
+            // out of both the storefront and the dashboard.
+            //
+            // Age separates the two cases. A browser's parallel requests arrive within milliseconds
+            // of each other, so a token reused seconds after its rotation is the same client racing
+            // itself. A token replayed minutes or days later is the case single-use rotation exists
+            // to catch, and that still fails.
+            //
+            // updatedAt is the revocation time: revoke() stamps it, and nothing updates a token
+            // after it is revoked.
+            Instant revokedAt = existing.getUpdatedAt();
+            boolean withinGrace = revokedAt != null
+                    && revokedAt.isAfter(Instant.now().minusSeconds(refreshReuseGraceSeconds));
+            if (!withinGrace) {
+                throw new SecurityException("Refresh token expired or revoked");
+            }
+            // Fall through and issue a fresh pair. Deliberately NOT re-revoking: re-stamping
+            // updatedAt on every reuse would slide the window forward indefinitely, so the grace
+            // period is measured once from the original rotation and cannot be extended.
+            log.debug("[AUTH] Refresh token reused {}ms after rotation — treating as a concurrent "
+                            + "refresh rather than a replay",
+                    Duration.between(revokedAt, Instant.now()).toMillis());
+        } else {
+            existing.revoke();
+            refreshTokenRepository.save(existing);
+        }
 
         AuthCredentials creds = existing.getAuthCredential();
         String newAccessToken = generateAccessToken(creds, audience);
