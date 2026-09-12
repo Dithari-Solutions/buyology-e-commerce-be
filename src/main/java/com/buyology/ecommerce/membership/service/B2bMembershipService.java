@@ -230,7 +230,7 @@ public class B2bMembershipService {
 
     public MembershipApplicationResponse getMyApplication(UUID userOrAuthCredId) {
         UUID resolved = resolveUsersId(userOrAuthCredId);
-        B2bMembershipApplication app = appRepo.findByUserId(resolved)
+        B2bMembershipApplication app = appRepo.findFirstByUserIdOrderByCreatedAtDesc(resolved)
                 .orElseThrow(() -> new NoSuchElementException("No application found for user"));
         return toAppResponse(app);
     }
@@ -328,11 +328,17 @@ public class B2bMembershipService {
         if (membershipRepo.existsByUserId(userId)) {
             throw new IllegalStateException("This user already has a B2B membership");
         }
-        // Reuse a prior REJECTED application row for this user instead of inserting a
-        // second one — findByUserId expects a single row, and since these flows attach
-        // userId immediately (unlike the public flow), a duplicate would break it. Any
-        // non-rejected status means an application is already in flight.
-        B2bMembershipApplication app = appRepo.findByUserId(userId).orElse(null);
+        // Reuse a prior REJECTED application row for this user instead of inserting a second one.
+        // Any non-rejected status means an application is already in flight.
+        //
+        // This used to be load-bearing for a different reason: the read was a single-result
+        // findByUserId over a column with no unique constraint, so a duplicate did not merely
+        // untidy the data, it threw and took GET /api/user/profile down with it. It threw anyway,
+        // because the public sign-up flow this guard explicitly did not cover went on creating
+        // second rows. The read is now findFirstBy...OrderByCreatedAtDesc and cannot throw, so
+        // this guard is back to being what it reads as — a rule about not having two live
+        // applications, not a prop holding up a fragile query.
+        B2bMembershipApplication app = appRepo.findFirstByUserIdOrderByCreatedAtDesc(userId).orElse(null);
         if (app != null && app.getStatus() != B2bMembershipApplication.ApplicationStatus.REJECTED) {
             throw new IllegalStateException(
                     "A B2B application already exists for this user (status: " + app.getStatus() + ").");

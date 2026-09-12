@@ -329,7 +329,7 @@ public class UserProfileService {
             res.setPendingDeletion(true);
             res.setDeletionScheduledAt(user.getDeletedAt().plus(30, java.time.temporal.ChronoUnit.DAYS));
         }
-        b2bApplicationRepo.findByUserId(user.getId()).ifPresent(app -> {
+        b2bApplicationRepo.findFirstByUserIdOrderByCreatedAtDesc(user.getId()).ifPresent(app -> {
             res.setB2bApplicationStatus(app.getStatus().name());
             // An application carries a password hash only when it CREATED the account
             // (the public B2B sign-up); the upgrade paths never capture one. So a hash

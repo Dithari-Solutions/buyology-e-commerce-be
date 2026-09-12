@@ -17,7 +17,23 @@ public interface B2bMembershipApplicationRepository extends JpaRepository<B2bMem
 
     Optional<B2bMembershipApplication> findByContactEmail(String contactEmail);
 
-    Optional<B2bMembershipApplication> findByUserId(UUID userId);
+    /**
+     * This user's current application — the most recent one.
+     *
+     * <p>Deliberately {@code findFirstBy...}, which emits {@code LIMIT 1}. The plain
+     * {@code findByUserId} this replaces was a single-result query over a column with no unique
+     * constraint anywhere — not in the entity and not in any migration — so the moment a user held
+     * two application rows it threw {@code IncorrectResultSizeDataAccessException} instead of
+     * returning one. That failed GET /api/user/profile outright, because {@code toResponse}
+     * enriches every profile with the B2B application: one duplicate row in an ancillary table
+     * took down the whole profile page for that customer, permanently, until the data was cleaned.
+     *
+     * <p>A unique constraint would be the wrong fix. Holding more than one application is
+     * legitimate — an applicant rejected once may apply again — so the read has to name which row
+     * it wants rather than assert there is only ever one. Newest wins: a re-application supersedes
+     * what came before, which is what all three callers mean by "the" application.
+     */
+    Optional<B2bMembershipApplication> findFirstByUserIdOrderByCreatedAtDesc(UUID userId);
 
     boolean existsByContactEmailAndStatusNot(String email, B2bMembershipApplication.ApplicationStatus status);
 }
