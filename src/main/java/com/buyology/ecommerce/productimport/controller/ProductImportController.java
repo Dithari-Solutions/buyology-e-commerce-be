@@ -2,6 +2,7 @@ package com.buyology.ecommerce.productimport.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.productimport.domain.ProductImportJob;
+import com.buyology.ecommerce.productimport.dto.FulfilmentQueueItem;
 import com.buyology.ecommerce.productimport.dto.ImportJobResponse;
 import com.buyology.ecommerce.productimport.dto.ImportRowResponse;
 import com.buyology.ecommerce.productimport.service.ProductImportService;
@@ -64,6 +65,17 @@ public class ProductImportController {
                 "Imports fetched");
     }
 
+    @GetMapping("/fulfilment-queue")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
+    @Operation(summary = "Imported products still waiting on photos and a final check")
+    public ResponseEntity<ApiResponse<List<FulfilmentQueueItem>>> fulfilmentQueue() {
+        return ApiResponse.success(
+                service.getFulfilmentQueue().stream().map(FulfilmentQueueItem::from).toList(),
+                "Fulfilment queue fetched");
+    }
+
+    // Declared after the literal route above on purpose: {jobId} binds a UUID, and
+    // "fulfilment-queue" is not one, so matcher precedence is not something to leave to chance.
     @GetMapping("/{jobId}")
     @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('product:read') or @rbacPolicy.legacyAdmin()")
     @Operation(summary = "One import, with every row and what was read from it")
