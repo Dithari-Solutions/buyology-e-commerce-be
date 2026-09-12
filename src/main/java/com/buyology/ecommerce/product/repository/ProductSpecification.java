@@ -29,6 +29,13 @@ public class ProductSpecification {
             // Always exclude deleted products on the public search
             predicates.add(cb.notEqual(root.get("status"), "DELETED"));
 
+            // And drafts. Bulk-imported products are created DRAFT precisely because they are not
+            // finished — no photos, specs that may still need a human decision — and this filter
+            // is what makes that status mean something on the storefront. Without it a DRAFT
+            // product is fully listed: the only other thing standing between it and a customer is
+            // the price subquery below, and that only runs when a price filter was supplied.
+            predicates.add(cb.notEqual(root.get("status"), "DRAFT"));
+
             // General search query (matches title in any language)
             if (filter.getQ() != null && !filter.getQ().isBlank()) {
                 String searchPattern = "%" + filter.getQ().toLowerCase() + "%";

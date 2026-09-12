@@ -50,7 +50,22 @@ public class ProductSearchService {
         }
     }
 
+    /**
+     * Indexes a product for search, unless it is a draft.
+     *
+     * <p>Search is a second, independent way a product reaches a customer, and this query applies
+     * no status filter of its own — so without this guard a bulk-imported DRAFT product stays off
+     * the category pages but turns up in the search box, which is the worse failure of the two
+     * because it looks deliberate. Delisting on the way in rather than filtering on the way out
+     * keeps the index honest: a document that is in it is a product that may be sold.
+     */
     public void indexProduct(Product product, List<ProductTranslation> translations) {
+        if (product != null && "DRAFT".equals(product.getStatus())) {
+            // Also remove any document from a previous publish, so demoting a product to DRAFT
+            // actually takes it out of search rather than leaving the old copy behind.
+            deleteProduct(product);
+            return;
+        }
         ProductDocument doc = mapToDocument(product, translations);
         productSearchRepository.save(doc);
     }

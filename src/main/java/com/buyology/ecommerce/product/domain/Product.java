@@ -57,6 +57,19 @@ public class Product {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    // Bulk-import provenance. needsFulfilment is set by the importer and cleared by a human; it
+    // answers a different question from status — status is "may this be sold", this is "has a
+    // person checked it and added the photos". importNotes carries what the extraction was unsure
+    // about plus the original spreadsheet line, which is what lets the human finish it quickly.
+    @Column(name = "needs_fulfilment", nullable = false)
+    private Boolean needsFulfilment = false;
+
+    @Column(name = "import_notes", columnDefinition = "TEXT")
+    private String importNotes;
+
+    @Column(name = "import_job_id")
+    private UUID importJobId;
+
     // Supplier product fields (null for admin-created products)
     @Column(name = "supplier_id")
     private UUID supplierId;
@@ -136,6 +149,7 @@ public class Product {
         if (this.availabilityStatus == null) this.availabilityStatus = AvailabilityStatus.PRE_ORDER;
         if (this.isSuperDeal == null) this.isSuperDeal = false;
         if (this.isLimitedStock == null) this.isLimitedStock = false;
+        if (this.needsFulfilment == null) this.needsFulfilment = false;
     }
 
     @PreUpdate
@@ -280,4 +294,13 @@ public class Product {
 
     public String getSupplierRejectionReason() { return supplierRejectionReason; }
     public void setSupplierRejectionReason(String supplierRejectionReason) { this.supplierRejectionReason = supplierRejectionReason; }
+
+    public Boolean getNeedsFulfilment() { return needsFulfilment; }
+    public void setNeedsFulfilment(Boolean needsFulfilment) { this.needsFulfilment = needsFulfilment; }
+
+    public String getImportNotes() { return importNotes; }
+    public void setImportNotes(String importNotes) { this.importNotes = importNotes; }
+
+    public UUID getImportJobId() { return importJobId; }
+    public void setImportJobId(UUID importJobId) { this.importJobId = importJobId; }
 }
