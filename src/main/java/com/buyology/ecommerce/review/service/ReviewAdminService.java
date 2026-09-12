@@ -41,6 +41,14 @@ public class ReviewAdminService {
 
     // ── List all reviews (admin view, filterable by status) ───────────────────
 
+    // @Transactional(readOnly = true) is load bearing, not decoration. The finders below return bare
+    // ProductReview entities, and reviewService.toResponse then reads the LAZY ProductReview.user for
+    // the reviewer's name (and the reply's LAZY admin) while assembling the DTO. toResponse carries no
+    // transaction of its own, so hopping across to the ReviewService bean supplies nothing — the
+    // annotation has to sit here, on the method the controller actually calls. With
+    // spring.jpa.open-in-view=false in production the finder's auto-commit closes the session before
+    // any of that runs, and the first name read throws LazyInitializationException.
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<ReviewResponse>>> getAllReviews(
             ModerationStatus status, int page, int size) {
 
@@ -57,6 +65,7 @@ public class ReviewAdminService {
 
     // ── Get single review by ID (admin view) ─────────────────────────────────
 
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<ReviewResponse>> getReviewById(UUID reviewId) {
         ProductReview review = reviewRepository.findById(reviewId).orElse(null);
         if (review == null) {

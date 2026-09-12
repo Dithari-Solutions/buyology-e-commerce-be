@@ -73,6 +73,20 @@ public class ReviewService {
 
     // ── Public: List approved reviews for a product ──────────────────────────
 
+    /**
+     * {@code @Transactional(readOnly = true)} is load bearing, not decoration. Every review here goes
+     * through {@link #toResponse}, which reads {@code ProductReview.user} for the reviewer's name and
+     * {@code ProductReviewReply.admin} for the responder's — both LAZY {@code @ManyToOne}, and the
+     * repository finder is a plain derived query with no fetch join. With {@code spring.jpa.open-in-view}
+     * false in production the session closes as soon as the finder's own auto-commit ends, so those
+     * reads land on a detached proxy and throw LazyInitializationException — a 500 on the product page.
+     *
+     * <p>Read-only because nothing on this path writes: three finders and DTO assembly, no save, no
+     * delete, no mutation of a managed entity. Scoped to the method rather than the whole request on
+     * purpose — holding a pooled connection through response serialisation is exactly what turning
+     * open-in-view off was meant to stop.
+     */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<ReviewResponse>>> getApprovedReviewsByProduct(
             UUID productId, int page, int size) {
 
@@ -87,6 +101,7 @@ public class ReviewService {
     }
 
     // ── Public: Get the reviews authored by a specific user ──────────────────
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<ReviewResponse>>> getReviewsByUser(
             UUID userId, int page, int size) {
 
@@ -118,6 +133,7 @@ public class ReviewService {
 
     // ── Public: Get single approved review ───────────────────────────────────
 
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<ReviewResponse>> getApprovedReview(UUID reviewId) {
         ProductReview review = reviewRepository.findByIdAndDeletedAtIsNull(reviewId).orElse(null);
         if (review == null || review.getStatus() != ModerationStatus.APPROVED) {

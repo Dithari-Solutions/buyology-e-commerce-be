@@ -94,6 +94,7 @@ public class GameService {
         return mapToResponse(saved);
     }
 
+    @Transactional(readOnly = true)
     public List<QuizQuestionResponse> getAllQuizQuestions() {
         return quizQuestionRepository.findAll().stream()
                 .map(this::mapToResponse)
@@ -160,6 +161,18 @@ public class GameService {
         return new DailyGameStatusResponse(gameType, played, tokens, streak);
     }
 
+    /**
+     * <p>{@code @Transactional(readOnly = true)} is load bearing, not decoration.
+     * {@code QuizQuestion.translations} is a LAZY {@code @OneToMany} and {@code findByIsActiveTrue} is a
+     * plain derived query with no join fetch, so the collection comes back uninitialised and
+     * {@code mapToResponse} reads it while assembling the DTO. With {@code spring.jpa.open-in-view=false}
+     * in production the session closes with the repository call, so that read throws
+     * LazyInitializationException and every request to the quiz screen 500s.
+     *
+     * <p>Read-only because nothing on this path writes, and a method-scoped transaction rather than
+     * re-enabling open-in-view: the connection is returned before response serialisation.
+     */
+    @Transactional(readOnly = true)
     public List<QuizQuestionResponse> getActiveQuizQuestions() {
         return quizQuestionRepository.findByIsActiveTrue().stream()
                 .map(this::mapToResponse)
@@ -288,6 +301,14 @@ public class GameService {
         return userStreakRepository.save(streak);
     }
 
+    /**
+     * <p>{@code @Transactional(readOnly = true)} for the same reason as the quiz: {@code GameResult.user}
+     * is a LAZY {@code @ManyToOne} and {@code findDailyLeaderboard} selects the root entity only, so every
+     * row's user is an uninitialised proxy and {@code displayName} reads the first/last name straight off
+     * it. Without a transaction under {@code open-in-view=false} there is no session to initialise against.
+     * It only looked intermittent because the list is empty until someone plays that day.
+     */
+    @Transactional(readOnly = true)
     public List<LeaderboardResponse> getDailyLeaderboard() {
         LocalDate today = LocalDate.now();
         List<GameResult> results = gameResultRepository.findDailyLeaderboard(today.atStartOfDay(), today.atTime(LocalTime.MAX));
@@ -301,6 +322,9 @@ public class GameService {
         )).collect(Collectors.toList());
     }
 
+    // UserStreak.user is a LAZY @OneToOne on the owning side, so displayName() initialises a proxy here
+    // too — same reason as getDailyLeaderboard above.
+    @Transactional(readOnly = true)
     public List<LeaderboardResponse> getStreakLeaderboard() {
         return userStreakRepository.findTop10ByOrderByCurrentStreakDesc().stream()
                 .map(s -> new LeaderboardResponse(

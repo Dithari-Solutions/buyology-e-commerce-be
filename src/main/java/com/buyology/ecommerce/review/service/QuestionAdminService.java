@@ -41,6 +41,18 @@ public class QuestionAdminService {
 
     // ── List all questions (admin view, filterable by status) ─────────────────
 
+    /**
+     * <p>{@code @Transactional(readOnly = true)} is load bearing, not decoration. The finders below
+     * are plain derived queries with no fetch join, and {@code questionService.toResponse} then reads
+     * {@code ProductQuestion.user} and {@code ProductQuestionAnswer.admin} — both LAZY — for the
+     * asker's and the answering admin's names. {@code toResponse} carries no transaction of its own,
+     * so with {@code spring.jpa.open-in-view} false in production there is no session left to
+     * initialise those proxies against and the listing 500s.
+     *
+     * <p>Read-only rather than re-enabling open-in-view: the session ends with this method instead of
+     * the whole request, so it does not hold a pooled connection through response serialisation.
+     */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<QuestionResponse>>> getAllQuestions(
             ModerationStatus status, int page, int size) {
 
@@ -57,6 +69,8 @@ public class QuestionAdminService {
 
     // ── Get single question by ID (admin view) ────────────────────────────────
 
+    // Same lazy dereference in toResponse as the listing above — read-only, nothing here mutates.
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<QuestionResponse>> getQuestionById(UUID questionId) {
         ProductQuestion question = questionRepository.findById(questionId).orElse(null);
         if (question == null) {

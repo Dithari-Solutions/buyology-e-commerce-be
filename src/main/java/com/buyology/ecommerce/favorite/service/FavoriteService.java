@@ -87,6 +87,16 @@ public class FavoriteService {
 
     // ─── Get my favorites ─────────────────────────────────────────────────────
 
+    /**
+     * {@code @Transactional(readOnly = true)} is load bearing here. Mapping the response reads the LAZY
+     * {@code Favorite.product} for its SKU, and {@code findByAuthCredential_Id} is a plain derived query
+     * with no fetch join — so with {@code spring.jpa.open-in-view} false in production the session is
+     * already closed by the time we map, and every non-empty list threw LazyInitializationException
+     * (a customer with no favourites still got a clean empty 200, which is why it looked intermittent).
+     * readOnly because nothing on this path writes, and a method-scoped transaction rather than
+     * re-enabling open-in-view so we do not hold a pooled connection through response serialisation.
+     */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<FavoriteListResponse>> getFavorites(UUID authCredentialId) {
         requireOwnedCredential(authCredentialId);
 
@@ -136,6 +146,9 @@ public class FavoriteService {
 
     // ─── Admin: get favorites for a specific user ─────────────────────────────
 
+    // Same lazy Product read as getFavorites, through the same private mapper — and a separate proxied
+    // entry point, so it needs its own annotation; annotating toItemResponse would do nothing.
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<FavoriteListResponse>> getUserFavorites(UUID authCredentialId) {
         if (!authCredentialRepository.existsById(authCredentialId)) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Auth credential not found");

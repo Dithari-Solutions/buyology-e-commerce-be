@@ -44,7 +44,7 @@ class CancellationRefundGateTest {
         Class<?>[] types = ctor.getParameterTypes();
         mocks = new Object[types.length];
         for (int i = 0; i < types.length; i++) {
-            mocks[i] = mock(types[i]);
+            mocks[i] = types[i].isPrimitive() ? zeroValueOf(types[i]) : mock(types[i]);
         }
         try {
             service = (OrderService) ctor.newInstance(mocks);
@@ -58,6 +58,20 @@ class CancellationRefundGateTest {
         // PaymentService — providers are erased, so identify by re-injecting through the field.
         org.springframework.test.util.ReflectionTestUtils.setField(
                 service, "paymentServiceProvider", paymentServiceProvider);
+    }
+
+    /**
+     * The boxed zero of a primitive parameter type — {@code false}, {@code 0}, {@code 0.0}.
+     *
+     * <p>Mockito refuses a primitive ({@code Cannot mock/spy because : - primitive type}), so a
+     * constructor that takes one — {@code @Value("${app.stock.enforce-product-quantity:false}")
+     * boolean} is the first — broke this whole class at construction time, all four tests at once.
+     * A freshly allocated one-element array holds exactly the language default for its component
+     * type, which is both the right value here (the flag's own default is off, and cancellation
+     * never reads it) and total over every primitive a future parameter might be.
+     */
+    private static Object zeroValueOf(Class<?> primitive) {
+        return java.lang.reflect.Array.get(java.lang.reflect.Array.newInstance(primitive, 1), 0);
     }
 
     @SuppressWarnings("unchecked")

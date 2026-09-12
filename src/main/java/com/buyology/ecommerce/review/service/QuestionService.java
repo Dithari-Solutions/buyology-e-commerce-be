@@ -50,6 +50,16 @@ public class QuestionService {
 
     // ── Public: List approved questions for a product ─────────────────────────
 
+    /**
+     * {@code @Transactional(readOnly = true)} is load bearing, not decoration. The repository finder
+     * returns ProductQuestion rows whose {@code user} association is LAZY, and {@code toResponse}
+     * dereferences it for the asker's name — with {@code spring.jpa.open-in-view} false in production
+     * the finder's auto-commit closes the session before that read, so the proxy has nothing to
+     * initialise against and the endpoint 500s with LazyInitializationException.
+     *
+     * <p>Read-only because the whole path is two finders and DTO assembly; nothing here writes.
+     */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<QuestionResponse>>> getApprovedQuestionsByProduct(
             UUID productId, int page, int size) {
 
@@ -65,6 +75,7 @@ public class QuestionService {
 
     // ── Public: Get single approved question ─────────────────────────────────
 
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<QuestionResponse>> getApprovedQuestion(UUID questionId) {
         ProductQuestion question = questionRepository.findByIdAndDeletedAtIsNull(questionId).orElse(null);
         if (question == null || question.getStatus() != ModerationStatus.APPROVED) {
