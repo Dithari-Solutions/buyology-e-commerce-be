@@ -49,6 +49,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -689,6 +690,25 @@ public class AdminUserService {
 
     // ─── Get full user detail by authCredentialId ─────────────────────────────
 
+    /**
+     * Everything an admin sees about one customer.
+     *
+     * <p>{@code @Transactional(readOnly = true)} is load bearing, not decoration. This method reads
+     * several LAZY associations while assembling the response — {@code Favorite.product} for the SKU,
+     * and the active cart's items, products and variants inside {@code buildCartResponse} — and
+     * {@code spring.jpa.open-in-view} is false in production, so outside a transaction there is no
+     * session to initialise them against and the read throws LazyInitializationException.
+     *
+     * <p>It failed for some admins and not others because both lists are usually empty: the
+     * favourites {@code .map()} never runs for a customer with no favourites, and the cart branch is
+     * skipped when there is no ACTIVE cart. One admin who had favourited a product got a 500 while
+     * everyone else loaded fine.
+     *
+     * <p>A read-only transaction rather than re-enabling open-in-view: the session lives for this
+     * method instead of the whole request, so it does not hold a pooled connection through response
+     * serialisation — which is why open-in-view was turned off in the first place.
+     */
+    @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<AdminUserDetailResponse>> getUserDetail(UUID authCredentialId) {
         AuthCredentials credential = authCredentialRepository.findById(authCredentialId).orElse(null);
         if (credential == null) {
