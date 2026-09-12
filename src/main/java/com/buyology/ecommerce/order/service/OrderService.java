@@ -451,10 +451,15 @@ public class OrderService {
             // cannot both pass, and it composes with the restore in StockReservationService when
             // a stale order is superseded inside this same transaction.
             //
-            // A null stockQuantity still means "not tracked" and is left alone, so nothing that
-            // sells today stops selling because of this.
+            // Two states are deliberately left unguarded, so that nothing which sells today
+            // stops selling because of this. A null stockQuantity still means "not tracked" —
+            // the meaning the column has always had. And PRE_ORDER is an explicit instruction to
+            // accept orders that cannot be filled yet, which is exactly a request to skip this
+            // check; it is also the default availability for a new product, so guarding it would
+            // refuse pre-orders that work today. A product an admin wants guarded is IN_STOCK.
             Product orderedProduct = cartItem.getProduct();
-            if (orderedProduct.getStockQuantity() != null) {
+            if (orderedProduct.getStockQuantity() != null
+                    && orderedProduct.getAvailabilityStatus() != Product.AvailabilityStatus.PRE_ORDER) {
                 int taken = productRepository.decrementStockIfAvailable(
                         orderedProduct.getId(), cartItem.getQuantity());
                 if (taken != 1) {

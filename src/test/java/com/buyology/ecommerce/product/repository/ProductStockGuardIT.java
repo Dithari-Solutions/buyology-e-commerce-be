@@ -104,6 +104,33 @@ class ProductStockGuardIT {
         assertNull(stockOf(id), "and is left untouched");
     }
 
+    // ─── Pre-order is exempt, on both legs ────────────────────────────────────
+
+    @Test
+    void aPreOrderProductIsNotGuarded() {
+        // PRE_ORDER means "take orders we cannot fill yet", so the guard must not apply — and it
+        // is the DEFAULT availability for a new product, so guarding it would refuse pre-orders
+        // that work today. This is the regression the exemption exists to prevent.
+        UUID id = product(0, Product.AvailabilityStatus.PRE_ORDER);
+
+        assertEquals(0, productRepository.decrementStockIfAvailable(id, 1),
+                "a pre-order product is not matched by the guard");
+        assertEquals(0, stockOf(id), "and its count is left where it was");
+    }
+
+    @Test
+    void restoringDoesNotInventStockForAPreOrderProduct() {
+        // The mirror of the above, and the reason the predicate is on both statements. The
+        // decrement skips a pre-order line, so if the restore did not, a cancelled pre-order
+        // would conjure units that never existed — the same class of bug as the old
+        // floored-take / unfloored-restore asymmetry.
+        UUID id = product(4, Product.AvailabilityStatus.PRE_ORDER);
+
+        assertEquals(0, productRepository.decrementStockIfAvailable(id, 2), "nothing is taken");
+        assertEquals(0, productRepository.incrementStock(id, 2), "so nothing may be given back");
+        assertEquals(4, stockOf(id), "the count must be exactly where it started");
+    }
+
     // ─── The restore is a true mirror ─────────────────────────────────────────
 
     @Test

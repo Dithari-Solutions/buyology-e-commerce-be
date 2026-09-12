@@ -265,7 +265,12 @@ public class CartService {
             if (storeProduct.hasDiscount()) {
                 originalUnitPrice = storeProduct.getStorePrice();
             }
-            availableUnits = product.getStockQuantity();
+            // PRE_ORDER accepts orders that cannot be filled yet, so it has no ceiling — this
+            // mirrors the guard in OrderService.createOrder, and the two must agree or the cart
+            // refuses something checkout would have allowed.
+            availableUnits = product.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER
+                    ? null
+                    : product.getStockQuantity();
         }
 
         // Stamp the cart with country + currency on first item
@@ -384,7 +389,10 @@ public class CartService {
                     .map(StoreProductVariant::getStock)
                     .orElse(null);
         }
-        return item.getProduct().getStockQuantity();
+        Product p = item.getProduct();
+        return p.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER
+                ? null
+                : p.getStockQuantity();
     }
 
     /**

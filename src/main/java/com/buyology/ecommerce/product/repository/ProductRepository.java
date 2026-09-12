@@ -91,16 +91,26 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
      * {@code createOrder} where a stale order is cancelled (restoring units) and the fresh one
      * then takes them again.
      *
-     * <p>{@code stockQuantity IS NULL} means "not tracked" — the meaning the column has always
-     * had — and such a product is deliberately not matched here, so untracked products stay
-     * sellable exactly as before.
+     * <p>Two states are deliberately not matched, so nothing that sells today stops selling.
+     * {@code stockQuantity IS NULL} means "not tracked" — the meaning the column has always had.
+     * And PRE_ORDER is an explicit instruction to accept orders that cannot be filled yet, which
+     * is precisely a request to skip this check; it is also the default availability for a new
+     * product, so guarding it would refuse pre-orders that work today. A product an admin wants
+     * guarded is IN_STOCK.
+     *
+     * <p>{@link #incrementStock} carries the same PRE_ORDER predicate. That is what stops the
+     * restore from inventing stock for a line the decrement never took anything from — the same
+     * class of bug as the old floored-take/unfloored-restore asymmetry.
      *
      * @return 1 when the units were taken, 0 when there were not enough (or stock is untracked)
      */
     @Modifying
     @Query("update Product p set p.stockQuantity = p.stockQuantity - :qty " +
-           "where p.id = :productId and p.stockQuantity is not null and p.stockQuantity >= :qty")
-    int decrementStockIfAvailable(@Param("productId") UUID productId, @Param("qty") int qty);
+           "where p.id = :productId and p.stockQuantity is not null and p.stockQuantity >= :qty " +
+           "and p.availabilityStatus <> :preOrder")
+    int decrementStockIfAvailable(@Param("productId") UUID productId,
+                                  @Param("qty") int qty,
+                                  @Param("preOrder") Product.AvailabilityStatus preOrder);
 
     /**
      * Puts units back on a product whose order died.
@@ -115,8 +125,20 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
      */
     @Modifying
     @Query("update Product p set p.stockQuantity = p.stockQuantity + :qty " +
-           "where p.id = :productId and p.stockQuantity is not null")
-    int incrementStock(@Param("productId") UUID productId, @Param("qty") int qty);
+           "where p.id = :productId and p.stockQuantity is not null " +
+           "and p.availabilityStatus <> :preOrder")
+    int incrementStock(@Param("productId") UUID productId,
+                       @Param("qty") int qty,
+                       @Param("preOrder") Product.AvailabilityStatus preOrder);
+
+    /** Keeps the PRE_ORDER argument out of every call site. */
+    default int decrementStockIfAvailable(UUID productId, int qty) {
+        return decrementStockIfAvailable(productId, qty, Product.AvailabilityStatus.PRE_ORDER);
+    }
+
+    default int incrementStock(UUID productId, int qty) {
+        return incrementStock(productId, qty, Product.AvailabilityStatus.PRE_ORDER);
+    }
 
     /**
      * Marks a tracked product OUT_OF_STOCK once its last unit is sold.
