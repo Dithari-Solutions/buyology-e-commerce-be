@@ -62,6 +62,22 @@ services:
       TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-false}
       # Per-minute cap for ONE admin on /api/admin/** (0 = built-in 300). Bump if admins see 429s.
       ADMIN_RATE_LIMIT_PER_MINUTE: ${ADMIN_RATE_LIMIT_PER_MINUTE:-0}
+      # false 500s every endpoint that reads a lazy association while assembling its response.
+      # Here so recovering is a restart rather than a deploy.
+      SPRING_JPA_OPEN_IN_VIEW: ${SPRING_JPA_OPEN_IN_VIEW:-true}
+
+      # ── Cash on delivery ──
+      # Goods leave before the money arrives, so every COD order is an unsecured advance of stock.
+      # Empty COD_COUNTRIES means EVERY market; COD_MAX_ORDER_AED 0 means NO ceiling.
+      COD_ENABLED: ${COD_ENABLED:-false}
+      COD_COUNTRIES: ${COD_COUNTRIES:-}
+      COD_MAX_ORDER_AED: ${COD_MAX_ORDER_AED:-0}
+
+      # ── VAT ──
+      # Added ON TOP of catalogue prices, so this assumes they are NET of tax. Set
+      # VAT_RATE_PERCENT=0 if they are already VAT-inclusive, or every customer pays it twice.
+      VAT_RATE_PERCENT: ${VAT_RATE_PERCENT:-5}
+      VAT_COUNTRIES: ${VAT_COUNTRIES:-}
 
       # ── Email / OTP (SendGrid) ──
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
