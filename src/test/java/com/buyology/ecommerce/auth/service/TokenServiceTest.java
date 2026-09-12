@@ -9,6 +9,7 @@ import com.buyology.ecommerce.role.repository.UserPermissionRepository;
 import com.buyology.ecommerce.role.repository.UserRoleRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -180,6 +181,78 @@ class TokenServiceTest {
 
         assertThrows(SecurityException.class, () -> svc.rotateTokens(raw, "device", "web"),
                 "a replay outside the grace window must still be refused");
+    }
+
+    // ── The session's client type survives rotation ──────────────────────────
+
+    /**
+     * The dashboard logout. For a privileged account the audience is not a label, it is whether the
+     * request is authenticated at all: {@code JwtAuthenticationFilter} drops the authentication of
+     * any admin/supplier principal whose token is not audience "dashboard", and
+     * {@code AuthService.buildSigninResponse} refuses to sign one in under any other audience. So
+     * an admin's session can only ever have been created as "dashboard" — and rotation re-derived
+     * the audience from the X-Client-Type header, which defaults to "web" when absent. One refresh
+     * without that header handed the admin a token the filter refuses, every following request was
+     * anonymous, and the dashboard read that as a logout. On a page reload, which is precisely when
+     * a refresh happens.
+     */
+    @Test
+    void rotate_keepsTheSessionsOwnClientTypeWhenTheRequestDoesNotSayOne() {
+        String raw = "dashboard-session";
+        RefreshToken dashboardSession = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        dashboardSession.setClientType("dashboard");
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw)))
+                .thenReturn(Optional.of(dashboardSession));
+
+        // "web" is what the endpoint passes when the header is missing — the whole bug.
+        var result = svc.rotateTokens(raw, "device", "web");
+
+        assertEquals("dashboard", svc.getAudience(result.signInResponse().getAccessToken()),
+                "an admin session must not be downgraded to an audience the filter refuses");
+    }
+
+    @Test
+    void rotate_carriesTheClientTypeOntoTheNextRefreshToken() {
+        // Rotation replaces the row, so the client type has to be copied forward or the very next
+        // refresh is back to trusting the header.
+        String raw = "dashboard-session-chained";
+        RefreshToken dashboardSession = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        dashboardSession.setClientType("dashboard");
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw)))
+                .thenReturn(Optional.of(dashboardSession));
+
+        svc.rotateTokens(raw, "device", "web");
+
+        ArgumentCaptor<RefreshToken> issued = ArgumentCaptor.forClass(RefreshToken.class);
+        verify(refreshRepo, atLeastOnce()).save(issued.capture());
+        assertEquals("dashboard", issued.getValue().getClientType(),
+                "the replacement token must inherit the session's client type");
+    }
+
+    @Test
+    void rotate_fallsBackToTheRequestForSessionsIssuedBeforeClientTypeWasRecorded() {
+        // Rows predating the column are null. Those keep the old header-derived behaviour rather
+        // than being guessed at, and heal on the next sign-in.
+        String raw = "legacy-session";
+        RefreshToken legacy = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        assertNull(legacy.getClientType());
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw))).thenReturn(Optional.of(legacy));
+
+        var result = svc.rotateTokens(raw, "device", "dashboard");
+
+        assertEquals("dashboard", svc.getAudience(result.signInResponse().getAccessToken()));
+    }
+
+    @Test
+    void issuedRefreshToken_recordsTheClientTypeItWasIssuedTo() {
+        assertEquals("dashboard",
+                svc.generateRefreshToken(creds, "device", "dashboard").token().getClientType());
+        // An unrecognised value is not silently treated as a real client type.
+        assertNull(svc.generateRefreshToken(creds, "device", "bogus").token().getClientType());
+        assertNull(svc.generateRefreshToken(creds, "device").token().getClientType());
     }
 
     @Test

@@ -29,6 +29,22 @@ public class RefreshToken {
     @Column(name = "device_info", length = 500)
     private String deviceInfo;
 
+    /**
+     * Which client this session belongs to — "web", "dashboard" or "mobile" — captured once when
+     * the token is issued and reused for every access token rotated out of it.
+     *
+     * <p>It is the access token's audience, and for a privileged account the audience decides
+     * whether the request is authenticated at all: {@code JwtAuthenticationFilter} drops the
+     * authentication of any admin/supplier principal whose token is not audience "dashboard".
+     * Deriving it from the X-Client-Type header on every call meant one refresh sent without that
+     * header re-minted an admin's token as "web" and signed them out. Stored here, rotation cannot
+     * change what the session is.
+     *
+     * <p>Null on sessions issued before this column existed; those fall back to the header.
+     */
+    @Column(name = "client_type", length = 20)
+    private String clientType;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -97,6 +113,14 @@ public class RefreshToken {
 
     public void setDeviceInfo(String deviceInfo) {
         this.deviceInfo = deviceInfo;
+    }
+
+    public String getClientType() {
+        return clientType;
+    }
+
+    public void setClientType(String clientType) {
+        this.clientType = clientType;
     }
 
     public Instant getCreatedAt() {

@@ -746,7 +746,12 @@ public class AuthService {
         });
 
         String accessToken = tokenService.generateAccessToken(credentials, audience);
-        var refreshToken = tokenService.generateRefreshToken(credentials, extractDeviceInfo(httpRequest));
+        // The audience is stamped on the refresh token so a later rotation re-mints for the SAME
+        // client. Without it, a refresh that omitted X-Client-Type downgraded an admin's token to
+        // "web" — an audience JwtAuthenticationFilter refuses for privileged accounts — and the
+        // dashboard signed them out on an ordinary page reload.
+        var refreshToken = tokenService.generateRefreshToken(
+                credentials, extractDeviceInfo(httpRequest), audience);
         String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.rawValue());
 
         SignInResponse body = new SignInResponse(accessToken, tokenService.getAccessTokenExpirySeconds());

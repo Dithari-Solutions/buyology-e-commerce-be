@@ -198,12 +198,42 @@ public class TokenService {
     public record IssuedRefreshToken(RefreshToken token, String rawValue) {}
 
     public IssuedRefreshToken generateRefreshToken(AuthCredentials authCredentials, String deviceInfo) {
+        return generateRefreshToken(authCredentials, deviceInfo, null);
+    }
+
+    /**
+     * Issues a refresh token that remembers which client it was issued to.
+     *
+     * <p>The audience is stamped on the row so {@link #rotateTokens} can re-mint access tokens for
+     * the SAME client without asking the request again — see the note there.
+     */
+    public IssuedRefreshToken generateRefreshToken(AuthCredentials authCredentials, String deviceInfo,
+                                                   String audience) {
         String rawValue = newOpaqueToken();
         String hashed = SecurityUtils.sha256Hex(rawValue);
         Instant expiry = Instant.now().plus(refreshTokenValidityDays, ChronoUnit.DAYS);
-        RefreshToken saved = refreshTokenRepository.save(
-                new RefreshToken(authCredentials, hashed, expiry, deviceInfo));
+        RefreshToken token = new RefreshToken(authCredentials, hashed, expiry, deviceInfo);
+        token.setClientType(normalizeAudience(audience));
+        RefreshToken saved = refreshTokenRepository.save(token);
         return new IssuedRefreshToken(saved, rawValue);
+    }
+
+    /**
+     * The canonical spelling of a client type, or null when there isn't one.
+     *
+     * <p>Null is meaningful and is NOT collapsed to "web": it records that the session never said
+     * which client it belongs to, which is what lets rotation tell "this is a storefront session"
+     * apart from "nobody ever said", and treat only the second as open to the header.
+     */
+    private static String normalizeAudience(String audience) {
+        if (audience == null || audience.isBlank()) {
+            return null;
+        }
+        String normalized = audience.trim().toLowerCase();
+        return switch (normalized) {
+            case "dashboard", "web", "mobile" -> normalized;
+            default -> null;
+        };
     }
 
     private static String newOpaqueToken() {
@@ -324,8 +354,24 @@ public class TokenService {
         }
 
         AuthCredentials creds = existing.getAuthCredential();
-        String newAccessToken = generateAccessToken(creds, audience);
-        IssuedRefreshToken newRefreshToken = generateRefreshToken(creds, deviceInfo);
+
+        // Which client this session belongs to is a property OF THE SESSION, not of the request
+        // doing the refresh. Taking it from X-Client-Type on every call is what signed admins out
+        // of the dashboard: the audience decides whether a privileged account is authenticated at
+        // all (JwtAuthenticationFilter drops any admin/supplier principal whose token is not
+        // audience "dashboard"), the header defaults to "web" when absent, and a page reload's
+        // refresh that omitted it therefore re-minted a working admin token as one the filter
+        // rejects. Every later request was anonymous, which the dashboard reads as a logout.
+        //
+        // The stored value wins, so rotation cannot change what the session is. The header is
+        // consulted only for sessions issued before that value was recorded, which heal on the
+        // next sign-in.
+        String effectiveAudience = existing.getClientType() != null
+                ? existing.getClientType()
+                : audience;
+
+        String newAccessToken = generateAccessToken(creds, effectiveAudience);
+        IssuedRefreshToken newRefreshToken = generateRefreshToken(creds, deviceInfo, effectiveAudience);
 
         return new RotateTokensResult(
                 new SignInResponse(newAccessToken, getAccessTokenExpirySeconds()),
