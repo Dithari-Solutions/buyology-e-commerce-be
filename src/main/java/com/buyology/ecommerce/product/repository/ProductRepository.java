@@ -102,12 +102,19 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
      * restore from inventing stock for a line the decrement never took anything from — the same
      * class of bug as the old floored-take/unfloored-restore asymmetry.
      *
+     * <p>The PRE_ORDER test is spelled {@code (availabilityStatus IS NULL OR ... <> :preOrder)}
+     * because this half of the guard is SQL and the caller's half is Java, where NULL does not
+     * behave the same way. {@code null != PRE_ORDER} is true in Java, so the caller decides the
+     * guard applies; {@code NULL <> 'PRE_ORDER'} is NULL in SQL, so the row matched nothing and the
+     * caller read the zero row count as "not enough stock" — refusing every product whose
+     * availability had never been set.
+     *
      * @return 1 when the units were taken, 0 when there were not enough (or stock is untracked)
      */
     @Modifying
     @Query("update Product p set p.stockQuantity = p.stockQuantity - :qty " +
            "where p.id = :productId and p.stockQuantity is not null and p.stockQuantity >= :qty " +
-           "and p.availabilityStatus <> :preOrder")
+           "and (p.availabilityStatus is null or p.availabilityStatus <> :preOrder)")
     int decrementStockIfAvailable(@Param("productId") UUID productId,
                                   @Param("qty") int qty,
                                   @Param("preOrder") Product.AvailabilityStatus preOrder);
@@ -126,7 +133,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     @Modifying
     @Query("update Product p set p.stockQuantity = p.stockQuantity + :qty " +
            "where p.id = :productId and p.stockQuantity is not null " +
-           "and p.availabilityStatus <> :preOrder")
+           "and (p.availabilityStatus is null or p.availabilityStatus <> :preOrder)")
     int incrementStock(@Param("productId") UUID productId,
                        @Param("qty") int qty,
                        @Param("preOrder") Product.AvailabilityStatus preOrder);

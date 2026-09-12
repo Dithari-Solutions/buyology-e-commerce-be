@@ -104,6 +104,25 @@ class ProductStockGuardIT {
         assertNull(stockOf(id), "and is left untouched");
     }
 
+    // ─── NULL availability must not be read as "no stock" ─────────────────────
+
+    @Test
+    void aProductWithNoAvailabilityStatusIsStillSellable() {
+        // The caller's half of this guard is Java, where `null != PRE_ORDER` is true, so it decides
+        // the guard applies and requires the statement to match a row. The statement's half is SQL,
+        // where `NULL <> 'PRE_ORDER'` is NULL rather than true — so the row matched nothing, the
+        // caller saw a zero row count, and every product whose availability had never been set was
+        // refused with a false "Insufficient stock".
+        UUID id = productWithNullAvailability(5);
+
+        assertEquals(1, productRepository.decrementStockIfAvailable(id, 2),
+                "a product with no availability status must still be sellable");
+        assertEquals(3, stockOf(id));
+
+        assertEquals(1, productRepository.incrementStock(id, 2), "and its restore must match");
+        assertEquals(5, stockOf(id));
+    }
+
     // ─── Pre-order is exempt, on both legs ────────────────────────────────────
 
     @Test
@@ -217,6 +236,20 @@ class ProductStockGuardIT {
         Product saved = productRepository.saveAndFlush(p);
         em.clear();   // the queries under test are bulk statements; read back from the database
         return saved.getId();
+    }
+
+    /**
+     * A product whose availability_status is NULL. The entity defaults it to PRE_ORDER, so the
+     * column is nulled directly — which is the state real rows are in when they predate the field.
+     */
+    private UUID productWithNullAvailability(Integer stock) {
+        UUID id = product(stock, Product.AvailabilityStatus.IN_STOCK);
+        em.createNativeQuery("update products set availability_status = null where id = :id")
+                .setParameter("id", id)
+                .executeUpdate();
+        em.flush();
+        em.clear();
+        return id;
     }
 
     private Integer stockOf(UUID id) {

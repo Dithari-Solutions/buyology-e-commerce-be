@@ -97,6 +97,8 @@ public class OrderService {
     private final StoreProductRepository storeProductRepo;
     private final StoreProductVariantRepository storeProductVariantRepo;
     private final com.buyology.ecommerce.product.repository.ProductRepository productRepository;
+    /** See the note at the product-stock guard in createOrder. Defaults to off. */
+    private final boolean enforceProductStock;
     private final ProductTranslationRepository productTranslationRepository;
     private final ProductMediaRepository productMediaRepository;
     private final UserProfilesRepository userProfileRepo;
@@ -146,6 +148,8 @@ public class OrderService {
                         StoreProductRepository storeProductRepo,
                         StoreProductVariantRepository storeProductVariantRepo,
                         com.buyology.ecommerce.product.repository.ProductRepository productRepository,
+                        @org.springframework.beans.factory.annotation.Value(
+                                "${app.stock.enforce-product-quantity:false}") boolean enforceProductStock,
                         ProductTranslationRepository productTranslationRepository,
                         ProductMediaRepository productMediaRepository,
                         UserProfilesRepository userProfileRepo,
@@ -185,6 +189,7 @@ public class OrderService {
         this.storeLocationRepo = storeLocationRepo;
         this.storeProductRepo = storeProductRepo;
         this.productRepository = productRepository;
+        this.enforceProductStock = enforceProductStock;
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
         this.productMediaRepository = productMediaRepository;
@@ -451,15 +456,28 @@ public class OrderService {
             // cannot both pass, and it composes with the restore in StockReservationService when
             // a stale order is superseded inside this same transaction.
             //
-            // Two states are deliberately left unguarded, so that nothing which sells today
-            // stops selling because of this. A null stockQuantity still means "not tracked" —
-            // the meaning the column has always had. And PRE_ORDER is an explicit instruction to
-            // accept orders that cannot be filled yet, which is exactly a request to skip this
-            // check; it is also the default availability for a new product, so guarding it would
-            // refuse pre-orders that work today. A product an admin wants guarded is IN_STOCK.
+            // Product-level stock. Whether this REFUSES an order is deliberately a configuration
+            // decision, and it defaults to off.
+            //
+            // products.stock_quantity is not an inventory count and never has been. V12 introduced
+            // it as an "admin-managed stock quantity ... when set and low (< 5) the storefront shows
+            // an 'almost sold out' urgency message", and the decrement here was floored at zero and
+            // by its own comment "never blocks the order". So the column has been counting DOWN past
+            // whatever an admin once typed, for every order, for as long as it has existed — which
+            // means a product that has simply sold well sits at 0 today while still being on sale.
+            //
+            // Enforcing it turned every one of those into a refused checkout. That is why this is a
+            // switch rather than a behaviour: the guard is correct, the data underneath it is not
+            // trustworthy yet. Audit and backfill stock_quantity, then set
+            // app.stock.enforce-product-quantity=true.
+            //
+            // Real inventory is StoreProductVariant.stock, guarded unconditionally above. Nothing
+            // here weakens that.
             Product orderedProduct = cartItem.getProduct();
-            if (orderedProduct.getStockQuantity() != null
-                    && orderedProduct.getAvailabilityStatus() != Product.AvailabilityStatus.PRE_ORDER) {
+            boolean tracksStock = orderedProduct.getStockQuantity() != null
+                    && orderedProduct.getAvailabilityStatus() != Product.AvailabilityStatus.PRE_ORDER;
+
+            if (tracksStock && enforceProductStock) {
                 int taken = productRepository.decrementStockIfAvailable(
                         orderedProduct.getId(), cartItem.getQuantity());
                 if (taken != 1) {
@@ -467,10 +485,19 @@ public class OrderService {
                             + orderedProduct.getId() + " (requested " + cartItem.getQuantity()
                             + ", available " + orderedProduct.getStockQuantity() + ")");
                 }
-                // Selling the last unit is what makes a product out of stock. Nothing recomputed
-                // this before, and the storefront's in-stock badge and Add to Cart gate are both
-                // derived from availabilityStatus alone — so a sold-out machine went on
-                // advertising itself as available.
+            } else if (orderedProduct.getStockQuantity() != null) {
+                // The historical behaviour: count down, floor at zero, never refuse. Kept so the
+                // urgency message keeps working while the guard is off.
+                orderedProduct.setStockQuantity(
+                        Math.max(0, orderedProduct.getStockQuantity() - cartItem.getQuantity()));
+            }
+
+            // Safe either way: selling the last unit is what makes a product out of stock, and
+            // nothing recomputed this before. The storefront's in-stock badge and Add to Cart gate
+            // are both derived from availabilityStatus alone, so a sold-out product went on
+            // advertising itself as available. This only ever moves IN_STOCK -> OUT_OF_STOCK for a
+            // product whose count has actually reached zero.
+            if (tracksStock) {
                 productRepository.markOutOfStockIfDepleted(orderedProduct.getId());
             }
 

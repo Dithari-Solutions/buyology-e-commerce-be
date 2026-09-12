@@ -56,6 +56,8 @@ public class CartService {
     private final ProductVariantRepository variantRepository;
     private final ProductSpecOptionRepository specOptionRepository;
     private final StoreProductRepository storeProductRepository;
+    /** See OrderService's product-stock guard. Defaults to off; the two must agree. */
+    private final boolean enforceProductStock;
     private final StoreProductVariantRepository storeProductVariantRepository;
     private final StoreLocationRepository storeLocationRepository;
     private final StoreOperatingHoursRepository operatingHoursRepository;
@@ -73,6 +75,8 @@ public class CartService {
             ProductVariantRepository variantRepository,
             ProductSpecOptionRepository specOptionRepository,
             StoreProductRepository storeProductRepository,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${app.stock.enforce-product-quantity:false}") boolean enforceProductStock,
             StoreProductVariantRepository storeProductVariantRepository,
             StoreLocationRepository storeLocationRepository,
             StoreOperatingHoursRepository operatingHoursRepository,
@@ -88,6 +92,7 @@ public class CartService {
         this.variantRepository = variantRepository;
         this.specOptionRepository = specOptionRepository;
         this.storeProductRepository = storeProductRepository;
+        this.enforceProductStock = enforceProductStock;
         this.storeProductVariantRepository = storeProductVariantRepository;
         this.storeLocationRepository = storeLocationRepository;
         this.operatingHoursRepository = operatingHoursRepository;
@@ -265,10 +270,17 @@ public class CartService {
             if (storeProduct.hasDiscount()) {
                 originalUnitPrice = storeProduct.getStorePrice();
             }
-            // PRE_ORDER accepts orders that cannot be filled yet, so it has no ceiling — this
-            // mirrors the guard in OrderService.createOrder, and the two must agree or the cart
-            // refuses something checkout would have allowed.
-            availableUnits = product.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER
+            // Product-level stock only caps the line when the switch is on, exactly as in
+            // OrderService.createOrder — the two must agree, or the cart refuses something
+            // checkout would have allowed, or worse allows something checkout will refuse.
+            //
+            // products.stock_quantity is a display-urgency hint that has been counted down past
+            // whatever an admin typed for every order since V12 (the old decrement floored at zero
+            // and never blocked), so a well-selling product sits at 0 while still on sale. Capping
+            // against it refused add-to-cart for those products. PRE_ORDER has no ceiling either
+            // way: it means "accept orders we cannot fill yet".
+            availableUnits = (!enforceProductStock
+                    || product.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER)
                     ? null
                     : product.getStockQuantity();
         }
@@ -390,7 +402,8 @@ public class CartService {
                     .orElse(null);
         }
         Product p = item.getProduct();
-        return p.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER
+        return (!enforceProductStock
+                || p.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER)
                 ? null
                 : p.getStockQuantity();
     }
