@@ -159,6 +159,16 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Product not found");
         }
 
+        // A product an admin has marked out of stock cannot be added. The disabled button on the
+        // product page used to be the only thing enforcing this, so any direct call to this
+        // endpoint — or the published mobile app, which cannot be updated as fast as the web —
+        // added it to the cart regardless.
+        if (product.getAvailabilityStatus() == Product.AvailabilityStatus.OUT_OF_STOCK) {
+            log.warn("addItem rejected — productId={} is OUT_OF_STOCK [authCredentialId={}]",
+                    request.getProductId(), authCredentialId);
+            return ApiResponse.failure(HttpStatus.CONFLICT, "This product is out of stock.");
+        }
+
         // Resolve variant if provided
         ProductVariant variant = null;
         if (request.getVariantId() != null) {
@@ -236,6 +246,9 @@ public class CartService {
         // price. Variants carry their own price and have no discount in the data model.
         BigDecimal unitPrice;
         BigDecimal originalUnitPrice = null; // pre-discount price, only set when discounted
+        // How many units this line can actually have. Null means the product does not track
+        // stock, which is a real state here and must stay sellable.
+        Integer availableUnits;
         if (variant != null) {
             StoreProductVariant storeVariant = storeProductVariantRepository
                     .findByStoreProduct_IdAndVariant_Id(storeProduct.getId(), variant.getId())
@@ -246,11 +259,13 @@ public class CartService {
                 return ApiResponse.failure(HttpStatus.NOT_FOUND, "Variant is not available in the selected store");
             }
             unitPrice = storeVariant.getStorePrice();
+            availableUnits = storeVariant.getStock();
         } else {
             unitPrice = storeProduct.effectivePrice();
             if (storeProduct.hasDiscount()) {
                 originalUnitPrice = storeProduct.getStorePrice();
             }
+            availableUnits = product.getStockQuantity();
         }
 
         // Stamp the cart with country + currency on first item
@@ -268,6 +283,11 @@ public class CartService {
             if (existing.isPresent()) {
                 CartItem item = existing.get();
                 int newQty = item.getQuantity() + request.getQuantity();
+                if (availableUnits != null && newQty > availableUnits) {
+                    log.warn("addItem rejected — {} unit(s) requested, {} in stock [cartId={} productId={}]",
+                            newQty, availableUnits, cart.getId(), product.getId());
+                    return ApiResponse.failure(HttpStatus.CONFLICT, outOfStockMessage(availableUnits));
+                }
                 log.debug("addItem — incrementing existing cartItemId={} qty {} -> {} [cartId={}]",
                         item.getId(), item.getQuantity(), newQty, cart.getId());
                 item.setQuantity(newQty);
@@ -276,6 +296,12 @@ public class CartService {
                 recalculateCartTotal(cart);
                 return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Cart updated");
             }
+        }
+
+        if (availableUnits != null && request.getQuantity() > availableUnits) {
+            log.warn("addItem rejected — {} unit(s) requested, {} in stock [cartId={} productId={}]",
+                    request.getQuantity(), availableUnits, cart.getId(), product.getId());
+            return ApiResponse.failure(HttpStatus.CONFLICT, outOfStockMessage(availableUnits));
         }
 
         // Create new cart item
@@ -323,12 +349,59 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Cart item not found");
         }
 
+        // The same ceiling as addItem. Without it the merge path was guarded and the PATCH path
+        // was not, so typing the quantity straight into the box bypassed the check entirely.
+        Integer availableUnits = availableUnitsFor(item);
+        if (availableUnits != null && request.getQuantity() > availableUnits) {
+            log.warn("updateItemQuantity rejected — {} unit(s) requested, {} in stock [cartId={} cartItemId={}]",
+                    request.getQuantity(), availableUnits, cart.getId(), cartItemId);
+            return ApiResponse.failure(HttpStatus.CONFLICT, outOfStockMessage(availableUnits));
+        }
+
         item.setQuantity(request.getQuantity());
         item.setTotalPrice(item.getUnitPrice().multiply(BigDecimal.valueOf(request.getQuantity())));
         cartItemRepository.save(item);
 
         recalculateCartTotal(cart);
         return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Cart item updated");
+    }
+
+    // ─── Stock ceilings ───────────────────────────────────────────────────────
+
+    /**
+     * How many units of an existing cart line are actually available, or null when the product
+     * does not track stock.
+     *
+     * <p>Mirrors the resolution in {@code addItem}: a variant line is limited by the store
+     * listing's own count, a variant-less line by the product's count.
+     */
+    private Integer availableUnitsFor(CartItem item) {
+        if (item.getVariant() != null && item.getStoreId() != null) {
+            return storeProductRepository
+                    .findByStore_IdAndProduct_IdAndIsActiveTrue(item.getStoreId(), item.getProduct().getId())
+                    .flatMap(sp -> storeProductVariantRepository
+                            .findByStoreProduct_IdAndVariant_Id(sp.getId(), item.getVariant().getId()))
+                    .map(StoreProductVariant::getStock)
+                    .orElse(null);
+        }
+        return item.getProduct().getStockQuantity();
+    }
+
+    /**
+     * What the customer is told when they ask for more than exists.
+     *
+     * <p>Names the number, because "out of stock" on a line they can see in their cart reads as a
+     * bug. Note this is a courtesy check, not the guarantee: the cart reserves nothing, so the
+     * binding refusal is the conditional decrement in {@code OrderService.createOrder}. This just
+     * means they find out before they reach the payment page rather than after.
+     */
+    private static String outOfStockMessage(int available) {
+        if (available <= 0) {
+            return "This item is now out of stock.";
+        }
+        return available == 1
+                ? "Only 1 left in stock."
+                : "Only " + available + " left in stock.";
     }
 
     // ─── Remove item ──────────────────────────────────────────────────────────

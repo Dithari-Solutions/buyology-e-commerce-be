@@ -96,6 +96,7 @@ public class OrderService {
     private final StoreLocationRepository storeLocationRepo;
     private final StoreProductRepository storeProductRepo;
     private final StoreProductVariantRepository storeProductVariantRepo;
+    private final com.buyology.ecommerce.product.repository.ProductRepository productRepository;
     private final ProductTranslationRepository productTranslationRepository;
     private final ProductMediaRepository productMediaRepository;
     private final UserProfilesRepository userProfileRepo;
@@ -144,6 +145,7 @@ public class OrderService {
                         StoreLocationRepository storeLocationRepo,
                         StoreProductRepository storeProductRepo,
                         StoreProductVariantRepository storeProductVariantRepo,
+                        com.buyology.ecommerce.product.repository.ProductRepository productRepository,
                         ProductTranslationRepository productTranslationRepository,
                         ProductMediaRepository productMediaRepository,
                         UserProfilesRepository userProfileRepo,
@@ -182,6 +184,7 @@ public class OrderService {
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.storeLocationRepo = storeLocationRepo;
         this.storeProductRepo = storeProductRepo;
+        this.productRepository = productRepository;
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
         this.productMediaRepository = productMediaRepository;
@@ -436,13 +439,34 @@ public class OrderService {
                 }
             }
 
-            // Soft-decrement the product's admin-managed display stock (drives the
-            // storefront's "almost sold out" urgency). Floored at 0; never blocks the
-            // order. The managed entity flushes on commit.
+            // Take the units off the product's own stock, and refuse the order if they are not
+            // there. This is the guard for every variant-less line — which is not an edge case:
+            // it is every ERP- and spreadsheet-imported refurbished machine, and it is every
+            // Buy Now order, since buyNow always builds its cart item with a null variant.
+            //
+            // This used to be a soft decrement floored at 0 that, by its own comment, "never
+            // blocks the order", so a single physical laptop could be sold any number of times.
+            // A statement rather than a read-modify-write on the entity: the >= predicate is
+            // evaluated by Postgres under the row lock, so two orders racing for the last unit
+            // cannot both pass, and it composes with the restore in StockReservationService when
+            // a stale order is superseded inside this same transaction.
+            //
+            // A null stockQuantity still means "not tracked" and is left alone, so nothing that
+            // sells today stops selling because of this.
             Product orderedProduct = cartItem.getProduct();
             if (orderedProduct.getStockQuantity() != null) {
-                orderedProduct.setStockQuantity(
-                        Math.max(0, orderedProduct.getStockQuantity() - cartItem.getQuantity()));
+                int taken = productRepository.decrementStockIfAvailable(
+                        orderedProduct.getId(), cartItem.getQuantity());
+                if (taken != 1) {
+                    throw new IllegalStateException("Insufficient stock for product "
+                            + orderedProduct.getId() + " (requested " + cartItem.getQuantity()
+                            + ", available " + orderedProduct.getStockQuantity() + ")");
+                }
+                // Selling the last unit is what makes a product out of stock. Nothing recomputed
+                // this before, and the storefront's in-stock badge and Add to Cart gate are both
+                // derived from availabilityStatus alone — so a sold-out machine went on
+                // advertising itself as available.
+                productRepository.markOutOfStockIfDepleted(orderedProduct.getId());
             }
 
             OrderItem item = new OrderItem();

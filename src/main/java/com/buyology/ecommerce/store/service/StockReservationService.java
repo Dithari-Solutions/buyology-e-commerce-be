@@ -3,7 +3,6 @@ package com.buyology.ecommerce.store.service;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
-import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductRepository;
 import com.buyology.ecommerce.store.repository.StoreProductVariantRepository;
 import org.slf4j.Logger;
@@ -110,24 +109,27 @@ public class StockReservationService {
                 }
             }
 
-            // The product's admin-managed display stock, soft-decremented at order creation.
-            // Through the managed entity rather than a bulk statement, because in createOrder's
-            // stale-order path this runs in the same persistence context that is about to
-            // soft-decrement the same Product — a bulk update there would be overwritten by the
-            // entity flush at commit and the restore would silently vanish.
+            // The product's own stock, taken at order creation. A bulk statement, matching the
+            // variant leg above and matching the decrement in createOrder.
+            //
+            // This used to go through the managed entity, because back then createOrder's
+            // decrement was a read-modify-write and a bulk update here would have been overwritten
+            // by that entity's flush at commit. Now that createOrder takes units with a conditional
+            // statement too, neither side mutates the entity, nothing is left dirty to flush, and
+            // the two compose in the stale-order path exactly as the variant statements do.
+            //
+            // Note this is now a true mirror of the take. While the decrement was floored at 0 and
+            // this restore was not, a declined card on a sold-out product invented a unit of
+            // stock: it subtracted from a count already at 0, changing nothing, then added one
+            // back. The decrement refuses instead of flooring, so that asymmetry is gone.
             if (item.getProductId() != null) {
-                productRepo.findById(item.getProductId()).ifPresent(p -> restoreDisplayStock(p, qty));
+                productRepo.incrementStock(item.getProductId(), qty);
+                productRepo.markInStockIfReplenished(item.getProductId());
             }
         }
 
         order.setStockRestoredAt(Instant.now());
         log.info("[STOCK] Order {}: returned stock for {} variant line(s)", order.getId(), variantLines);
         return true;
-    }
-
-    private static void restoreDisplayStock(Product product, int qty) {
-        if (product.getStockQuantity() != null) {
-            product.setStockQuantity(product.getStockQuantity() + qty);
-        }
     }
 }

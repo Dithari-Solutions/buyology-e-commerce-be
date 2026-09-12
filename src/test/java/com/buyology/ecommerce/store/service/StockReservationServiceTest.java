@@ -73,19 +73,22 @@ class StockReservationServiceTest {
     }
 
     @Test
-    void alsoRestoresTheProductsDisplayStock() {
-        // The storefront's "almost sold out" urgency reads this. Left alone, a shop that never
-        // sold anything slowly reads as sold out.
+    void alsoRestoresTheProductsOwnStock() {
+        // Now real inventory, not just a display counter: createOrder refuses an order it cannot
+        // take these units for, so they have to come back when the order dies.
+        //
+        // A statement rather than a mutation of the loaded entity. That is deliberate and load
+        // bearing — createOrder's decrement is a statement too, and in the stale-order path both
+        // run in one transaction against the same product. Mutating the entity here would have
+        // its value flushed over the decrement at commit.
         Order order = reservedOrder();
-        Product p = new Product();
-        p.setStockQuantity(7);
         itemsAre(item(VARIANT, STORE, 2));
         when(variantRepo.incrementStock(any(), any(), any(), anyInt())).thenReturn(1);
-        when(productRepo.findById(PRODUCT)).thenReturn(Optional.of(p));
 
         service.releaseForOrder(order);
 
-        assertEquals(9, p.getStockQuantity());
+        verify(productRepo).incrementStock(PRODUCT, 2);
+        verify(productRepo).markInStockIfReplenished(PRODUCT);
     }
 
     // ── Inventing stock: the failure worse than the leak ─────────────────────
@@ -115,15 +118,21 @@ class StockReservationServiceTest {
     }
 
     @Test
-    void ignoresLinesThatNeverHadStock() {
-        // Only variant lines with a store were ever decremented — this mirrors the condition in
-        // createOrder that took the stock.
+    void returnsProductStockEvenForLinesWithNoVariant() {
+        // This used to assert the opposite, because a variant-less line genuinely held nothing:
+        // createOrder skipped the guard for it entirely. It now takes units off the product, so
+        // the restore has to give them back — otherwise every Buy Now cancellation and every
+        // imported refurbished machine leaks a unit on each declined card.
         Order order = reservedOrder();
         itemsAre(item(null, STORE, 4), item(VARIANT, null, 2));
 
         service.releaseForOrder(order);
 
+        // Still no store listing to credit: one line has no variant, the other no store.
         verify(variantRepo, never()).incrementStock(any(), any(), any(), anyInt());
+        // But both lines name a product, and both took product stock.
+        verify(productRepo).incrementStock(PRODUCT, 4);
+        verify(productRepo).incrementStock(PRODUCT, 2);
     }
 
     @Test
@@ -151,13 +160,16 @@ class StockReservationServiceTest {
     }
 
     @Test
-    void toleratesAProductThatNoLongerExists() {
+    void toleratesAProductThatNoLongerExistsOrDoesNotTrackStock() {
+        // Both cases surface the same way now — the conditional UPDATE simply matches no row —
+        // and neither may undo a cancellation the customer has already been told about.
         Order order = reservedOrder();
         itemsAre(item(VARIANT, STORE, 1));
         when(variantRepo.incrementStock(any(), any(), any(), anyInt())).thenReturn(1);
-        when(productRepo.findById(PRODUCT)).thenReturn(Optional.empty());
+        when(productRepo.incrementStock(any(), anyInt())).thenReturn(0);
 
         assertDoesNotThrow(() -> service.releaseForOrder(order));
+        assertNotNull(order.getStockRestoredAt());
     }
 
     @Test
