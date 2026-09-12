@@ -4,6 +4,7 @@ import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import com.buyology.ecommerce.order.dto.CreateOrderRequest;
 
 import java.math.BigDecimal;
@@ -20,6 +21,11 @@ import java.util.Objects;
  * those changes move the subtotal. Reuse is only safe when EVERY input that decides price or
  * fulfilment matches; anything less quietly charges or ships something the customer did not review.
  *
+ * <p>The payment method is one of those inputs and not a cosmetic one: it decides whether the goods
+ * may leave before the money arrives. Handing back a prepaid order to a customer who has just
+ * switched to cash would leave them waiting at a gateway for an order meant to be settled at the
+ * door, and the reverse would dispatch an unpaid parcel for an order they intended to pay for now.
+ *
  * <p>Deliberately free of Spring and repositories, so the predicate is testable without
  * constructing OrderService's thirty-odd-argument constructor.
  */
@@ -35,9 +41,11 @@ final class CheckoutIdentity {
      */
     static boolean isSameCheckout(Order prior, Cart cart, List<CartItem> cartItems,
                                   CreateOrderRequest req, OrderService.FulfilmentPlan plan,
-                                  String currency, String orderCountryCode) {
+                                  String currency, String orderCountryCode,
+                                  OrderPaymentMethod paymentMethod) {
         return eqMoney(prior.getSubtotal(), cart.getTotalPrice())              // the price base
                 && eqMoney(prior.getShippingFee(), plan.shippingFee())         // fee, post-downgrade
+                && prior.getPaymentMethod() == paymentMethod                   // card now, cash now?
                 && eqIgnoreCaseNullable(prior.getCurrency(), currency)         // what they pay in
                 && eqIgnoreCaseNullable(prior.getCountryCode(), orderCountryCode)
                 && eqIgnoreCaseNullable(prior.getCountry(), plan.country())

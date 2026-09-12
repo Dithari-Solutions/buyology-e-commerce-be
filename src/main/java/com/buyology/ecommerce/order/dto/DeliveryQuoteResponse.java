@@ -12,5 +12,11 @@ public record DeliveryQuoteResponse(
         BigDecimal standardFee,
         BigDecimal expressFee,
         BigDecimal freeShippingThreshold,
-        boolean qualifiesForFreeShipping) {
+        boolean qualifiesForFreeShipping,
+        /**
+         * The VAT rate this checkout will be charged at — 5.00 means 5%; null where VAT does not
+         * apply. Here because Buy Now has no cart to read it from, and a checkout page that cannot
+         * show the tax line shows a total that disagrees with the amount charged.
+         */
+        BigDecimal vatRatePercent) {
 }

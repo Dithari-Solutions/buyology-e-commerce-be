@@ -54,7 +54,7 @@ public class QuiqupOrderMapper {
     /**
      * Builds the create-order payload.
      *
-     * @param order  the paid order being dispatched
+     * @param order  the order being dispatched — paid already, or due in cash at the door
      * @param origin the active store location the parcel is collected from
      * @param originContactPhone the store's contact phone, for the courier to call on arrival
      * @param items  the order's items, used only to describe the parcels
@@ -66,11 +66,25 @@ public class QuiqupOrderMapper {
         root.put("partner_order_id", partnerOrderId(order));
         root.put("notes", "Buyology order " + partnerOrderId(order));
 
-        // Every order reaching this mapper has already been paid for on our side, so the courier
-        // collects no money. Cash on delivery would need payment_mode "cod" and the amount to
-        // collect, and is not offered on this channel.
-        root.put("payment_mode", "pre_paid");
-        root.put("payment_amount", 0);
+        // What the courier is asked to collect at the door.
+        //
+        // A prepaid order is settled before it is ever dispatched, so the courier collects nothing.
+        // A cash order is the opposite and this is the ONLY place that tells Quiqup so: get it
+        // wrong and the parcel is handed over for free, with no second chance to ask for the money.
+        //
+        // Keyed on whether the money is actually in hand, not on the payment method alone — a cash
+        // order whose customer paid at the counter before dispatch, or that an admin has already
+        // recorded as collected, is prepaid by the time it reaches a courier and must not be
+        // charged twice.
+        if (order.isCashOnDelivery() && !order.isMoneyCollected()) {
+            root.put("payment_mode", "cod");
+            root.put("payment_amount", order.getTotalAmount() == null
+                    ? 0
+                    : order.getTotalAmount().doubleValue());
+        } else {
+            root.put("payment_mode", "pre_paid");
+            root.put("payment_amount", 0);
+        }
 
         root.set("origin", originNode(origin, originContactPhone,
                 "Collect 1 parcel for Buyology order " + partnerOrderId(order)

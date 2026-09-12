@@ -91,6 +91,36 @@ public class AdminOrderController {
     }
 
     /**
+     * Record that a cash-on-delivery order's money is actually in hand.
+     *
+     * <p>Deliberately NOT a status change. A cash order's fulfilment and its payment run on
+     * different clocks — it is packed, dispatched and delivered while unpaid, and the cash is banked
+     * at the end — so there is no point in the status machine where "PAID" belongs. This stamps the
+     * collection on the order itself (who, when, how much), which is what
+     * {@code Order.isMoneyCollected()} reads and therefore what decides whether there is anything
+     * to refund if the order is later cancelled.
+     *
+     * <p>Body is optional: {@code { "amount": 249.00, "notes": "..." }}. An omitted amount means
+     * the order's total was collected in full.
+     */
+    @PostMapping("/{orderId}/cod-collected")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:status:update') or @rbacPolicy.legacyAdmin()")
+    public ResponseEntity<ApiResponse<OrderResponse>> recordCashCollected(
+            @AuthenticationPrincipal UUID adminUserId,
+            @PathVariable UUID orderId,
+            @RequestBody(required = false) RecordCashCollectedRequest request) {
+        return ApiResponse.success(
+                orderService.recordCashOnDeliveryCollected(
+                        orderId, adminUserId,
+                        request == null ? null : request.amount(),
+                        request == null ? null : request.notes()),
+                "Cash collection recorded");
+    }
+
+    /** @param amount collected, in the order's own currency; null means the full total. */
+    public record RecordCashCollectedRequest(java.math.BigDecimal amount, String notes) {}
+
+    /**
      * Assign one of the order's store's couriers to the order (stamps courier name/phone).
      * Body: { "courierProfileId": "<uuid>" }.
      */

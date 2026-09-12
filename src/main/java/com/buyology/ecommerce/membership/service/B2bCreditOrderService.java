@@ -84,6 +84,13 @@ public class B2bCreditOrderService {
         if (order.getCreditApplied() != null && order.getCreditApplied().compareTo(BigDecimal.ZERO) > 0) {
             return ApiResponse.failure(HttpStatus.CONFLICT, "Credit has already been applied to this order");
         }
+        // A cash order stays PENDING_PAYMENT while it is packed and delivered, so the status check
+        // above does not exclude it. Spending credit on one would settle the same goods twice —
+        // once from the wallet and once in cash at the door.
+        if (order.isCashOnDelivery()) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "This order is being paid in cash on delivery and cannot be paid with credit.");
+        }
 
         B2bMembership membership = membershipRepository.findByUserId(userId).orElse(null);
         if (membership == null) {

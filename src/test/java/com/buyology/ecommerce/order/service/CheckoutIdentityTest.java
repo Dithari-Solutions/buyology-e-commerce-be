@@ -5,6 +5,7 @@ import com.buyology.ecommerce.cart.domain.CartItem;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import com.buyology.ecommerce.order.dto.CreateOrderRequest;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductVariant;
@@ -101,7 +102,13 @@ class CheckoutIdentityTest {
     }
 
     private static boolean same(Order prior, OrderService.FulfilmentPlan plan, String coupon) {
-        return CheckoutIdentity.isSameCheckout(prior, cart(), basket(), req(coupon), plan, "AED", "UAE");
+        return same(prior, plan, coupon, OrderPaymentMethod.ONLINE);
+    }
+
+    private static boolean same(Order prior, OrderService.FulfilmentPlan plan, String coupon,
+                                OrderPaymentMethod paymentMethod) {
+        return CheckoutIdentity.isSameCheckout(
+                prior, cart(), basket(), req(coupon), plan, "AED", "UAE", paymentMethod);
     }
 
     // ── the double-tap must still reuse ──────────────────────────────────────
@@ -149,7 +156,8 @@ class CheckoutIdentityTest {
                 cartItem(p2, null, STORE, 1, "50.00"),
                 cartItem(PRODUCT, VARIANT, STORE, 2, "100.00"));
 
-        assertTrue(CheckoutIdentity.isSameCheckout(o, c, reversed, req(null), deliveryPlan(), "AED", "UAE"));
+        assertTrue(CheckoutIdentity.isSameCheckout(
+                o, c, reversed, req(null), deliveryPlan(), "AED", "UAE", OrderPaymentMethod.ONLINE));
     }
 
     // ── everything the customer can change must supersede ────────────────────
@@ -176,6 +184,34 @@ class CheckoutIdentityTest {
                 DeliveryMethod.PICKUP, BigDecimal.ZERO, "today",
                 STORE, "Buyology Downtown", "Emaar Square 1", null, null, "UAE");
         assertFalse(same(prior(), pickup, null));
+    }
+
+    @Test
+    void switchingToCashOnDeliverySupersedes() {
+        // Reuse here would be the worst kind: the customer has just chosen to pay at the door and
+        // would be handed back a prepaid order, left waiting at a gateway for money the order was
+        // never going to ask for. Nothing else about the checkout moved, so no other clause catches
+        // it — the subtotal, basket, address and fee are all identical.
+        assertFalse(same(prior(), deliveryPlan(), null, OrderPaymentMethod.CASH_ON_DELIVERY));
+    }
+
+    @Test
+    void switchingBackToPayingOnlineSupersedes() {
+        // And the reverse, which is the dangerous direction: reusing a cash order for a customer
+        // who has decided to pay now would dispatch an unpaid parcel and ask a courier to collect
+        // money the customer has already handed over online.
+        Order cash = prior();
+        cash.setPaymentMethod(OrderPaymentMethod.CASH_ON_DELIVERY);
+        assertFalse(same(cash, deliveryPlan(), null, OrderPaymentMethod.ONLINE));
+    }
+
+    @Test
+    void aPriorOrderPredatingThePaymentMethodFieldStillReuses() {
+        // Rows created before V53 have a null payment_method and are read as ONLINE. A returning
+        // customer's double-tap must not rebuild their order just because the column is new.
+        Order legacy = prior();
+        legacy.setPaymentMethod(null);
+        assertTrue(same(legacy, deliveryPlan(), null, OrderPaymentMethod.ONLINE));
     }
 
     @Test

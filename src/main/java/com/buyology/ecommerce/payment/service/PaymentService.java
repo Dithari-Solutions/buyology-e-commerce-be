@@ -345,6 +345,15 @@ public class PaymentService {
         if (order.getStatus() != com.buyology.ecommerce.order.domain.enums.OrderStatus.PENDING_PAYMENT) {
             throw new IllegalStateException("This order is not awaiting payment");
         }
+        // A cash order sits in PENDING_PAYMENT for its whole fulfilment journey — that is what lets
+        // it be packed and dispatched before the money arrives — so the status check above does not
+        // rule it out the way it rules out an already-settled card order. Without this, a customer
+        // could pay at the gateway for an order whose cash is still due at the door, and be charged
+        // twice for the same goods.
+        if (order.isCashOnDelivery()) {
+            throw new IllegalStateException(
+                    "This order is being paid in cash on delivery and cannot be paid online.");
+        }
         // Ownership is enforced inside initiatePayment (order.userId == principal).
         InitiatePaymentRequest ip = new InitiatePaymentRequest();
         ip.setAppOrderId(orderId);

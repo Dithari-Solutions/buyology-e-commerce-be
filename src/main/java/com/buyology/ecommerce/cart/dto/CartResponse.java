@@ -18,6 +18,26 @@ public class CartResponse {
     private Instant updatedAt;
 
     // Pricing policy snapshot, all expressed in {@link #currency}.
+    /**
+     * Tax that will be added on top, at {@link #vatRatePercent}. Null when the policy figures could
+     * not be computed at all (FX unavailable) — clients should then show no VAT line rather than
+     * a zero one, because "no tax" and "we could not work it out" are different claims.
+     */
+    private BigDecimal vatAmount;
+
+    /** The rate — 5.00 means 5%. Null where VAT does not apply to this cart's market. */
+    private BigDecimal vatRatePercent;
+
+    /**
+     * What the customer will be asked to pay: goods + delivery + VAT.
+     *
+     * <p>{@link #totalPrice} is and remains the SELECTED SUBTOTAL — the promo validator, the
+     * free-shipping threshold and the order's price base are all defined against it, so widening
+     * its meaning to include tax would silently change all three. This is the display total, and
+     * only that.
+     */
+    private BigDecimal estimatedTotal;
+
     private BigDecimal freeShippingThreshold;
     private BigDecimal deliveryFee;
     private Boolean qualifiesForFreeShipping;
@@ -64,6 +84,15 @@ public class CartResponse {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public BigDecimal getVatAmount() { return vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
+
+    public BigDecimal getVatRatePercent() { return vatRatePercent; }
+    public void setVatRatePercent(BigDecimal vatRatePercent) { this.vatRatePercent = vatRatePercent; }
+
+    public BigDecimal getEstimatedTotal() { return estimatedTotal; }
+    public void setEstimatedTotal(BigDecimal estimatedTotal) { this.estimatedTotal = estimatedTotal; }
 
     public BigDecimal getFreeShippingThreshold() { return freeShippingThreshold; }
     public void setFreeShippingThreshold(BigDecimal freeShippingThreshold) { this.freeShippingThreshold = freeShippingThreshold; }

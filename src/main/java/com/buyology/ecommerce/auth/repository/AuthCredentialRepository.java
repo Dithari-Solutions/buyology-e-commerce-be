@@ -30,4 +30,24 @@ public interface AuthCredentialRepository extends JpaRepository<AuthCredentials,
      * every "is this email taken?" check must go through this method.
      */
     List<AuthCredentials> findAllByEmailIgnoreCase(String email);
+
+    /**
+     * Takes a write lock on one credential row, used to serialise "find or create the cart".
+     *
+     * <p>Cart creation is a read-then-insert with nothing between the two, so a page load that
+     * fires several cart calls at once had every one of them find no ACTIVE cart and insert. On a
+     * database carrying V17's {@code ux_cart_active_per_credential} partial unique index the loser
+     * fails with a constraint violation, which the client is shown as "A record with the same
+     * unique value already exists" — the error people hit on the checkout page. On a database
+     * created after V17 that index was never built (V17 is guarded on the table already existing,
+     * and Flyway runs before Hibernate creates it), so there the same race silently produces TWO
+     * active carts and the items split invisibly across them.
+     *
+     * <p>Locking the credential first makes the pair atomic per shopper, and fixes both outcomes
+     * with one mechanism that does not depend on the index being there. It is a real row lock, so
+     * it holds across replicas, and it serialises nothing beyond the one shopper creating a cart.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select c from AuthCredentials c where c.id = :id")
+    Optional<AuthCredentials> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
 }

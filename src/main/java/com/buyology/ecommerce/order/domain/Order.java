@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.order.domain;
 
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import jakarta.persistence.*;
 
@@ -142,6 +143,20 @@ public class Order {
     @Column(name = "discount", nullable = false, precision = 12, scale = 2)
     private BigDecimal discount = BigDecimal.ZERO;
 
+    /**
+     * Tax charged on top of the goods and delivery, in the order's own currency.
+     *
+     * <p>Included in {@link #totalAmount}, and stored separately because it has to be shown as its
+     * own line and reported as its own figure — a tax folded into a total is a tax nobody can
+     * account for afterwards. Zero where VAT does not apply, and on orders that predate it.
+     */
+    @Column(name = "vat_amount", precision = 12, scale = 2)
+    private BigDecimal vatAmount = BigDecimal.ZERO;
+
+    /** The rate this order was taxed at — 5.00 means 5%. Snapshotted: rates change, orders do not. */
+    @Column(name = "vat_rate_percent", precision = 5, scale = 2)
+    private BigDecimal vatRatePercent;
+
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
 
@@ -206,6 +221,44 @@ public class Order {
     /** Free-form cancellation reason (set by admin or customer on CANCELLED). */
     @Column(name = "cancellation_reason", length = 1000)
     private String cancellationReason;
+
+    // ── How this order is paid for ────────────────────────────────────────────
+
+    /**
+     * Whether the money arrives before the goods or with them.
+     *
+     * <p>The only field that lets an order be picked and dispatched while still PENDING_PAYMENT, so
+     * it is read by the status machine, by the cancellation path (a cash order with nothing
+     * collected has no money to refund) and by the courier payload (a cash order has to tell the
+     * courier what to collect at the door).
+     *
+     * <p>Never null for an order created since V53 — {@code ONLINE} is written explicitly rather
+     * than left to a default, so "the order did not say" and "the order is prepaid" cannot be
+     * confused. Rows predating it are NULL and are read as ONLINE, which is what they all were.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", length = 30)
+    private OrderPaymentMethod paymentMethod;
+
+    /**
+     * When an admin recorded that the cash was actually in hand.
+     *
+     * <p>Separate from {@link #paidAt}, and it is the field the money decisions read. Fulfilment
+     * and payment run on different clocks for a cash order — the parcel is packed, dispatched and
+     * delivered while unpaid, and the cash is banked at the end — so the fulfilment status cannot
+     * answer "has this been paid for". NULL on a cash order means the platform is still owed the
+     * money, and nothing may be refunded against it.
+     */
+    @Column(name = "cod_collected_at")
+    private Instant codCollectedAt;
+
+    /** How much cash was taken, in the order's own currency. Snapshotted, not recomputed. */
+    @Column(name = "cod_collected_amount", precision = 12, scale = 2)
+    private BigDecimal codCollectedAmount;
+
+    /** The admin (users.id) who recorded the collection — this is a cash audit trail. */
+    @Column(name = "cod_collected_by")
+    private UUID codCollectedBy;
 
     // ── Milestone timestamps ──────────────────────────────────────────────────
 
@@ -475,6 +528,12 @@ public class Order {
     public BigDecimal getDiscount() { return discount; }
     public void setDiscount(BigDecimal discount) { this.discount = discount; }
 
+    public BigDecimal getVatAmount() { return vatAmount == null ? BigDecimal.ZERO : vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
+
+    public BigDecimal getVatRatePercent() { return vatRatePercent; }
+    public void setVatRatePercent(BigDecimal vatRatePercent) { this.vatRatePercent = vatRatePercent; }
+
     public BigDecimal getTotalAmount() { return totalAmount; }
     public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
 
@@ -524,6 +583,40 @@ public class Order {
 
     public String getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    /** Never null: rows predating V53 are read as {@link OrderPaymentMethod#ONLINE}, which is what they were. */
+    public OrderPaymentMethod getPaymentMethod() {
+        return paymentMethod == null ? OrderPaymentMethod.ONLINE : paymentMethod;
+    }
+
+    public void setPaymentMethod(OrderPaymentMethod paymentMethod) { this.paymentMethod = paymentMethod; }
+
+    /** True when this order is settled in cash at handover rather than before it. */
+    public boolean isCashOnDelivery() {
+        return getPaymentMethod() == OrderPaymentMethod.CASH_ON_DELIVERY;
+    }
+
+    /**
+     * Whether this order's money is actually in hand.
+     *
+     * <p>The one question every money decision should ask, and the reason it is a method rather
+     * than a status check: for a prepaid order "paid" is a fulfilment milestone that precedes
+     * everything, while for a cash order it is an event at the END of a journey the order has
+     * already travelled unpaid. Reading {@code status == PAID} answers the first correctly and the
+     * second never — a delivered cash order is not, and never will be, in status PAID.
+     */
+    public boolean isMoneyCollected() {
+        return isCashOnDelivery() ? codCollectedAt != null : paidAt != null;
+    }
+
+    public Instant getCodCollectedAt() { return codCollectedAt; }
+    public void setCodCollectedAt(Instant codCollectedAt) { this.codCollectedAt = codCollectedAt; }
+
+    public BigDecimal getCodCollectedAmount() { return codCollectedAmount; }
+    public void setCodCollectedAmount(BigDecimal codCollectedAmount) { this.codCollectedAmount = codCollectedAmount; }
+
+    public UUID getCodCollectedBy() { return codCollectedBy; }
+    public void setCodCollectedBy(UUID codCollectedBy) { this.codCollectedBy = codCollectedBy; }
 
     public Instant getPaidAt() { return paidAt; }
     public void setPaidAt(Instant paidAt) { this.paidAt = paidAt; }

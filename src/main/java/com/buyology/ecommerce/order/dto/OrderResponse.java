@@ -25,6 +25,30 @@ public class OrderResponse {
     private String courierName;
     private String courierPhone;
     private DeliveryMethod deliveryMethod;
+
+    /** Tax charged on top of goods and delivery, already included in totalAmount. */
+    private BigDecimal vatAmount;
+
+    /** The rate applied — 5.00 means 5%. Null when this order carries no VAT. */
+    private BigDecimal vatRatePercent;
+
+    /** ONLINE or CASH_ON_DELIVERY — how this order is settled. Never null. */
+    private com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod paymentMethod;
+
+    /**
+     * Whether the money for this order is actually in hand.
+     *
+     * <p>Sent because the client cannot work it out: for a prepaid order it follows from paidAt,
+     * but a cash order is DELIVERED and unpaid until an admin records the collection, and no
+     * combination of status and paidAt distinguishes that from a prepaid order mid-flight.
+     */
+    private boolean moneyCollected;
+
+    /** When an admin recorded the cash as collected. Null on a cash order still owing money. */
+    private Instant codCollectedAt;
+
+    /** How much cash was taken, in this order's currency. */
+    private BigDecimal codCollectedAmount;
     private OrderStatus status;
 
     // Address snapshot
@@ -118,6 +142,24 @@ public class OrderResponse {
 
     public String getCourierPhone() { return courierPhone; }
     public void setCourierPhone(String courierPhone) { this.courierPhone = courierPhone; }
+
+    public BigDecimal getVatAmount() { return vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
+
+    public BigDecimal getVatRatePercent() { return vatRatePercent; }
+    public void setVatRatePercent(BigDecimal vatRatePercent) { this.vatRatePercent = vatRatePercent; }
+
+    public com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod paymentMethod) { this.paymentMethod = paymentMethod; }
+
+    public boolean isMoneyCollected() { return moneyCollected; }
+    public void setMoneyCollected(boolean moneyCollected) { this.moneyCollected = moneyCollected; }
+
+    public Instant getCodCollectedAt() { return codCollectedAt; }
+    public void setCodCollectedAt(Instant codCollectedAt) { this.codCollectedAt = codCollectedAt; }
+
+    public BigDecimal getCodCollectedAmount() { return codCollectedAmount; }
+    public void setCodCollectedAmount(BigDecimal codCollectedAmount) { this.codCollectedAmount = codCollectedAmount; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }

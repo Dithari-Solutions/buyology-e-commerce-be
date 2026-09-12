@@ -35,6 +35,7 @@ import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.OrderTrackingEvent;
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.order.dto.*;
 import com.buyology.ecommerce.order.event.OrderPaidEvent;
@@ -99,6 +100,10 @@ public class OrderService {
     private final com.buyology.ecommerce.product.repository.ProductRepository productRepository;
     /** See the note at the product-stock guard in createOrder. Defaults to off. */
     private final boolean enforceProductStock;
+    /** Whether an order may be settled in cash at handover, and up to what size. Off by default. */
+    private final CashOnDeliveryPolicy cashOnDeliveryPolicy;
+    /** The tax added on top of goods and delivery. Shared with the cart so the two totals agree. */
+    private final VatPolicy vatPolicy;
     private final ProductTranslationRepository productTranslationRepository;
     private final ProductMediaRepository productMediaRepository;
     private final UserProfilesRepository userProfileRepo;
@@ -150,6 +155,8 @@ public class OrderService {
                         com.buyology.ecommerce.product.repository.ProductRepository productRepository,
                         @org.springframework.beans.factory.annotation.Value(
                                 "${app.stock.enforce-product-quantity:false}") boolean enforceProductStock,
+                        CashOnDeliveryPolicy cashOnDeliveryPolicy,
+                        VatPolicy vatPolicy,
                         ProductTranslationRepository productTranslationRepository,
                         ProductMediaRepository productMediaRepository,
                         UserProfilesRepository userProfileRepo,
@@ -190,6 +197,8 @@ public class OrderService {
         this.storeProductRepo = storeProductRepo;
         this.productRepository = productRepository;
         this.enforceProductStock = enforceProductStock;
+        this.cashOnDeliveryPolicy = cashOnDeliveryPolicy;
+        this.vatPolicy = vatPolicy;
         this.storeProductVariantRepo = storeProductVariantRepo;
         this.productTranslationRepository = productTranslationRepository;
         this.productMediaRepository = productMediaRepository;
@@ -307,6 +316,12 @@ public class OrderService {
         String orderCountryCode = (marketCountry != null && !marketCountry.isBlank())
                 ? marketCountry : plan.country();
 
+        // How the customer intends to pay. Absent means ONLINE, which is what every order was
+        // before cash on delivery existed — so an unchanged storefront keeps behaving identically.
+        OrderPaymentMethod paymentMethod = req.getPaymentMethod() == null
+                ? OrderPaymentMethod.ONLINE
+                : req.getPaymentMethod();
+
         // The PENDING_PAYMENT half of the idempotency: reuse a prior order only when EVERY price-
         // and fulfilment-deciding input still matches; supersede the rest. A double-tap matches
         // trivially. A changed checkout supersedes — which returns the stale order's stock (via
@@ -314,7 +329,7 @@ public class OrderService {
         Order reusable = null;
         for (Order prior : priorOrders) {
             if (reusable == null && CheckoutIdentity.isSameCheckout(
-                    prior, cart, cartItems, req, plan, currency, orderCountryCode)) {
+                    prior, cart, cartItems, req, plan, currency, orderCountryCode, paymentMethod)) {
                 reusable = prior;
             } else {
                 supersedeStaleOrder(prior, cart.getId());
@@ -387,15 +402,43 @@ public class OrderService {
         if (discount.compareTo(BigDecimal.ZERO) < 0) {
             discount = BigDecimal.ZERO;
         }
-        BigDecimal totalAmount = grossTotal.subtract(discount);
-        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
-            totalAmount = BigDecimal.ZERO;
+        BigDecimal netTotal = grossTotal.subtract(discount);
+        if (netTotal.compareTo(BigDecimal.ZERO) < 0) {
+            netTotal = BigDecimal.ZERO;
         }
+
+        // VAT on top, computed on the DISCOUNTED total — tax follows the money, and taxing the
+        // pre-discount figure would charge tax on a sum nobody paid. Snapshotted with its rate,
+        // because rates change and an old order must still say what it was actually taxed at.
+        //
+        // Same VatPolicy the cart preview reads, so the number on the basket page and the number
+        // the gateway charges cannot drift apart.
+        BigDecimal vat = vatPolicy.vatOn(netTotal, orderCountryCode);
+        BigDecimal totalAmount = netTotal.add(vat);
 
         order.setSubtotal(subtotal);
         order.setDiscount(discount);
+        order.setVatAmount(vat);
+        order.setVatRatePercent(vat.signum() > 0 ? vatPolicy.ratePercent() : null);
         order.setTotalAmount(totalAmount);
-        
+
+        // Cash on delivery is checked HERE and not at the storefront's discretion, and it is
+        // checked against the final total rather than the subtotal — shipping and the discount both
+        // move the number the courier would actually be asked to collect, so a cap applied to the
+        // subtotal is a cap on the wrong figure.
+        //
+        // Placed after pricing and before anything is persisted: this order has not reserved the
+        // promo code or taken stock yet, so a refusal costs the customer nothing but a message.
+        order.setPaymentMethod(paymentMethod);
+        if (paymentMethod == OrderPaymentMethod.CASH_ON_DELIVERY) {
+            String refusal = cashOnDeliveryPolicy.rejectionReason(orderCountryCode, totalAmount, currency);
+            if (refusal != null) {
+                log.warn("[ORDER] Cash on delivery refused for user {} (country={} total={} {}): {}",
+                        userId, orderCountryCode, totalAmount, currency, refusal);
+                throw new IllegalArgumentException(refusal);
+            }
+        }
+
         order.setCurrency(currency);
         order.setCountryCode(orderCountryCode);
         order.setCouponCode(req.getCouponCode());
@@ -734,25 +777,40 @@ public class OrderService {
         }
 
         // Ephemeral, single-item cart — NOT the user's active cart.
+        //
+        // CHECKED_OUT from the moment it is constructed, and never ACTIVE for even one statement.
+        // `new Cart(credential)` defaults to ACTIVE, and this used to be saved in that state and
+        // flipped afterwards — which meant the INSERT itself carried status=ACTIVE. The shopper
+        // already has an ACTIVE cart (loading the cart page creates one), and V17's
+        // ux_cart_active_per_credential allows exactly one per credential, so that INSERT was
+        // refused: Buy Now died with "A record with the same unique value already exists" for
+        // anyone who had ever opened their cart. That is the unique-constraint error reported on
+        // the checkout page.
+        //
+        // It also has to be CHECKED_OUT before createOrder runs in any case — createOrder refuses
+        // a cart in any other state — so there was never a reason for the ACTIVE moment.
         Cart cart = new Cart(credential);
+        cart.setStatus(Cart.CartStatus.CHECKED_OUT);
         cart.setCountryCode(storeCountry);
         cart.setCurrency(storeCurrency);
+        cart.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)));
         cart = cartRepo.save(cart);
 
         CartItem item = new CartItem(cart, product, null, quantity, unitPrice, req.getStoreId());
         item.setOriginalUnitPrice(originalUnitPrice);
         cartItemRepo.save(item);
 
-        cart.setTotalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)));
-        cart.setStatus(Cart.CartStatus.CHECKED_OUT);
-        cartRepo.save(cart);
-
         // Reuse the tested order pipeline (address/country checks, pricing, promo,
         // shipping, stock, payment integration) on the ephemeral cart.
         CreateOrderRequest orderReq = new CreateOrderRequest();
         orderReq.setCartId(cart.getId());
         orderReq.setAddressId(req.getAddressId());
+        // Carried through, or "Buy Now, collect from store" reaches resolveFulfilment with no
+        // store and is refused with "Please choose a store to pick up from" — the pickup option
+        // worked from the cart and nowhere else.
+        orderReq.setPickupStoreId(req.getPickupStoreId());
         orderReq.setDeliveryMethod(req.getDeliveryMethod());
+        orderReq.setPaymentMethod(req.getPaymentMethod());
         orderReq.setShippingFee(req.getShippingFee());
         orderReq.setCouponCode(req.getCouponCode());
 
@@ -1184,7 +1242,8 @@ public class OrderService {
                 calculateShippingFee(subtotal, ccy, DeliveryMethod.REGULAR, country),
                 calculateShippingFee(subtotal, ccy, DeliveryMethod.EXPRESS, country),
                 threshold,
-                deliveryFeePolicy.qualifiesForFreeDelivery(subtotalAed));
+                deliveryFeePolicy.qualifiesForFreeDelivery(subtotalAed),
+                vatPolicy.appliesTo(country) ? vatPolicy.ratePercent() : null);
     }
 
     private BigDecimal calculateShippingFee(BigDecimal subtotal, String currency,
@@ -1375,7 +1434,7 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        validateTransition(order.getStatus(), req.getStatus(), order.getDeliveryMethod());
+        validateTransition(order, req.getStatus());
 
         // Assign courier when moving to COURIER_ASSIGNED (legacy flow)
         if (req.getStatus() == OrderStatus.COURIER_ASSIGNED && req.getCourierUserId() != null) {
@@ -1451,7 +1510,7 @@ public class OrderService {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        validateTransition(order.getStatus(), req.getStatus(), order.getDeliveryMethod());
+        validateTransition(order, req.getStatus());
 
         // Require tracking code when shipping
         if (req.getStatus() == OrderStatus.SHIPPED
@@ -1605,7 +1664,7 @@ public class OrderService {
             throw new IllegalStateException(
                     "This order can no longer be cancelled — it is already on its way to you.");
         }
-        validateTransition(order.getStatus(), OrderStatus.CANCELLED, order.getDeliveryMethod());
+        validateTransition(order, OrderStatus.CANCELLED);
 
         order.setCancellationReason(reason);
         transitionTo(order, OrderStatus.CANCELLED);
@@ -1972,6 +2031,63 @@ public class OrderService {
     }
 
     /**
+     * Records that a cash-on-delivery order's money is in hand.
+     *
+     * <p>Idempotent: a second call returns the order unchanged rather than overwriting who
+     * collected it and when. Cash is reconciled against this field, and an admin clicking twice
+     * must not rewrite the audit trail.
+     *
+     * <p>{@link Order#setPaidAt} is stamped alongside, so everything that already reads paidAt —
+     * the ERP sync, revenue reporting, the customer's order page — sees a settled order without
+     * each of them having to learn about cash. The status is deliberately untouched: a delivered
+     * cash order is DELIVERED, not PAID, and forcing it backwards through PAID would be a lie about
+     * where the parcel is.
+     */
+    @Transactional
+    public OrderResponse recordCashOnDeliveryCollected(UUID orderId, UUID adminUserId,
+                                                       BigDecimal amount, String notes) {
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+
+        if (!order.isCashOnDelivery()) {
+            throw new IllegalStateException(
+                    "This order is not a cash-on-delivery order, so there is no cash to record.");
+        }
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            throw new IllegalStateException("This order was cancelled; no cash is due on it.");
+        }
+        if (order.getCodCollectedAt() != null) {
+            log.info("[ORDER] Cash for order {} was already recorded at {} by {} — ignoring repeat",
+                    orderId, order.getCodCollectedAt(), order.getCodCollectedBy());
+            return toOrderResponse(order);
+        }
+
+        BigDecimal collected = (amount != null && amount.signum() > 0) ? amount : order.getTotalAmount();
+        Instant now = Instant.now();
+        order.setCodCollectedAt(now);
+        order.setCodCollectedAmount(collected);
+        order.setCodCollectedBy(adminUserId);
+        order.setPaidAt(now);
+        Order saved = orderRepo.save(order);
+
+        // A short-of-the-total collection is not refused — the cash is in the building either way,
+        // and refusing to record it would leave the order looking wholly unpaid. It IS flagged,
+        // because a shortfall is a real event someone has to chase.
+        if (order.getTotalAmount() != null && collected.compareTo(order.getTotalAmount()) < 0) {
+            log.warn("[ORDER] Cash collected for order {} is {} {}, short of the {} {} due",
+                    orderId, collected, order.getCurrency(), order.getTotalAmount(), order.getCurrency());
+        }
+
+        appendTrackingEvent(saved, saved.getStatus(),
+                "Cash payment collected: " + collected + " " + saved.getCurrency()
+                        + (notes != null && !notes.isBlank() ? " — " + notes : ""),
+                null, null, null, adminUserId, "ADMIN");
+        log.info("[ORDER] Cash collection recorded for order {} — {} {} by admin {}",
+                orderId, collected, saved.getCurrency(), adminUserId);
+        return toOrderResponse(saved);
+    }
+
+    /**
      * Resolves a presigned primary-image URL for each order item's product, batched in one query.
      * Prefers the media flagged {@code isPrimary}, else the lowest {@code orderIndex}; uses the
      * thumbnail when available. Returns a productId → URL map (products without media are omitted).
@@ -2099,7 +2215,7 @@ public class OrderService {
                     "Couriers may only set status to PICKED_UP, IN_TRANSIT, DELIVERED, or FAILED");
         }
 
-        validateTransition(order.getStatus(), target, order.getDeliveryMethod());
+        validateTransition(order, target);
 
         transitionTo(order, target);
 
@@ -2431,7 +2547,7 @@ public class OrderService {
         if (newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.FAILED) {
             throw new IllegalArgumentException("Suppliers cannot cancel or fail orders");
         }
-        validateTransition(order.getStatus(), newStatus, order.getDeliveryMethod());
+        validateTransition(order, newStatus);
         transitionTo(order, newStatus);
         appendTrackingEvent(order, newStatus, notes, null, null, null, supplier.getId(), "SUPPLIER");
         Order saved = orderRepo.save(order);
@@ -2665,12 +2781,38 @@ public class OrderService {
      * Validates that the requested status transition is allowed.
      * Throws IllegalStateException for illegal transitions (→ HTTP 409 via GlobalExceptionHandler).
      */
+    /**
+     * The form every caller should use: it reads the payment method off the order, so no status
+     * change can forget that a cash order is allowed to be fulfilled before it is paid for.
+     */
+    private void validateTransition(Order order, OrderStatus next) {
+        validateTransition(order.getStatus(), next, order.getDeliveryMethod(), order.isCashOnDelivery());
+    }
+
+    /**
+     * @param cashOnDelivery when true, fulfilment may begin from PENDING_PAYMENT — see the
+     *                       PENDING_PAYMENT case below.
+     */
     @SuppressWarnings("deprecation") // legacy statuses kept for historical orders
-    private void validateTransition(OrderStatus current, OrderStatus next, DeliveryMethod method) {
+    private void validateTransition(OrderStatus current, OrderStatus next, DeliveryMethod method,
+                                    boolean cashOnDelivery) {
         boolean isPickup = method == DeliveryMethod.PICKUP;
         boolean allowed = switch (current) {
             // ── New admin-managed flow ────────────────────────────────────────
-            case PENDING_PAYMENT  -> next == OrderStatus.PAID || next == OrderStatus.CANCELLED;
+            //
+            // A cash order may start being packed while still PENDING_PAYMENT, and that is the
+            // whole of what cash on delivery changes about this machine. Its money arrives at the
+            // END of the journey, so waiting for PAID before packing would mean waiting for a
+            // payment that by definition cannot happen until the goods have already been handed
+            // over — the order would never move at all.
+            //
+            // Note what does NOT change: a cash order never passes through PAID. Collection is
+            // recorded on the order itself (cod_collected_at), not as a fulfilment status, because
+            // fulfilment and payment genuinely run on different clocks here. Order.isMoneyCollected()
+            // is what the money decisions ask, and it is the reason a cancelled cash order that was
+            // never collected cannot refund anything.
+            case PENDING_PAYMENT  -> next == OrderStatus.PAID || next == OrderStatus.CANCELLED
+                                       || (cashOnDelivery && next == OrderStatus.PACKAGING);
             case PAID             -> next == OrderStatus.PACKAGING || next == OrderStatus.CANCELLED;
             // Pickup orders branch to READY_FOR_PICKUP; delivery orders go to a courier.
             case PACKAGING        -> isPickup
@@ -2819,6 +2961,12 @@ public class OrderService {
         res.setCourierName(o.getCourierName());
         res.setCourierPhone(o.getCourierPhone());
         res.setDeliveryMethod(o.getDeliveryMethod());
+        res.setVatAmount(o.getVatAmount());
+        res.setVatRatePercent(o.getVatRatePercent());
+        res.setPaymentMethod(o.getPaymentMethod());
+        res.setMoneyCollected(o.isMoneyCollected());
+        res.setCodCollectedAt(o.getCodCollectedAt());
+        res.setCodCollectedAmount(o.getCodCollectedAmount());
         res.setStatus(o.getStatus());
         res.setDeliveryAddressId(o.getDeliveryAddressId());
         res.setRecipientFirstName(o.getRecipientFirstName());
@@ -2881,57 +3029,17 @@ public class OrderService {
     private OrderAdminResponse toAdminOrderResponse(Order o) {
         OrderResponse base = toOrderResponse(o);
         OrderAdminResponse res = new OrderAdminResponse();
-        // Copy base fields (manual copy or BeanUtils.copyProperties if available)
-        res.setId(base.getId());
-        res.setUserId(base.getUserId());
-        res.setCartId(base.getCartId());
-        res.setPaymentTransactionId(base.getPaymentTransactionId());
-        res.setCourierUserId(base.getCourierUserId());
-        res.setDeliveryOrderId(base.getDeliveryOrderId());
-        res.setCourierName(base.getCourierName());
-        res.setCourierPhone(base.getCourierPhone());
-        res.setDeliveryMethod(base.getDeliveryMethod());
-        res.setStatus(base.getStatus());
-        res.setDeliveryAddressId(base.getDeliveryAddressId());
-        res.setRecipientFirstName(base.getRecipientFirstName());
-        res.setRecipientLastName(base.getRecipientLastName());
-        res.setRecipientPhone(base.getRecipientPhone());
-        res.setAddressLine1(base.getAddressLine1());
-        res.setAddressLine2(base.getAddressLine2());
-        res.setCity(base.getCity());
-        res.setState(base.getState());
-        res.setCountry(base.getCountry());
-        res.setPostalCode(base.getPostalCode());
-        res.setDeliveryLatitude(base.getDeliveryLatitude());
-        res.setDeliveryLongitude(base.getDeliveryLongitude());
-        res.setPickupStoreId(base.getPickupStoreId());
-        res.setPickupStoreName(base.getPickupStoreName());
-        res.setPickupStoreAddress(base.getPickupStoreAddress());
-        res.setSubtotal(base.getSubtotal());
-        res.setShippingFee(base.getShippingFee());
-        res.setDiscount(base.getDiscount());
-        res.setTotalAmount(base.getTotalAmount());
-        res.setCurrency(base.getCurrency());
-        res.setCountryCode(base.getCountryCode());
-        res.setCouponCode(base.getCouponCode());
-        res.setEstimatedDeliveryTime(base.getEstimatedDeliveryTime());
-        res.setTrackingCode(base.getTrackingCode());
-        res.setCarrierName(base.getCarrierName());
-        res.setPaidAt(base.getPaidAt());
-        res.setShippedAt(base.getShippedAt());
-        res.setDeliveredAt(base.getDeliveredAt());
-        res.setCancelledAt(base.getCancelledAt());
-        res.setCancellationReason(base.getCancellationReason());
-        res.setCreatedAt(base.getCreatedAt());
-        res.setUpdatedAt(base.getUpdatedAt());
-        res.setItems(base.getItems());
-        res.setTrackingHistory(base.getTrackingHistory());
 
-        // Carry the customer contact resolved by toOrderResponse (no extra query).
-        res.setCustomerFirstName(base.getCustomerFirstName());
-        res.setCustomerLastName(base.getCustomerLastName());
-        res.setCustomerEmail(base.getCustomerEmail());
-        res.setCustomerPhone(base.getCustomerPhone());
+        // Copied by reflection rather than by hand. The hand-written version listed 48 of
+        // OrderResponse's 58 properties, and the missing ten were not decisions — nobody chose to
+        // withhold the B2B credit applied to an order, or the store's map pin, from the admin
+        // looking at that order. They were simply added to the response later and never added
+        // here, which is the failure mode a 60-line copy has by construction: it is correct only
+        // until the next field, and nothing fails when it stops being.
+        //
+        // OrderAdminResponse extends OrderResponse, so every property matches by name and type and
+        // the copy is total. The admin-only fields below are set afterwards, as they always were.
+        org.springframework.beans.BeanUtils.copyProperties(base, res);
 
         // Set additional admin-only fields
         if (o.getItems() != null && !o.getItems().isEmpty()) {
@@ -3000,6 +3108,10 @@ public class OrderService {
             res.setStoreId(o.getItems().get(0).getStoreId());
         }
         res.setDeliveryMethod(o.getDeliveryMethod());
+        // The order list is where an admin spots cash orders still owing money, so the summary
+        // carries both facts — the method, and whether the cash has actually been banked.
+        res.setPaymentMethod(o.getPaymentMethod());
+        res.setMoneyCollected(o.isMoneyCollected());
         res.setStatus(o.getStatus());
         res.setTotalAmount(o.getTotalAmount());
         res.setCurrency(o.getCurrency());

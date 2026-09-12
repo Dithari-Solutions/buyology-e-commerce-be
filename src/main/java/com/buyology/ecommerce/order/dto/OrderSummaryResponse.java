@@ -22,6 +22,12 @@ public class OrderSummaryResponse {
     /** Store of the order's first item — lets list views deep-link to the store-scoped detail page. */
     private UUID storeId;
     private DeliveryMethod deliveryMethod;
+
+    /** ONLINE or CASH_ON_DELIVERY. Never null. */
+    private com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod paymentMethod;
+
+    /** Whether this order's money is in hand — a cash order can be DELIVERED and still owe it. */
+    private boolean moneyCollected;
     private OrderStatus status;
     private BigDecimal totalAmount;
     private String currency;
@@ -59,6 +65,12 @@ public class OrderSummaryResponse {
 
     public UUID getStoreId() { return storeId; }
     public void setStoreId(UUID storeId) { this.storeId = storeId; }
+
+    public com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod paymentMethod) { this.paymentMethod = paymentMethod; }
+
+    public boolean isMoneyCollected() { return moneyCollected; }
+    public void setMoneyCollected(boolean moneyCollected) { this.moneyCollected = moneyCollected; }
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }

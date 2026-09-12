@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.order.dto;
 
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
@@ -22,6 +23,15 @@ public class CreateOrderRequest {
 
     private BigDecimal shippingFee;
 
+    /**
+     * How the customer intends to pay. Null means ONLINE, which is what every order was before
+     * cash on delivery existed — so a storefront that does not send this keeps working unchanged.
+     *
+     * <p>Whether CASH_ON_DELIVERY is actually allowed is not the client's decision: it is checked
+     * against {@code CashOnDeliveryPolicy} in the service, which is off by default.
+     */
+    private OrderPaymentMethod paymentMethod;
+
     private String couponCode;
 
     private String notes;
@@ -39,6 +49,9 @@ public class CreateOrderRequest {
 
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }
+
+    public OrderPaymentMethod getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(OrderPaymentMethod paymentMethod) { this.paymentMethod = paymentMethod; }
 
     public BigDecimal getShippingFee() { return shippingFee; }
     public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }

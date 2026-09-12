@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.order.dto;
 
 import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
+import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
 
@@ -24,10 +25,25 @@ public class BuyNowOrderRequest {
     @Max(value = 1000, message = "quantity must not exceed 1000")
     private Integer quantity;
 
-    @NotNull
+    /**
+     * Required for EXPRESS/REGULAR delivery; omitted for PICKUP.
+     *
+     * <p>Deliberately not {@code @NotNull}: it was, and that alone made "Buy Now, collect from
+     * store" impossible — the request was rejected before it reached the service, whatever
+     * deliveryMethod said. Which of addressId and pickupStoreId is required depends on the
+     * delivery method, so the choice is validated in the service (see
+     * {@code OrderService.resolveFulfilment}) where the method is known, exactly as it is for a
+     * normal cart checkout.
+     */
     private UUID addressId;
 
+    /** Required for PICKUP: the store branch the customer collects from. */
+    private UUID pickupStoreId;
+
     private DeliveryMethod deliveryMethod;
+
+    /** Null means ONLINE. See the note on {@code CreateOrderRequest.paymentMethod}. */
+    private OrderPaymentMethod paymentMethod;
 
     private BigDecimal shippingFee;
 
@@ -45,8 +61,14 @@ public class BuyNowOrderRequest {
     public UUID getAddressId() { return addressId; }
     public void setAddressId(UUID addressId) { this.addressId = addressId; }
 
+    public UUID getPickupStoreId() { return pickupStoreId; }
+    public void setPickupStoreId(UUID pickupStoreId) { this.pickupStoreId = pickupStoreId; }
+
     public DeliveryMethod getDeliveryMethod() { return deliveryMethod; }
     public void setDeliveryMethod(DeliveryMethod deliveryMethod) { this.deliveryMethod = deliveryMethod; }
+
+    public OrderPaymentMethod getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(OrderPaymentMethod paymentMethod) { this.paymentMethod = paymentMethod; }
 
     public BigDecimal getShippingFee() { return shippingFee; }
     public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }

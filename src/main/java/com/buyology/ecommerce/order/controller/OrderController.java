@@ -33,10 +33,13 @@ public class OrderController {
     private final OrderService orderService;
     private final B2bCreditOrderService b2bCreditOrderService;
     private final AuthCredentialRepository authCredentialRepository;
+    private final com.buyology.ecommerce.order.service.CashOnDeliveryPolicy cashOnDeliveryPolicy;
 
     public OrderController(OrderService orderService,
                            B2bCreditOrderService b2bCreditOrderService,
-                           AuthCredentialRepository authCredentialRepository) {
+                           AuthCredentialRepository authCredentialRepository,
+                           com.buyology.ecommerce.order.service.CashOnDeliveryPolicy cashOnDeliveryPolicy) {
+        this.cashOnDeliveryPolicy = cashOnDeliveryPolicy;
         this.orderService = orderService;
         this.b2bCreditOrderService = b2bCreditOrderService;
         this.authCredentialRepository = authCredentialRepository;
@@ -75,6 +78,38 @@ public class OrderController {
                 orderService.quoteDeliveryFees(subtotal, currency, country),
                 "Delivery quote");
     }
+
+    /**
+     * Whether this checkout may be settled in cash at handover, and why not when it may not.
+     *
+     * <p>The storefront cannot work this out for itself — the switch, the market list and the
+     * ceiling are all server-side configuration — and it must not offer an option the order
+     * pipeline will refuse, because the customer would choose cash and be told no at the last
+     * step. Same policy object the pipeline enforces, so the two cannot disagree.
+     *
+     * <p>Authenticated like the rest of {@code /api/orders/**} (and like the delivery quote beside
+     * it), which costs nothing here — only a signed-in shopper reaches the checkout page.
+     */
+    @GetMapping("/cash-on-delivery")
+    public ResponseEntity<ApiResponse<CashOnDeliveryAvailability>> cashOnDeliveryAvailability(
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) java.math.BigDecimal total,
+            @RequestParam(required = false) String currency) {
+        String reason = cashOnDeliveryPolicy.rejectionReason(country, total, currency);
+        return ApiResponse.success(
+                new CashOnDeliveryAvailability(
+                        reason == null, reason, cashOnDeliveryPolicy.maxOrderTotalAed()),
+                "Cash on delivery availability");
+    }
+
+    /**
+     * @param available        whether this exact checkout may choose cash
+     * @param reason           the customer-facing explanation when it may not; null when it may
+     * @param maxOrderTotalAed the single-order ceiling in AED, or null when there is none — so the
+     *                         page can say "cash up to X" before a basket even has a total
+     */
+    public record CashOnDeliveryAvailability(boolean available, String reason,
+                                             java.math.BigDecimal maxOrderTotalAed) {}
 
     @PostMapping("/buy-now")
     @PreAuthorize("isAuthenticated()")

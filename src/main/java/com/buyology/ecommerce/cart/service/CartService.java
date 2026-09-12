@@ -65,6 +65,8 @@ public class CartService {
     private final AccountStatusValidator accountStatusValidator;
     private final CurrencyExchangeService currencyExchangeService;
     private final DeliveryFeePolicy deliveryFeePolicy;
+    /** The same tax the order pipeline applies — shared so the basket and the charge agree. */
+    private final com.buyology.ecommerce.order.service.VatPolicy vatPolicy;
 
     public CartService(
             CartRepository cartRepository,
@@ -83,7 +85,8 @@ public class CartService {
             UserProfilesRepository userProfileRepo,
             AccountStatusValidator accountStatusValidator,
             CurrencyExchangeService currencyExchangeService,
-            DeliveryFeePolicy deliveryFeePolicy) {
+            DeliveryFeePolicy deliveryFeePolicy,
+            com.buyology.ecommerce.order.service.VatPolicy vatPolicy) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.specSelectionRepository = specSelectionRepository;
@@ -100,6 +103,7 @@ public class CartService {
         this.accountStatusValidator = accountStatusValidator;
         this.currencyExchangeService = currencyExchangeService;
         this.deliveryFeePolicy = deliveryFeePolicy;
+        this.vatPolicy = vatPolicy;
     }
 
     // ─── Get or create active cart ────────────────────────────────────────────
@@ -108,6 +112,10 @@ public class CartService {
      * @param userLat optional — when provided together with userLng, enables the quick-delivery badge
      * @param userLng optional — when provided together with userLat, enables the quick-delivery badge
      */
+    // Transactional because it can CREATE the cart: the credential lock that makes find-or-create
+    // atomic is only a lock for as long as a transaction holds it. Without one, each repository
+    // call auto-commits and releases it immediately, and two parallel cart loads race again.
+    @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> getCart(UUID authCredentialId, Double userLat, Double userLng) {
         requireOwnedCredential(authCredentialId);
         Cart cart = findOrCreateActiveCart(authCredentialId);
@@ -118,11 +126,24 @@ public class CartService {
 
     /**
      * Lightweight count of the active cart for badge display — does NOT create a cart.
+     *
+     * <p>A CHECKED_OUT cart counts. Starting a checkout flips the cart to CHECKED_OUT, and it stays
+     * there until a payment actually succeeds (success marks it ABANDONED). So every shopper who
+     * reached the checkout page and did not pay — abandoned at the gateway, was logged out, closed
+     * the tab — is left holding one. {@link #getCart} resumes exactly that cart and shows the items
+     * again, but this counter looked only at ACTIVE and answered zero, so the header badge read
+     * "empty" over a cart that still had everything in it. That is the cart people reported losing
+     * after signing back in: nothing was ever deleted, the badge was reporting on the wrong row.
+     *
+     * <p>Read-only, so it reports what {@link #getCart} WOULD resume without resuming it — a badge
+     * poll must not change the cart's state.
      */
     public ResponseEntity<ApiResponse<com.buyology.ecommerce.cart.dto.CartCountResponse>> getCartCount(UUID authCredentialId) {
         requireOwnedCredential(authCredentialId);
         Cart cart = cartRepository
                 .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .or(() -> cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(
+                        authCredentialId, Cart.CartStatus.CHECKED_OUT))
                 .orElse(null);
         if (cart == null) {
             return ApiResponse.success(new com.buyology.ecommerce.cart.dto.CartCountResponse(0, 0), "Cart count retrieved");
@@ -353,7 +374,7 @@ public class CartService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "quantity must be at least 1");
         }
 
-        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = findEditableCart(authCredentialId);
         if (cart == null) {
             log.warn("updateItemQuantity rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
@@ -433,7 +454,7 @@ public class CartService {
 
         requireOwnedCredential(authCredentialId);
 
-        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = findEditableCart(authCredentialId);
         if (cart == null) {
             log.warn("removeItem rejected — no active cart [authCredentialId={}]", authCredentialId);
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
@@ -545,8 +566,7 @@ public class CartService {
     @Transactional
     public ResponseEntity<ApiResponse<CartResponse>> setAllSelection(UUID authCredentialId, boolean selected) {
         requireOwnedCredential(authCredentialId);
-        Cart cart = cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(
-                authCredentialId, Cart.CartStatus.ACTIVE).orElse(null);
+        Cart cart = findEditableCart(authCredentialId);
         if (cart == null) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "No active cart found");
         }
@@ -573,40 +593,106 @@ public class CartService {
         return credential;
     }
 
+    /**
+     * The shopper's cart for editing: the ACTIVE one, or the CHECKED_OUT one they are still
+     * holding — resumed, because changing the basket means they are no longer mid-checkout.
+     *
+     * <p>Starting a checkout flips the cart to CHECKED_OUT and it stays there until a payment
+     * succeeds. Anyone who abandoned at the gateway is therefore left with a cart that
+     * {@link #getCart} displays in full — it resumes exactly this cart — while every button on the
+     * page it renders answered 404 "No active cart found", because the mutating endpoints looked
+     * for ACTIVE and nothing else. The shopper saw their items and could not change the quantity,
+     * remove a line or tick anything. {@link #clearCart} already accepted both; this is the same
+     * rule applied to the rest, so one lookup decides what "the cart" is for all of them.
+     *
+     * <p>Never creates. Callers that must have a cart use {@link #findOrCreateActiveCart}.
+     */
+    private Cart findEditableCart(UUID authCredentialId) {
+        Cart cart = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .or(() -> cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(
+                        authCredentialId, Cart.CartStatus.CHECKED_OUT))
+                .orElse(null);
+        if (cart != null && cart.getStatus() == Cart.CartStatus.CHECKED_OUT) {
+            log.debug("findEditableCart — resuming CHECKED_OUT cart {} for authCredentialId={} (shopper is editing again)",
+                    cart.getId(), authCredentialId);
+            cart.setStatus(Cart.CartStatus.ACTIVE);
+            cart = cartRepository.save(cart);
+        }
+        return cart;
+    }
+
     private Cart findOrCreateActiveCart(UUID authCredentialId) {
-        return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
-                .orElseGet(() -> {
-                    // If a CHECKED_OUT cart exists, payment never reached SUCCESS
-                    // (success would have marked it ABANDONED). Revert it to ACTIVE
-                    // with items intact so the customer can resume.
-                    Cart stale = cartRepository
-                            .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT)
-                            .orElse(null);
-                    if (stale != null) {
-                        log.debug("findOrCreateActiveCart — resuming CHECKED_OUT cart {} for authCredentialId={} (preserving items)",
-                                stale.getId(), authCredentialId);
-                        stale.setStatus(Cart.CartStatus.ACTIVE);
-                        return cartRepository.save(stale);
-                    }
-                    AuthCredentials cred = authCredentialRepository.findById(authCredentialId).orElseThrow();
-                    return cartRepository.save(new Cart(cred));
-                });
+        Cart active = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .orElse(null);
+        if (active != null) {
+            return active;
+        }
+        return createOrResumeUnderLock(
+                authCredentialRepository.findById(authCredentialId).orElseThrow());
     }
 
     private Cart findOrCreateActiveCart(AuthCredentials authCredential) {
-        return cartRepository.findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.ACTIVE)
-                .orElseGet(() -> {
-                    Cart stale = cartRepository
-                            .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.CHECKED_OUT)
-                            .orElse(null);
-                    if (stale != null) {
-                        log.debug("findOrCreateActiveCart — resuming CHECKED_OUT cart {} for authCredentialId={} (preserving items)",
-                                stale.getId(), authCredential.getId());
-                        stale.setStatus(Cart.CartStatus.ACTIVE);
-                        return cartRepository.save(stale);
-                    }
-                    return cartRepository.save(new Cart(authCredential));
-                });
+        Cart active = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredential.getId(), Cart.CartStatus.ACTIVE)
+                .orElse(null);
+        if (active != null) {
+            return active;
+        }
+        return createOrResumeUnderLock(authCredential);
+    }
+
+    /**
+     * The slow path of find-or-create, serialised per shopper.
+     *
+     * <p>Finding no ACTIVE cart and then creating one is a read followed by an insert with nothing
+     * holding the two together, and a storefront page load fires several cart calls at once. Every
+     * one of them read "no cart" and every one of them inserted. What that produced depended on the
+     * database: where V17's {@code ux_cart_active_per_credential} partial unique index exists, the
+     * losing insert failed and the shopper was shown "A record with the same unique value already
+     * exists" — the error on the checkout page. Where it does not (V17 only builds the index if the
+     * carts table already existed, and on a database created since, Flyway runs before Hibernate
+     * makes that table), nothing complained and the shopper quietly got TWO active carts, with
+     * their items split across them and only one ever displayed.
+     *
+     * <p>Locking the credential row closes both. The second caller blocks until the first commits
+     * and then re-reads, finding the cart that was just created instead of racing it. The lock is
+     * held by Postgres rather than the JVM, so it works across replicas, and it is taken only on
+     * the path that creates — an existing cart is returned above without locking anything.
+     *
+     * <p>MUST run inside the caller's transaction, which is why this carries no
+     * {@code @Transactional} of its own: it is reached by self-invocation, so an annotation here
+     * would be silently ignored by the proxy and the lock would be released by the very next
+     * statement's auto-commit, leaving the race exactly as it was. Both entry points —
+     * {@link #getCart} and {@link #addItem} — are transactional for that reason.
+     */
+    private Cart createOrResumeUnderLock(AuthCredentials authCredential) {
+        UUID authCredentialId = authCredential.getId();
+        AuthCredentials locked = authCredentialRepository.findByIdForUpdate(authCredentialId)
+                .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
+
+        // Re-read under the lock: the request we were racing may have created the cart while we
+        // waited, and creating a second one now is the bug this lock exists to prevent.
+        Cart active = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.ACTIVE)
+                .orElse(null);
+        if (active != null) {
+            return active;
+        }
+
+        // If a CHECKED_OUT cart exists, payment never reached SUCCESS (success would have marked it
+        // ABANDONED). Revert it to ACTIVE with items intact so the customer can resume.
+        Cart stale = cartRepository
+                .findFirstByAuthCredentialIdAndStatusOrderByUpdatedAtDesc(authCredentialId, Cart.CartStatus.CHECKED_OUT)
+                .orElse(null);
+        if (stale != null) {
+            log.debug("findOrCreateActiveCart — resuming CHECKED_OUT cart {} for authCredentialId={} (preserving items)",
+                    stale.getId(), authCredentialId);
+            stale.setStatus(Cart.CartStatus.ACTIVE);
+            return cartRepository.save(stale);
+        }
+        return cartRepository.save(new Cart(locked));
     }
 
     private void recalculateCartTotal(Cart cart) {
@@ -710,6 +796,18 @@ public class CartService {
             response.setFreeShippingThreshold(threshold);
             response.setDeliveryFee(deliveryFee);
             response.setQualifiesForFreeShipping(qualifies);
+
+            // VAT, and the total the customer will actually be asked for.
+            //
+            // The basket page has to show the same number the checkout charges, so this reads the
+            // SAME VatPolicy the order pipeline does rather than applying 5% of its own. The base
+            // is goods + delivery, which is what the order's base will be too — no promo is applied
+            // at this stage, so there is nothing to discount yet; a code entered at checkout lowers
+            // the base and the tax with it, and the checkout page shows that recomputed figure.
+            BigDecimal vat = vatPolicy.vatOn(subtotal.add(deliveryFee), cart.getCountryCode());
+            response.setVatRatePercent(vat.signum() > 0 ? vatPolicy.ratePercent() : null);
+            response.setVatAmount(vat);
+            response.setEstimatedTotal(subtotal.add(deliveryFee).add(vat));
         } catch (Exception ignored) {
             // FX unavailable — leave policy fields null; clients should treat that as "unknown".
         }
