@@ -32,7 +32,7 @@ class RateLimitingFilterSubjectTest {
 
     /** Only the constructor's field assignments are exercised, so the Redis factory can be null. */
     private final RateLimitingFilter filter =
-            new RateLimitingFilter(null, new ObjectMapper(), false, "", 0);
+            new RateLimitingFilter(null, new ObjectMapper(), false, "", 0, 0, 0);
 
     @AfterEach
     void clearContext() {
@@ -114,5 +114,47 @@ class RateLimitingFilterSubjectTest {
         SecurityContextHolder.getContext().setAuthentication(new AnonymousAuthenticationToken(
                 "key", "anonymousUser", List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))));
         assertEquals(CLIENT_IP, filter.resolveBucketSubject(RateLimitTier.ADMIN, CLIENT_IP));
+    }
+
+    // ── Refresh must not share the credential tiers' ceiling ─────────────────
+
+    @Test
+    void refreshGetsItsOwnTierRatherThanAuthGeneral() throws Exception {
+        // /auth/refresh sat in AUTH_GENERAL's 10/min. Every tier except ADMIN is keyed on the
+        // client IP, and behind the proxy with trust-forwarded-headers off that is ONE bucket for
+        // the whole platform — so ten reloads a minute, across all customers and admins together,
+        // exhausted it and the rest got a 429. A failed refresh is a logout, which is exactly the
+        // "it logs me out when I refresh, on the website and the dashboard" report.
+        assertEquals(RateLimitTier.AUTH_REFRESH, tierOf("/auth/refresh"));
+    }
+
+    @Test
+    void theCredentialEndpointsKeepTheirNarrowTier() throws Exception {
+        // The new tier must not have widened anything it should not. These are guessable and stay
+        // where they were.
+        assertEquals(RateLimitTier.AUTH_SENSITIVE, tierOf("/auth/signin"));
+        assertEquals(RateLimitTier.AUTH_SENSITIVE, tierOf("/auth/signup"));
+        assertEquals(RateLimitTier.AUTH_SENSITIVE, tierOf("/auth/verify-otp"));
+        assertEquals(RateLimitTier.AUTH_SENSITIVE, tierOf("/api/verify/phone/start"));
+        assertEquals(RateLimitTier.AUTH_GENERAL, tierOf("/auth/google"));
+    }
+
+    @Test
+    void refreshDoesNotFailClosedWhenRedisIsDown() {
+        // The credential tiers fall back to a local bucket so brute-force protection survives an
+        // outage. Refresh must not: it is validated against the database regardless of any
+        // throttle, so refusing it during a Redis blip logs every signed-in user out and buys
+        // nothing.
+        assertFalse(RateLimitTier.AUTH_REFRESH.isAuthSensitive());
+        assertFalse(RateLimitTier.AUTH_REFRESH.needsLocalFallback());
+        assertTrue(RateLimitTier.AUTH_SENSITIVE.needsLocalFallback(),
+                "credential endpoints must still fail closed");
+    }
+
+    /** determineTier is private; reach it the way the filter does. */
+    private RateLimitTier tierOf(String path) throws Exception {
+        var m = RateLimitingFilter.class.getDeclaredMethod("determineTier", String.class);
+        m.setAccessible(true);
+        return (RateLimitTier) m.invoke(filter, path);
     }
 }

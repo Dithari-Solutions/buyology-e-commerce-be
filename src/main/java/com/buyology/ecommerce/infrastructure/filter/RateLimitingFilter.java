@@ -67,32 +67,60 @@ public class RateLimitingFilter extends OncePerRequestFilter {
      */
     private final int adminPerMinute;
 
+    /**
+     * Overrides for the two tiers that every visitor currently shares.
+     *
+     * <p>While {@code app.trust-forwarded-headers} is false, every tier except ADMIN is keyed on
+     * the proxy's IP, so PUBLIC's 100/min and AUTH_REFRESH's 300/min are budgets for the WHOLE
+     * platform rather than per visitor. These exist so those ceilings can be raised from the
+     * environment during an incident instead of waiting for a release. 0 or less means "use the
+     * tier's built-in default".
+     */
+    private final int publicPerMinute;
+    private final int authRefreshPerMinute;
+
     public RateLimitingFilter(LettuceConnectionFactory connectionFactory,
                               ObjectMapper objectMapper,
                               @Value("${app.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
                               @Value("${app.rate-limit.bypass-key:}") String rateLimitBypassKey,
-                              @Value("${app.rate-limit.admin-per-minute:0}") int adminPerMinute) {
+                              @Value("${app.rate-limit.admin-per-minute:0}") int adminPerMinute,
+                              @Value("${app.rate-limit.public-per-minute:0}") int publicPerMinute,
+                              @Value("${app.rate-limit.auth-refresh-per-minute:0}") int authRefreshPerMinute) {
         this.connectionFactory = connectionFactory;
         this.objectMapper = objectMapper;
         this.trustForwardedHeaders = trustForwardedHeaders;
         this.rateLimitBypassKey = rateLimitBypassKey;
         this.adminPerMinute = adminPerMinute;
+        this.publicPerMinute = publicPerMinute;
+        this.authRefreshPerMinute = authRefreshPerMinute;
     }
 
     /**
-     * The bucket shape for a tier, applying the ADMIN override when one is configured. Everything
-     * else uses the tier's own constant, so a bad value here can only affect admin traffic.
+     * The bucket shape for a tier, applying an environment override where one is configured.
+     * Anything without an override uses the tier's own constant, so a bad value can only affect the
+     * tier it was set for — and the credential tiers (AUTH_SENSITIVE, AUTH_GENERAL) deliberately
+     * have no override at all, so brute-force ceilings cannot be widened from the environment.
      */
     private BucketConfiguration configurationFor(RateLimitTier tier) {
-        if (tier == RateLimitTier.ADMIN && adminPerMinute > 0) {
-            return BucketConfiguration.builder()
-                    .addLimit(Bandwidth.builder()
-                            .capacity(adminPerMinute)
-                            .refillGreedy(adminPerMinute, Duration.ofMinutes(1))
-                            .build())
-                    .build();
+        int override = switch (tier) {
+            case ADMIN -> adminPerMinute;
+            case PUBLIC -> publicPerMinute;
+            case AUTH_REFRESH -> authRefreshPerMinute;
+            default -> 0;
+        };
+        if (override > 0) {
+            return perMinute(override);
         }
         return tier.buildConfiguration();
+    }
+
+    private static BucketConfiguration perMinute(int permits) {
+        return BucketConfiguration.builder()
+                .addLimit(Bandwidth.builder()
+                        .capacity(permits)
+                        .refillGreedy(permits, Duration.ofMinutes(1))
+                        .build())
+                .build();
     }
 
     @Override
@@ -357,6 +385,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/membership/auth/")) { // B2B token-gated password setup
             return RateLimitTier.AUTH_SENSITIVE;
         }
+        // Before the /auth/ catch-all, or refresh lands in AUTH_GENERAL's 10/min — which, with a
+        // single shared bucket for the whole platform, logged people out on an ordinary reload.
+        if (path.equals("/auth/refresh")) {
+            return RateLimitTier.AUTH_REFRESH;
+        }
         if (path.startsWith("/auth/")) {
             return RateLimitTier.AUTH_GENERAL;
         }
@@ -400,6 +433,29 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(10).refillGreedy(10, Duration.ofMinutes(1)).build())
+                        .build();
+            }
+        },
+
+        // 300 req/min — token refresh, and it needs its own tier.
+        //
+        // /auth/refresh used to fall into AUTH_GENERAL's 10/min. Because every tier except ADMIN is
+        // keyed on the client IP, and app.trust-forwarded-headers is false behind the proxy, that
+        // was TEN REFRESHES PER MINUTE FOR THE WHOLE PLATFORM — customers and admins together. The
+        // eleventh visitor to reload a page got a 429 on refresh, and a failed refresh is a logout.
+        // That is the shape of the "it logs me out when I refresh, on both the website and the
+        // dashboard" report.
+        //
+        // Refresh does not belong with signin and OTP. Those tiers are narrow because they are
+        // credential-guessing targets — a caller can try another password or another six-digit
+        // code. Refresh presents a 256-bit opaque token that is looked up by hash and rejected if
+        // it is unknown, revoked or expired, so guessing is not a threat model and the throttle
+        // buys nothing against it. It is here only to bound abuse volume.
+        AUTH_REFRESH {
+
+            BucketConfiguration buildConfiguration() {
+                return BucketConfiguration.builder()
+                        .addLimit(Bandwidth.builder().capacity(300).refillGreedy(300, Duration.ofMinutes(1)).build())
                         .build();
             }
         },
@@ -463,7 +519,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         abstract BucketConfiguration buildConfiguration();
 
-        /** Auth-sensitive tiers must not fail open when Redis is unavailable. */
+        /**
+         * Auth-sensitive tiers must not fail open when Redis is unavailable.
+         *
+         * <p>AUTH_REFRESH is deliberately excluded. The others are here because they are
+         * credential-guessing targets and brute-force protection matters most during an outage.
+         * Refresh is not guessable — it presents a 256-bit opaque token that is validated against
+         * the database regardless of any throttle — so failing closed on it buys no security and
+         * costs the one thing an outage should not cost: every signed-in user gets logged out the
+         * moment Redis blips, on a request that would have been rejected anyway if the token were
+         * bad.
+         */
         boolean isAuthSensitive() {
             return this == AUTH_SENSITIVE || this == AUTH_GENERAL;
         }
