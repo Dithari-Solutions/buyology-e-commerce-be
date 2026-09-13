@@ -405,5 +405,30 @@ jobs:
               sleep 5
             done
 
+            # ── What the feature toggles actually resolved to ──────────────────
+            #
+            # Only the non-secret ones. A repo variable that was never created — or created as a
+            # SECRET instead of a VARIABLE, or misspelled, or scoped to an environment — resolves to
+            # the `|| 'default'` fallback with no error anywhere, so the deploy goes green and the
+            # feature stays off. That failure is invisible without this, and it has already cost real
+            # debugging time on COD_ENABLED. Print it so the run log answers "did my variable land?"
+            echo "── Effective feature configuration ──────────────────────────────"
+            printf '  %-38s %s\n' \
+              "COD_ENABLED"                  "${COD_ENABLED:-<unset>}" \
+              "COD_COUNTRIES"                "${COD_COUNTRIES:-<empty = every market>}" \
+              "COD_MAX_ORDER_AED"            "${COD_MAX_ORDER_AED:-<unset>}" \
+              "VAT_RATE_PERCENT"             "${VAT_RATE_PERCENT:-<unset>}" \
+              "VAT_COUNTRIES"                "${VAT_COUNTRIES:-<empty = every market>}" \
+              "DELIVERY_FLAT_FEE_AED"        "${DELIVERY_FLAT_FEE_AED:-<unset>}" \
+              "DELIVERY_FREE_SHIPPING_AED"   "${DELIVERY_FREE_SHIPPING_THRESHOLD_AED:-<unset>}" \
+              "DELIVERY_EXPRESS_ENABLED"     "${DELIVERY_EXPRESS_ENABLED:-<unset>}" \
+              "ENFORCE_PRODUCT_STOCK"        "${ENFORCE_PRODUCT_STOCK:-<unset>}" \
+              "QUIQUP_ENABLED"               "${QUIQUP_ENABLED:-<unset>}" \
+              "QUIQUP_DISPATCH_ENABLED"      "${QUIQUP_DISPATCH_ENABLED:-<unset>}" \
+              "QUIQUP_ALLOW_PRODUCTION_WRITES" "${QUIQUP_ALLOW_PRODUCTION_WRITES:-<unset>}" \
+              "JWT_ACCESS_TOKEN_MINUTES"     "${JWT_ACCESS_TOKEN_MINUTES:-<unset>}" \
+              "MFA_ENABLED"                  "${MFA_ENABLED:-<unset>}"
+            echo "─────────────────────────────────────────────────────────────────"
+
             docker image prune -f --filter "until=24h" || true
             docker compose -f docker-compose.app.yml ps
