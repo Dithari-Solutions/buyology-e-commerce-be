@@ -201,6 +201,14 @@ services:
       # DELIVERY_QUIQUP_FEE_AED is the rate Quiqup bills us for a standard delivery, passed through
       # to the customer on orders under the free-shipping threshold. Defaults to the previous 15.00.
       DELIVERY_FREE_SHIPPING_THRESHOLD_AED: ${DELIVERY_FREE_SHIPPING_THRESHOLD_AED:-100.00}
+      # ONE delivery rate for every method and every market, below the free-shipping threshold above.
+      # Pickup stays free. Tiered pricing was how the cart's quote and the order's charge drifted apart.
+      DELIVERY_FLAT_FEE_AED: ${DELIVERY_FLAT_FEE_AED:-25.00}
+      # Whether 30-minute delivery may be offered at all. Off — enforced server-side, because hiding the
+      # button in the clients closes nothing (a client can post the method, and the payment webhook
+      # takes it from metadata the client wrote).
+      DELIVERY_EXPRESS_ENABLED: ${DELIVERY_EXPRESS_ENABLED:-false}
+      # Retired — no longer read. Kept so an environment still exporting it does not look broken.
       DELIVERY_EXPRESS_FEE_AED: ${DELIVERY_EXPRESS_FEE_AED:-20.00}
       DELIVERY_QUIQUP_FEE_AED: ${DELIVERY_QUIQUP_FEE_AED:-15.00}
       DELIVERY_STANDARD_FEE_AED: ${DELIVERY_STANDARD_FEE_AED:-15.00}

@@ -10,29 +10,32 @@ import java.math.BigDecimal;
  * The one place that decides what delivery costs.
  *
  * <p>It used to be two places — a pair of constants in {@code OrderService} and another pair in
- * {@code CartService}, kept aligned by a comment saying "same source-of-truth as CartService". That
- * held only while every method charged the same flat 15 AED. Now that 30-minute delivery and
- * standard delivery are priced differently, a drift between the two would mean the cart quotes one
- * fee and the order charges another, which the customer sees as a total changing at payment.
+ * {@code CartService}, kept aligned by a comment saying "same source-of-truth as CartService". A drift
+ * between them means the cart quotes one fee and the order charges another, which the customer sees as
+ * the total changing at payment.
  *
  * <p>The policy:
  * <ul>
- *   <li>subtotal at or above {@code free-shipping-threshold-aed} (100) — free, whatever the method,</li>
- *   <li>below it, {@link DeliveryMethod#EXPRESS} (the 30-minute service, delivered by our own
- *       couriers) charges {@code express-fee-aed} (20),</li>
- *   <li>below it, {@link DeliveryMethod#REGULAR} charges {@code quiqup-fee-aed} — the rate we are
- *       billed, so the cost is passed through rather than absorbed — but only in the countries Quiqup
- *       actually serve (see {@link QuiqupCoverage}); a standard order anywhere else keeps the flat
- *       rate, because Quiqup are not carrying it,</li>
- *   <li>anything else (PICKUP, INTERNATIONAL) keeps the previous flat rate, deliberately unchanged.</li>
+ *   <li>subtotal at or above {@code free-shipping-threshold-aed} (100) — free, whatever the method;</li>
+ *   <li>{@link DeliveryMethod#PICKUP} — free, because collecting it yourself is not a delivery;</li>
+ *   <li>otherwise a flat {@code flat-fee-aed} (25), the same for every method and every market.</li>
  * </ul>
  *
- * <p>Every rate is configurable, because a courier's rate card changes without our release cycle.
- * {@code quiqup-fee-aed} defaults to the old 15 AED rather than a guess at Quiqup's price: until it
- * is set deliberately, standard delivery is billed exactly as it is today. Quiqup expose no quote
- * endpoint (their documented paths cover create/get/ready/cancel/label/parcels and nothing for
- * pricing), so this is a contracted rate, not a per-order quotation. If they add quoting, this class
- * is where the call belongs.
+ * <p>One rate, deliberately. This used to be tiered — 20 for the 30-minute service, a pass-through
+ * Quiqup rate for standard deliveries in the countries they serve, a separate flat rate everywhere
+ * else — and each of those distinctions was a way for the quote and the charge to disagree. A single
+ * number cannot. The old keys are kept in configuration but no longer read (see the fields below), so
+ * reverting to tiered pricing is a change to this one class.
+ *
+ * <p>The free-delivery threshold is checked FIRST and is untouched by any of this: an order at or above
+ * it still ships free, whatever method it resolves to. Getting that order of operations wrong — a flat
+ * fee returned before the threshold check — would start charging 25 AED on every large order, which is
+ * the one thing this change must not do.
+ *
+ * <p>The rate is configurable because a courier's rate card changes without our release cycle. Quiqup
+ * expose no quote endpoint (their documented paths cover create/get/ready/cancel/label/parcels and
+ * nothing for pricing), so this is a contracted rate, not a per-order quotation. If they add quoting,
+ * this class is where the call belongs.
  *
  * <p>All amounts here are AED, the settlement currency. Callers convert for display.
  */
@@ -40,21 +43,21 @@ import java.math.BigDecimal;
 public class DeliveryFeePolicy {
 
     private final BigDecimal freeShippingThresholdAed;
-    private final BigDecimal expressFeeAed;
-    private final BigDecimal quiqupFeeAed;
-    private final BigDecimal standardFeeAed;
+    private final BigDecimal flatFeeAed;
     private final QuiqupCoverage quiqupCoverage;
 
+    /**
+     * @param quiqupCoverage no longer consulted for PRICING — the fee is flat — but still injected
+     *                       because it remains the gate for whether an order is Quiqup-dispatchable
+     *                       ({@code QuiqupDispatchService}), and keeping it here documents that the
+     *                       bean is load-bearing elsewhere rather than dead.
+     */
     public DeliveryFeePolicy(
             @Value("${delivery.free-shipping-threshold-aed:100.00}") BigDecimal freeShippingThresholdAed,
-            @Value("${delivery.express-fee-aed:20.00}") BigDecimal expressFeeAed,
-            @Value("${delivery.quiqup-fee-aed:15.00}") BigDecimal quiqupFeeAed,
-            @Value("${delivery.standard-fee-aed:15.00}") BigDecimal standardFeeAed,
+            @Value("${delivery.flat-fee-aed:25.00}") BigDecimal flatFeeAed,
             QuiqupCoverage quiqupCoverage) {
         this.freeShippingThresholdAed = freeShippingThresholdAed;
-        this.expressFeeAed = expressFeeAed;
-        this.quiqupFeeAed = quiqupFeeAed;
-        this.standardFeeAed = standardFeeAed;
+        this.flatFeeAed = flatFeeAed;
         this.quiqupCoverage = quiqupCoverage;
     }
 
@@ -81,35 +84,30 @@ public class DeliveryFeePolicy {
      * @param subtotalAed  the order/cart subtotal converted to AED
      */
     public BigDecimal feeAed(DeliveryMethod method, String countryCode, BigDecimal subtotalAed) {
+        // FIRST, always. A flat fee returned ahead of this check would charge 25 AED on every order
+        // over the threshold and silently delete free delivery.
         if (qualifiesForFreeDelivery(subtotalAed)) {
             return BigDecimal.ZERO;
         }
-        if (method == DeliveryMethod.EXPRESS) {
-            return expressFeeAed;
+        // Collecting it from a store is not a delivery, so there is nothing to charge for. Stated here
+        // as well as in OrderService.resolveFulfilment, which hardcodes zero and never calls this:
+        // when two places decide the same thing, they should at least agree.
+        if (method == DeliveryMethod.PICKUP) {
+            return BigDecimal.ZERO;
         }
-        if (quiqupCoverage.covers(method, countryCode)) {
-            return quiqupFeeAed;
-        }
-        return standardFeeAed;
+        return flatFeeAed;
     }
 
     /**
-     * The fee the cart advertises before a delivery address — and therefore a method — is known.
+     * The 30-minute delivery rate.
      *
-     * <p>Standard delivery, because that is what most orders are: only an address inside a store's
-     * 30-minute radius resolves to EXPRESS. An order that does qualify is recalculated at checkout,
-     * where the customer sees the final total before paying.
-     */
-    /**
-     * The 30-minute delivery rate, for quoting it alongside the standard rate.
-     *
-     * <p>Free delivery still applies above the threshold, so this is what an order UNDER it pays;
-     * callers that quote it must respect {@link #qualifiesForFreeDelivery} exactly as
-     * {@link #feeAed} does. Exposed because the storefront has to be able to SHOW the 30-minute
-     * fee: it was previously derivable only by charging it.
+     * <p>The same flat rate as everything else now — the fee no longer depends on the method. Kept as a
+     * method so the response fields that quote it still compile and still answer honestly for any
+     * client already in the field; 30-minute delivery is itself switched off (see
+     * {@code delivery.express-enabled}).
      */
     public BigDecimal expressFeeAed() {
-        return expressFeeAed;
+        return flatFeeAed;
     }
 
     /**

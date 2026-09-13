@@ -58,6 +58,9 @@ public class CartService {
     private final StoreProductRepository storeProductRepository;
     /** See OrderService's product-stock guard. Defaults to off; the two must agree. */
     private final boolean enforceProductStock;
+
+    /** Whether 30-minute delivery may be offered. Off — see OrderService.resolveDeliveryMethod. */
+    private final boolean expressEnabled;
     private final StoreProductVariantRepository storeProductVariantRepository;
     private final StoreLocationRepository storeLocationRepository;
     private final StoreOperatingHoursRepository operatingHoursRepository;
@@ -79,6 +82,8 @@ public class CartService {
             StoreProductRepository storeProductRepository,
             @org.springframework.beans.factory.annotation.Value(
                     "${app.stock.enforce-product-quantity:false}") boolean enforceProductStock,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${delivery.express-enabled:false}") boolean expressEnabled,
             StoreProductVariantRepository storeProductVariantRepository,
             StoreLocationRepository storeLocationRepository,
             StoreOperatingHoursRepository operatingHoursRepository,
@@ -96,6 +101,7 @@ public class CartService {
         this.specOptionRepository = specOptionRepository;
         this.storeProductRepository = storeProductRepository;
         this.enforceProductStock = enforceProductStock;
+        this.expressEnabled = expressEnabled;
         this.storeProductVariantRepository = storeProductVariantRepository;
         this.storeLocationRepository = storeLocationRepository;
         this.operatingHoursRepository = operatingHoursRepository;
@@ -815,17 +821,25 @@ public class CartService {
             response.setDeliveryFee(deliveryFee);
             response.setQualifiesForFreeShipping(qualifies);
 
-            // VAT, and the total the customer will actually be asked for.
+            // The total the customer will actually be asked for, and how much of it is tax.
             //
-            // The basket page has to show the same number the checkout charges, so this reads the
-            // SAME VatPolicy the order pipeline does rather than applying 5% of its own. The base
-            // is goods + delivery, which is what the order's base will be too — no promo is applied
-            // at this stage, so there is nothing to discount yet; a code entered at checkout lowers
-            // the base and the tax with it, and the checkout page shows that recomputed figure.
-            BigDecimal vat = vatPolicy.vatOn(subtotal.add(deliveryFee), cart.getCountryCode());
-            response.setVatRatePercent(vat.signum() > 0 ? vatPolicy.ratePercent() : null);
+            // Nothing is added: catalogue prices already include VAT, so the total is simply goods
+            // plus delivery. The VAT figure is the portion of that total which IS tax, extracted for
+            // the "VAT included" line rather than added to the bill.
+            //
+            // Reads the SAME VatPolicy the order pipeline does rather than applying 5% of its own, so
+            // the basket page and the amount charged cannot drift. No promo is applied at this stage,
+            // so there is nothing to discount yet; a code entered at checkout lowers the total and the
+            // tax inside it, and the checkout page shows that recomputed figure.
+            BigDecimal estimatedTotal = subtotal.add(deliveryFee);
+            BigDecimal vat = vatPolicy.vatIncludedIn(estimatedTotal, cart.getCountryCode());
+            // On the market being taxed, not on the amount rounding above zero — an empty basket in a
+            // taxed market should still be able to say what the rate is.
+            response.setVatRatePercent(vatPolicy.appliesTo(cart.getCountryCode())
+                    ? vatPolicy.ratePercent()
+                    : null);
             response.setVatAmount(vat);
-            response.setEstimatedTotal(subtotal.add(deliveryFee).add(vat));
+            response.setEstimatedTotal(estimatedTotal);
         } catch (Exception ignored) {
             // FX unavailable — leave policy fields null; clients should treat that as "unknown".
         }
@@ -833,7 +847,7 @@ public class CartService {
         List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
         List<CartItemResponse> itemResponses = new ArrayList<>();
         for (CartItem item : items) {
-            itemResponses.add(buildCartItemResponse(item, nearbyStoreIds));
+            itemResponses.add(buildCartItemResponse(item, nearbyStoreIds, cart.getCountryCode()));
         }
         response.setItems(itemResponses);
 
@@ -847,7 +861,11 @@ public class CartService {
         // quoted the express fee and then charged a silently downgraded regular delivery. Unticked
         // rows are excluded: they are not part of the order, so an out-of-radius one must not
         // block express for a cart that qualifies.
-        boolean expressAvailable = CartExpressRule.expressAvailable(
+        //
+        // And false outright while 30-minute delivery is switched off. Told to clients from the server
+        // so an already-published mobile build, or a cached web bundle, stops offering a method the
+        // order pipeline will refuse — there is no release to wait for.
+        boolean expressAvailable = expressEnabled && CartExpressRule.expressAvailable(
                 itemResponses.stream().filter(CartItemResponse::isSelected).toList());
         response.setExpressAvailable(expressAvailable);
         // The fee is quoted unconditionally (when FX allows): availability here is judged against
@@ -872,7 +890,8 @@ public class CartService {
         return response;
     }
 
-    private CartItemResponse buildCartItemResponse(CartItem item, Set<UUID> nearbyStoreIds) {
+    private CartItemResponse buildCartItemResponse(CartItem item, Set<UUID> nearbyStoreIds,
+                                                  String countryCode) {
         CartItemResponse response = new CartItemResponse();
         response.setId(item.getId());
         response.setProductId(item.getProduct().getId());
@@ -892,6 +911,11 @@ public class CartService {
             response.setOriginalTotalPrice(
                     item.getOriginalUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
         }
+        // The VAT already inside this line's price, for the per-product "VAT included" note. Computed
+        // here rather than by each client so three storefronts cannot each round it differently — the
+        // web checkout used to do this in floating point and disagreed with the server by fils.
+        response.setVatAmount(vatPolicy.vatIncludedIn(item.getTotalPrice(), countryCode));
+
         // What a stepper is allowed to count up to. Resolved by the same helper the PATCH ceiling
         // uses, so the number the client shows and the number the server enforces cannot disagree.
         response.setAvailableUnits(availableUnitsFor(item));

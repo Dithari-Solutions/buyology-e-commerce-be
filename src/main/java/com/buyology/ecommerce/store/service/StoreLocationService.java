@@ -24,10 +24,16 @@ public class StoreLocationService {
     private final StoreLocationRepository locationRepository;
     private final StoreRepository storeRepository;
 
+    /** Whether 30-minute delivery may be offered. Off — see OrderService.resolveDeliveryMethod. */
+    private final boolean expressEnabled;
+
     public StoreLocationService(StoreLocationRepository locationRepository,
-                                StoreRepository storeRepository) {
+                                StoreRepository storeRepository,
+                                @org.springframework.beans.factory.annotation.Value(
+                                        "${delivery.express-enabled:false}") boolean expressEnabled) {
         this.locationRepository = locationRepository;
         this.storeRepository = storeRepository;
+        this.expressEnabled = expressEnabled;
     }
 
     @Transactional
@@ -138,6 +144,15 @@ public class StoreLocationService {
      * open-hours filter — this mirrors what the order will actually decide.
      */
     public ResponseEntity<ApiResponse<ExpressStoresResponse>> getExpressStoreIds(double lat, double lng) {
+        // Empty while 30-minute delivery is switched off, rather than the honest geographic answer.
+        // This endpoint is what a checkout page reads to decide whether to show the express option, so
+        // answering "none" is how an already-published mobile build and any cached web bundle stop
+        // offering a method the order pipeline would refuse — without waiting for a client release.
+        // The radius is still reported, so the response shape is unchanged.
+        if (!expressEnabled) {
+            return ApiResponse.success(new ExpressStoresResponse(ExpressDeliveryRadius.KM, List.of()),
+                    "30-minute delivery is currently unavailable");
+        }
         List<UUID> ids = locationRepository.findStoreIdsWithinRadius(
                 lat, lng, ExpressDeliveryRadius.KM);
         return ApiResponse.success(new ExpressStoresResponse(ExpressDeliveryRadius.KM, ids),

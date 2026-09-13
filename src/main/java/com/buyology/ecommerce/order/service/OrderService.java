@@ -101,6 +101,16 @@ public class OrderService {
     private final com.buyology.ecommerce.product.repository.ProductRepository productRepository;
     /** See the note at the product-stock guard in createOrder. Defaults to off. */
     private final boolean enforceProductStock;
+
+    /**
+     * Whether 30-minute delivery may be offered at all. Off.
+     *
+     * <p>A switch rather than deleted machinery: the enum, the stored values, the courier's EXPRESS
+     * order list and its GPS tracking all have to keep working for orders already placed, so turning
+     * the offer off and ripping the concept out are different jobs. Flipping this back on is a
+     * restart, not a release.
+     */
+    private final boolean expressEnabled;
     /** Whether an order may be settled in cash at handover, and up to what size. Off by default. */
     private final CashOnDeliveryPolicy cashOnDeliveryPolicy;
     /** The tax added on top of goods and delivery. Shared with the cart so the two totals agree. */
@@ -156,6 +166,8 @@ public class OrderService {
                         com.buyology.ecommerce.product.repository.ProductRepository productRepository,
                         @org.springframework.beans.factory.annotation.Value(
                                 "${app.stock.enforce-product-quantity:false}") boolean enforceProductStock,
+                        @org.springframework.beans.factory.annotation.Value(
+                                "${delivery.express-enabled:false}") boolean expressEnabled,
                         CashOnDeliveryPolicy cashOnDeliveryPolicy,
                         VatPolicy vatPolicy,
                         ProductTranslationRepository productTranslationRepository,
@@ -198,6 +210,7 @@ public class OrderService {
         this.storeProductRepo = storeProductRepo;
         this.productRepository = productRepository;
         this.enforceProductStock = enforceProductStock;
+        this.expressEnabled = expressEnabled;
         this.cashOnDeliveryPolicy = cashOnDeliveryPolicy;
         this.vatPolicy = vatPolicy;
         this.storeProductVariantRepo = storeProductVariantRepo;
@@ -408,19 +421,26 @@ public class OrderService {
             netTotal = BigDecimal.ZERO;
         }
 
-        // VAT on top, computed on the DISCOUNTED total — tax follows the money, and taxing the
-        // pre-discount figure would charge tax on a sum nobody paid. Snapshotted with its rate,
-        // because rates change and an old order must still say what it was actually taxed at.
+        // The total is the discounted total, full stop. Catalogue prices already include VAT, so
+        // there is nothing to add — adding it charged the tax a second time and every customer paid
+        // 5% over the price they were shown.
         //
-        // Same VatPolicy the cart preview reads, so the number on the basket page and the number
-        // the gateway charges cannot drift apart.
-        BigDecimal vat = vatPolicy.vatOn(netTotal, orderCountryCode);
-        BigDecimal totalAmount = netTotal.add(vat);
+        // VAT is still recorded, because an invoice has to name it: it is the portion of what the
+        // customer pays that IS tax, extracted from the amount rather than added to it. Snapshotted
+        // with its rate, because rates change and an old order must still say what it was taxed at.
+        //
+        // Same VatPolicy the cart preview reads, so the number on the basket page and the number the
+        // gateway charges cannot drift apart.
+        BigDecimal totalAmount = netTotal;
+        BigDecimal vat = vatPolicy.vatIncludedIn(totalAmount, orderCountryCode);
 
         order.setSubtotal(subtotal);
         order.setDiscount(discount);
         order.setVatAmount(vat);
-        order.setVatRatePercent(vat.signum() > 0 ? vatPolicy.ratePercent() : null);
+        // Gated on the market being taxed, not on the amount landing above zero. A zero-value order
+        // in a taxed market should still report the rate it was taxed at, and "rate is null" should
+        // mean "this market has no VAT" rather than "this order happened to round to nothing".
+        order.setVatRatePercent(vatPolicy.appliesTo(orderCountryCode) ? vatPolicy.ratePercent() : null);
         order.setTotalAmount(totalAmount);
 
         // Cash on delivery is checked HERE and not at the storefront's discretion, and it is
@@ -466,6 +486,12 @@ public class OrderService {
             order.setPromoCodeId(null);
             order.setDiscount(BigDecimal.ZERO);
             order.setTotalAmount(grossTotal);
+            // Re-extract: the total just changed, and the VAT stored against it was computed from the
+            // discounted figure. Leaving it would record a tax amount that does not correspond to the
+            // total on the same row — wrong on the invoice, and wrong in any report that trusts the
+            // pair. This was already inconsistent before VAT became inclusive; it is fixed here
+            // because this is the line that moves the total.
+            order.setVatAmount(vatPolicy.vatIncludedIn(grossTotal, orderCountryCode));
             order = orderRepo.save(order);
         }
 
@@ -1231,8 +1257,21 @@ public class OrderService {
      * Returns EXPRESS if every cart item's store has an active location within
      * the 30-minute delivery radius of the given address, otherwise REGULAR.
      * Also validates that all items are in the same country as the delivery address.
+     *
+     * <p>The ONE place an order can come out as EXPRESS, which is why the kill switch lives here
+     * rather than in the UI. Every route funnels through it: a client posting
+     * {@code deliveryMethod=EXPRESS} is re-validated through this method, an omitted method is
+     * resolved by it, and the Paymob webhook's method — which comes out of transaction metadata the
+     * client wrote, and is therefore not to be trusted — ends up back here via createOrder. Hiding the
+     * button closes none of those; closing this closes all of them.
+     *
+     * <p>The enum, its converter and the courier's EXPRESS-only order list are all left alone: orders
+     * placed while 30-minute delivery was on still have to load, display and be tracked.
      */
     private DeliveryMethod resolveDeliveryMethod(List<CartItem> cartItems, UserAddress address) {
+        if (!expressEnabled) {
+            return DeliveryMethod.REGULAR;
+        }
         if (address.getLatitude() == null || address.getLongitude() == null) {
             return DeliveryMethod.REGULAR;
         }

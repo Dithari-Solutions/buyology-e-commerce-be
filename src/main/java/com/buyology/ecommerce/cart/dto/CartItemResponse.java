@@ -43,12 +43,29 @@ public class CartItemResponse {
      */
     private Integer availableUnits;
 
+    /**
+     * The VAT already contained in this line's {@code totalPrice}, or null when the market is untaxed.
+     *
+     * <p>For the per-product "VAT 5% included" note. Extracted, not added — the price is inclusive, so
+     * this is a portion OF totalPrice and must never be shown as something on top of it, or the page
+     * says the customer owes 5% they have already paid.
+     *
+     * <p>Deliberately not expected to reconcile with the cart's own {@code vatAmount}: that one is
+     * extracted from goods plus delivery, and rounding per line does not sum to rounding the whole
+     * (three lines of 33.33 do not). The order-level figure is the authoritative one; this annotates a
+     * line.
+     */
+    private BigDecimal vatAmount;
+
     private List<CartItemSpecSelectionResponse> selectedSpecs;
     private Instant createdAt;
     private Instant updatedAt;
 
     public CartItemResponse() {
     }
+
+    public BigDecimal getVatAmount() { return vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
 
     public Integer getAvailableUnits() { return availableUnits; }
     public void setAvailableUnits(Integer availableUnits) { this.availableUnits = availableUnits; }
