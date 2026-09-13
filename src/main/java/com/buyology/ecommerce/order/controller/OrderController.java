@@ -98,17 +98,28 @@ public class OrderController {
         String reason = cashOnDeliveryPolicy.rejectionReason(country, total, currency);
         return ApiResponse.success(
                 new CashOnDeliveryAvailability(
-                        reason == null, reason, cashOnDeliveryPolicy.maxOrderTotalAed()),
+                        reason == null,
+                        cashOnDeliveryPolicy.isEnabled(),
+                        reason,
+                        cashOnDeliveryPolicy.maxOrderTotalAed()),
                 "Cash on delivery availability");
     }
 
     /**
      * @param available        whether this exact checkout may choose cash
+     * @param offered          whether cash is offered by this platform AT ALL, regardless of this
+     *                         order. The difference is what a page needs to decide between staying
+     *                         silent and explaining itself: when cash is switched off nobody wants to
+     *                         be told about a method they have never seen, but when it is on and THIS
+     *                         order does not qualify, saying nothing reads as the site being broken.
+     *                         The storefront previously inferred this from whether a ceiling existed,
+     *                         which is wrong — with no ceiling configured (the default) it concluded
+     *                         "switched off" for every refusal and explained nothing, ever.
      * @param reason           the customer-facing explanation when it may not; null when it may
      * @param maxOrderTotalAed the single-order ceiling in AED, or null when there is none — so the
      *                         page can say "cash up to X" before a basket even has a total
      */
-    public record CashOnDeliveryAvailability(boolean available, String reason,
+    public record CashOnDeliveryAvailability(boolean available, boolean offered, String reason,
                                              java.math.BigDecimal maxOrderTotalAed) {}
 
     @PostMapping("/buy-now")
