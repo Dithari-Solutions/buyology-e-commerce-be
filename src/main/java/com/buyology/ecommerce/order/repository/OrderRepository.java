@@ -77,6 +77,14 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * <p>The horizon matters. Without it a permanently unmappable order — one spanning two stores,
      * say — is retried every five minutes forever, and the log noise buries the orders a retry
      * could actually save.
+     *
+     * <p>The horizon is measured from {@code updatedAt}, not {@code createdAt} — "recently active",
+     * not "recently created". A CASH order is the case that forces this: it stays PENDING_PAYMENT
+     * until somebody packs it, which can be days after it was placed, and a createdAt horizon put
+     * every one of those outside the window before it ever became dispatchable. So a cash order packed
+     * on Thursday for a Monday checkout would never be picked up, and nobody would be told. The lower
+     * bound stays on createdAt, because that one is a grace period for a brand-new order the event
+     * listener is already handling.
      */
     @Query("""
             SELECT o FROM Order o
@@ -85,7 +93,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                                com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING)
               AND o.deliveryMethod = com.buyology.ecommerce.order.domain.enums.DeliveryMethod.REGULAR
               AND o.createdAt < :olderThan
-              AND o.createdAt > :horizon
+              AND o.updatedAt > :horizon
             ORDER BY o.createdAt ASC
             """)
     List<Order> findUndispatchedQuiqupOrders(@Param("olderThan") Instant olderThan,

@@ -126,6 +126,53 @@ class QuiqupOrderMapperTest {
         assertEquals(0, payload.get("payment_amount").asInt());
     }
 
+    @Test
+    void aCashOrderTellsTheCourierWhatToCollect() {
+        // The one place Quiqup is told to ask for money. Get it wrong and the parcel is handed over
+        // free, with no second chance to ask.
+        Order cash = order();
+        cash.setPaymentMethod(com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod.CASH_ON_DELIVERY);
+        cash.setTotalAmount(new java.math.BigDecimal("105.50"));
+        cash.setCurrency("AED");
+
+        ObjectNode payload = mapper.toCreatePayload(cash, origin(), "+971500000001", List.of());
+
+        assertEquals("cod", payload.get("payment_mode").asText());
+        assertEquals(0, new java.math.BigDecimal("105.50")
+                        .compareTo(payload.get("payment_amount").decimalValue()),
+                "the amount must be exact to the fils — a human counts this out at a door");
+    }
+
+    @Test
+    void theCollectedAmountKeepsBothDecimalsRatherThanBecomingAFloat() {
+        // doubleValue() on a money BigDecimal is how 105.50 becomes 105.5 — or worse. This is the
+        // figure printed on a courier's job sheet, so it serialises at scale 2.
+        Order cash = order();
+        cash.setPaymentMethod(com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod.CASH_ON_DELIVERY);
+        cash.setTotalAmount(new java.math.BigDecimal("105.5"));
+        cash.setCurrency("AED");
+
+        ObjectNode payload = mapper.toCreatePayload(cash, origin(), "+971500000001", List.of());
+
+        assertEquals("105.50", payload.get("payment_amount").asText());
+    }
+
+    @Test
+    void aCashOrderAlreadyCollectedIsPrepaidAgain() {
+        // Money in hand beats payment method. A cash order the customer settled at the counter, or one
+        // an admin has already booked, must not be charged a second time at the door.
+        Order cash = order();
+        cash.setPaymentMethod(com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod.CASH_ON_DELIVERY);
+        cash.setTotalAmount(new java.math.BigDecimal("105.50"));
+        cash.setCurrency("AED");
+        cash.setCodCollectedAt(java.time.Instant.now());
+
+        ObjectNode payload = mapper.toCreatePayload(cash, origin(), "+971500000001", List.of());
+
+        assertEquals("pre_paid", payload.get("payment_mode").asText());
+        assertEquals(0, payload.get("payment_amount").asInt());
+    }
+
     // ── Reference and parcels ────────────────────────────────────────────────
 
     @Test

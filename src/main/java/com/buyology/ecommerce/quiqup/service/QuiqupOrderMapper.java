@@ -77,10 +77,17 @@ public class QuiqupOrderMapper {
         // recorded as collected, is prepaid by the time it reaches a courier and must not be
         // charged twice.
         if (order.isCashOnDelivery() && !order.isMoneyCollected()) {
-            root.put("payment_mode", "cod");
+            // The mode string is CONFIGURABLE because it is not confirmed. It is modelled on Quiqup's
+            // sample pack, which only ever shows pre_paid and describes itself as a best guess — and
+            // the cost of it being wrong is a courier who is not asked for the money, i.e. the parcel
+            // handed over free. Confirm the value with Quiqup and correct it with a restart rather
+            // than a release.
+            root.put("payment_mode", props.getDispatch().getCodPaymentMode());
+            // setScale(2), not doubleValue(). This is the figure a human counts out at a door: it must
+            // serialise as 105.50, never as a float artefact, and never lose a fils.
             root.put("payment_amount", order.getTotalAmount() == null
-                    ? 0
-                    : order.getTotalAmount().doubleValue());
+                    ? java.math.BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP)
+                    : order.getTotalAmount().setScale(2, java.math.RoundingMode.HALF_UP));
         } else {
             root.put("payment_mode", "pre_paid");
             root.put("payment_amount", 0);

@@ -171,6 +171,17 @@ public class QuiqupDispatchService {
             if (snap.quiqupOrderId != null && !snap.quiqupOrderId.isBlank()) {
                 return "Already dispatched (Quiqup order " + snap.quiqupOrderId + ")";
             }
+            // "Not packed yet" is not a failure, and must not be written onto the order as one. A CASH
+            // order makes this visible: it is created PENDING_PAYMENT and fires its handoff event right
+            // then, so every cash order used to stamp "Order is PENDING_PAYMENT, not awaiting dispatch"
+            // into quiqupDispatchError — shown in red on the admin page — before anybody had done
+            // anything wrong. The retry sweep picks the order up once it reaches PACKAGING.
+            String notReady = notReadyYet(snap);
+            if (notReady != null) {
+                log.debug("[QUIQUP] Order {} not dispatchable yet — {}", orderId, notReady);
+                return notReady;
+            }
+
             String refusal = refuseReason(snap);
             if (refusal != null) {
                 recordFailure(orderId, refusal);
@@ -303,11 +314,38 @@ public class QuiqupDispatchService {
     // =========================================================================
 
     /** Why this order must not be dispatched, or null when it may be. */
+    /**
+     * The currency a Quiqup cash collection is implicitly in.
+     *
+     * <p>Their create payload has no currency field, so the amount is interpreted in the market the
+     * courier settles in. Quiqup are a UAE operation, so that is AED — and an order in any other
+     * currency cannot be handed to them for collection without misstating what is owed.
+     */
+    private static final String QUIQUP_SETTLEMENT_CURRENCY = "AED";
+
+    /**
+     * Why this order is not ready for a courier YET, or null when it is.
+     *
+     * <p>Separate from {@link #refuseReason} because the two mean different things to an admin. A
+     * refusal is a problem with the order that somebody has to resolve — no coordinates, two stores,
+     * no phone — and belongs on the order in red. "Not packed yet" is the normal state of a healthy
+     * order that simply has not got there, and recording it as a failure turns every cash order into
+     * a false alarm the moment it is created.
+     */
+    private String notReadyYet(Snapshot snap) {
+        OrderStatus status = snap.order.getStatus();
+        if (status != OrderStatus.PAID && status != OrderStatus.PACKAGING) {
+            return "Order is " + status + ", not awaiting dispatch";
+        }
+        return null;
+    }
+
     private String refuseReason(Snapshot snap) {
         Order order = snap.order;
 
-        if (order.getStatus() != OrderStatus.PAID && order.getStatus() != OrderStatus.PACKAGING) {
-            return "Order is " + order.getStatus() + ", not awaiting dispatch";
+        String notReady = notReadyYet(snap);
+        if (notReady != null) {
+            return notReady;
         }
         // The same bean that decides whether Quiqup's rate is charged decides whether Quiqup carry
         // it. Billing one carrier and using another is the divergence this is here to prevent.
@@ -319,6 +357,23 @@ public class QuiqupDispatchService {
         }
         if (order.getRecipientPhone() == null || order.getRecipientPhone().isBlank()) {
             return "Order has no recipient phone; the courier cannot make contact";
+        }
+        // A cash job tells Quiqup an AMOUNT and no currency — their payload has no currency field, so
+        // the number is implicitly whatever the courier's market settles in. That is safe while the
+        // order is in AED and actively dangerous otherwise: a 400 AZN order would be collected as 400
+        // AED. Refusing is the only honest option, because there is nowhere to put the currency.
+        //
+        // Also refuses a cash order with no total at all, rather than sending a courier to collect 0.
+        if (order.isCashOnDelivery() && !order.isMoneyCollected()) {
+            if (order.getTotalAmount() == null || order.getTotalAmount().signum() <= 0) {
+                return "Cash order has no amount to collect";
+            }
+            if (order.getCurrency() == null
+                    || !QUIQUP_SETTLEMENT_CURRENCY.equalsIgnoreCase(order.getCurrency())) {
+                return "Cash order is in " + order.getCurrency() + " but a Quiqup job carries no "
+                        + "currency, so the amount would be collected as " + QUIQUP_SETTLEMENT_CURRENCY
+                        + "; needs manual handling";
+            }
         }
         if (snap.storeCount > 1) {
             return "Order spans " + snap.storeCount + " stores and a Quiqup job has one pickup "
