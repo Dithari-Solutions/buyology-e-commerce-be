@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger, for applying a CONFIG change with no code change.
+  #
+  # Every repo variable below is read at run time and exported into the deploy shell, where compose
+  # substitutes it — so the values live only for the duration of a deploy. Changing a variable in the
+  # GitHub UI therefore does nothing until this workflow runs again, and a plain `docker compose
+  # restart` on the host resolves every one of them to the compose default instead (COD_ENABLED back
+  # to false, and so on). Without a dispatch trigger the only way to apply a variable change was to
+  # push a commit or re-run an old run, which is a poor fit for "turn cash on delivery on".
+  workflow_dispatch:
 
 env:
   DEPLOY_PATH: /opt/buyology-ecommerce-be
