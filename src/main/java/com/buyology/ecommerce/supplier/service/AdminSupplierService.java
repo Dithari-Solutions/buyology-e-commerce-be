@@ -129,6 +129,39 @@ public class AdminSupplierService {
             return ApiResponse.failure(HttpStatus.BAD_REQUEST, "At least one store must be assigned");
         }
 
+        // An address that already holds a credential must not be given a second one.
+        //
+        // auth_credentials has no unique index on email — not in the entity, not in any migration —
+        // so the insert below simply succeeds and leaves TWO LOCAL rows for one address. At that
+        // point findByEmailAndProvider is a single-result query over two rows, and it throws
+        // IncorrectResultSizeDataAccessException: BOTH accounts lose sign-in, forgot-password and
+        // reset-password, permanently, with no self-service way back.
+        //
+        // Nothing stopped that happening. The only guard on this flow is in initiateApplication and
+        // it queries supplier_applications, a different table, so approving a supplier whose contact
+        // address is already a customer's login produced the duplicate every single time — no race,
+        // no concurrency, just the ordinary case of a customer who wants to sell.
+        //
+        // Refusing rather than linking the supplier to the existing account is deliberate. Turning a
+        // customer into a supplier changes their user type and their access, and that is a decision
+        // for the person approving, not a side effect of this button.
+        // LOCAL only. All ten call sites of findByEmailAndProvider pass "LOCAL", so a second LOCAL
+        // row is the only thing that can make it throw; a social login lives under a different
+        // provider on its own Users row and collides with nothing. Matching on any provider would
+        // strand applications rather than protect them — an applicant who signed in with Google
+        // after applying could never be approved, and nothing in the admin surface can edit an
+        // application's email, so the only exit would be to reject them.
+        boolean localAccountExists = authCredentialRepository.findAllByEmailIgnoreCase(app.getEmail())
+                .stream()
+                .anyMatch(c -> "LOCAL".equalsIgnoreCase(c.getProvider()));
+        if (localAccountExists) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "An account already exists with this email address. Approving would create a "
+                            + "second login for it and lock both accounts out of sign-in. Resolve "
+                            + "the existing account first, or ask the applicant for a different "
+                            + "address.");
+        }
+
         // 1. Create Users record
         String[] nameParts = app.getFullName().trim().split("\\s+", 2);
         Users user = new Users();

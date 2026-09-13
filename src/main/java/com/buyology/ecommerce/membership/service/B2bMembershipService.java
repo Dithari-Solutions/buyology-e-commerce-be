@@ -578,6 +578,36 @@ public class B2bMembershipService {
                 .findFirst()
                 .orElse(null);
         if (localCreds == null) {
+            // This branch resolved the user by ID, so it knows this USER has no LOCAL credential —
+            // it does not know whether this EMAIL is already someone else's login. Inserting blind
+            // is how an applicant who applied while signed in as an OAuth-only user, quoting a
+            // contact address another account already holds, produced a second LOCAL row for that
+            // address. auth_credentials carries no unique index on email, so nothing refused it,
+            // and findByEmailAndProvider then threw for both accounts: no sign-in, no
+            // forgot-password, no reset-password, for either of them, permanently.
+            //
+            // Failing the activation is the lesser harm. An admin sees a conflict they can act on;
+            // the alternative silently locks two people out and gives neither of them a way back.
+            // LOCAL rows belonging to somebody else — both halves of that matter. Only a second
+            // LOCAL row can make findByEmailAndProvider throw, and one person may hold several
+            // social logins on one address: Google and Facebook each key on providerUserId and
+            // mint their own Users row, so the same address routinely sits on two OAuth
+            // credentials under two user ids without colliding with anything. Filtering on the
+            // user id alone would read those as a conflict and refuse an activation that was
+            // never at risk.
+            UUID resolvedUserId = userId; // userId is reassigned above, so it is not effectively final
+            List<AuthCredentials> heldElsewhere = authCredentialRepository.findAllByEmailIgnoreCase(email)
+                    .stream()
+                    .filter(c -> "LOCAL".equalsIgnoreCase(c.getProvider()))
+                    .filter(c -> !resolvedUserId.equals(c.getUserId()))
+                    .toList();
+            if (!heldElsewhere.isEmpty()) {
+                throw new IllegalStateException(
+                        "The contact email on this application (" + email + ") already belongs to "
+                                + "another account. Activating would create a second login for it "
+                                + "and lock both accounts out of sign-in. Resolve the existing "
+                                + "account first, or correct the application's contact address.");
+            }
             localCreds = new AuthCredentials();
             localCreds.setUserId(userId);
             localCreds.setEmail(email);

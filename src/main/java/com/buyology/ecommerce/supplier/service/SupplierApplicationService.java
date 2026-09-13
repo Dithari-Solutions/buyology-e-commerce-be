@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.supplier.service;
 
+import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.common.service.EmailService;
 import com.buyology.ecommerce.common.utils.EmailValidation;
@@ -47,6 +48,7 @@ public class SupplierApplicationService {
     private final OtpProperties otpProperties;
     private final ObjectMapper objectMapper;
     private final ContactVerificationService verificationService;
+    private final AuthCredentialRepository authCredentialRepository;
 
     public SupplierApplicationService(
             SupplierApplicationRepository applicationRepository,
@@ -56,7 +58,8 @@ public class SupplierApplicationService {
             ContaboObjectService contaboObjectService,
             OtpProperties otpProperties,
             ObjectMapper objectMapper,
-            ContactVerificationService verificationService) {
+            ContactVerificationService verificationService,
+            AuthCredentialRepository authCredentialRepository) {
         this.applicationRepository = applicationRepository;
         this.otpRepository = otpRepository;
         this.emailService = emailService;
@@ -65,6 +68,7 @@ public class SupplierApplicationService {
         this.otpProperties = otpProperties;
         this.objectMapper = objectMapper;
         this.verificationService = verificationService;
+        this.authCredentialRepository = authCredentialRepository;
     }
 
     // ── Step 1: Create application + send OTP ────────────────────────────────
@@ -84,6 +88,35 @@ public class SupplierApplicationService {
         if (alreadyExists) {
             return ApiResponse.failure(HttpStatus.CONFLICT,
                     "A supplier application with this email already exists");
+        }
+
+        // Say no here rather than at approval. The check above asks only whether a supplier
+        // APPLICATION exists; an address that is already somebody's login sails past it, and the
+        // approval then mints a second LOCAL credential for it. auth_credentials has no unique
+        // index on email, so that insert succeeds and findByEmailAndProvider — a single-result
+        // query — starts throwing for both accounts: neither can sign in, reset a password, or
+        // recover. Catching it at application time costs the applicant a clear message; catching it
+        // at approval time costs two people their accounts.
+        //
+        // IgnoreCase because the two sides disagree about letter case: this flow lower-cases before
+        // saving, AuthService.signup stores whatever was typed. A case-sensitive check would miss
+        // exactly the collisions that matter.
+        //
+        // LOCAL only, and that restriction is the whole point. Every one of the ten call sites of
+        // findByEmailAndProvider passes "LOCAL", so a second LOCAL row is the only thing that can
+        // make it throw. A social login is a different provider on its own Users row — Google and
+        // Facebook key on providerUserId and mint their own — so an address held only by an OAuth
+        // credential collides with nothing. Rejecting those too would refuse a case that was never
+        // broken, and permanently: there is no signed-in variant of this flow and no way to edit
+        // the address later, so anyone who had ever used "Sign in with Google" could not become a
+        // supplier under their real business address at all.
+        boolean localAccountExists = authCredentialRepository.findAllByEmailIgnoreCase(email)
+                .stream()
+                .anyMatch(c -> "LOCAL".equalsIgnoreCase(c.getProvider()));
+        if (localAccountExists) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "An account already exists with this email address. Please sign in with it, or "
+                            + "apply using a different address.");
         }
 
         if (phone == null || phone.isBlank()) {
