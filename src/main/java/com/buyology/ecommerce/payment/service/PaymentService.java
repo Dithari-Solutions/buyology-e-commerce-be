@@ -139,6 +139,15 @@ public class PaymentService {
         boolean requireAddress = true;
         if (req.getAppOrderId() != null) {
             var preOrder = orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null);
+            // A cash order must not also be chargeable online. repayOrder has always refused this,
+            // with a comment about double-charging, but this entry point did not — so a direct call
+            // could take the card payment while a courier was still on the way to collect the same
+            // money in cash. The storefront happens to return before reaching here, which is not a
+            // guarantee: the guard belongs on the endpoint, not on the one client that behaves.
+            if (preOrder != null && preOrder.isCashOnDelivery()) {
+                throw new IllegalStateException(
+                        "This order is being paid in cash on delivery and cannot be paid online.");
+            }
             if (preOrder != null
                     && preOrder.getDeliveryMethod() == com.buyology.ecommerce.order.domain.enums.DeliveryMethod.PICKUP) {
                 requireAddress = false;

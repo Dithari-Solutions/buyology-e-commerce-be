@@ -647,7 +647,63 @@ public class OrderService {
         // NOTE: promo usage is now recorded on payment success (recordPromoUsageOnPaid),
         // not here — so a code only counts as redeemed once the order is actually paid.
 
+        // A cash order is FINISHED being placed here. Everything that happens when an order is
+        // confirmed hung off the payment-success path only, and a cash order never reaches PAID by
+        // design — so without this a customer placed a cash order and nobody was told: no
+        // confirmation email, no supplier or superadmin notification, nothing handed to ERP, and the
+        // basket still full of the items they had just bought.
+        if (paymentMethod == OrderPaymentMethod.CASH_ON_DELIVERY) {
+            applyCashOrderPlaced(order, cart.getId());
+        }
+
         return toOrderResponse(order);
+    }
+
+    /**
+     * The side effects a cash order has to run at CREATION, because it has no payment to wait for.
+     *
+     * <p>Its counterparts fire on payment success for a card order. A cash order never passes through
+     * PAID — its money arrives at the end of a journey the parcel has already made — so "when the money
+     * lands" is the wrong trigger for all of it and "when the order is placed" is the right one.
+     *
+     * <p>The promo redemption is the one thing deliberately NOT moved here. Redemption is recorded when
+     * an order is actually paid, and for a cash order that is when the cash is booked — see
+     * {@link #recordCashOnDeliveryCollected}. Recording it now would let an abandoned cash order burn a
+     * single-use code nobody ever paid with.
+     *
+     * <p>Each step is isolated: a failure in any one of them must not roll back an order that has
+     * already taken stock and been promised to the customer.
+     */
+    private void applyCashOrderPlaced(Order order, UUID cartId) {
+        try {
+            notifyNewOrder(order);
+        } catch (Exception e) {
+            log.error("[ORDER] Cash order {} placed but suppliers/admins were not notified: {}",
+                    order.getId(), e.getMessage(), e);
+        }
+        try {
+            sendOrderConfirmationEmailFor(order);
+        } catch (Exception e) {
+            log.error("[ORDER] Cash order {} placed but the confirmation email failed: {}",
+                    order.getId(), e.getMessage(), e);
+        }
+        try {
+            // Same handoff a paid order makes. ERPNext needs the sales order whether the money has
+            // arrived yet or not — the goods are about to leave either way.
+            eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
+        } catch (Exception e) {
+            log.error("[ORDER] Cash order {} placed but the downstream handoff failed: {}",
+                    order.getId(), e.getMessage(), e);
+        }
+        try {
+            // Without this the basket keeps the items that were just ordered, and findEditableCart
+            // resumes a CHECKED_OUT cart as ACTIVE — so the customer sees them again and can order
+            // the same goods a second time, taking stock twice.
+            cartCheckoutCleanupService.clearOrderedItems(cartId);
+        } catch (Exception e) {
+            log.error("[ORDER] Cash order {} placed but its cart was not cleared: {}",
+                    order.getId(), e.getMessage(), e);
+        }
     }
 
     /**
@@ -2194,6 +2250,17 @@ public class OrderService {
         if (order.getTotalAmount() != null && collected.compareTo(order.getTotalAmount()) < 0) {
             log.warn("[ORDER] Cash collected for order {} is {} {}, short of the {} {} due",
                     orderId, collected, order.getCurrency(), order.getTotalAmount(), order.getCurrency());
+        }
+
+        // Booking the cash is the moment a cash order is actually paid, so this is where its promo
+        // code is redeemed — the same rule a card order follows at PAID. It was missing entirely: a
+        // cash order carrying a single-use code left the code reserved but never redeemed, so it
+        // counted against nobody and the reservation was the only thing holding it.
+        try {
+            recordPromoUsageOnPaid(saved);
+        } catch (Exception e) {
+            log.error("[ORDER] Cash collected for order {} but the promo redemption was not recorded: {}",
+                    orderId, e.getMessage(), e);
         }
 
         appendTrackingEvent(saved, saved.getStatus(),
