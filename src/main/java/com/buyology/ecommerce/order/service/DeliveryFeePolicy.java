@@ -44,21 +44,16 @@ public class DeliveryFeePolicy {
 
     private final BigDecimal freeShippingThresholdAed;
     private final BigDecimal flatFeeAed;
-    private final QuiqupCoverage quiqupCoverage;
 
-    /**
-     * @param quiqupCoverage no longer consulted for PRICING — the fee is flat — but still injected
-     *                       because it remains the gate for whether an order is Quiqup-dispatchable
-     *                       ({@code QuiqupDispatchService}), and keeping it here documents that the
-     *                       bean is load-bearing elsewhere rather than dead.
-     */
+    // No QuiqupCoverage here any more. It used to select between two rates, and with one rate it had
+    // nothing left to decide — an injected field nobody reads is worse than no field. The bean itself
+    // stays: QuiqupDispatchService gates on it to decide whether an order may be handed to Quiqup at
+    // all, which is a dispatch question rather than a pricing one.
     public DeliveryFeePolicy(
             @Value("${delivery.free-shipping-threshold-aed:100.00}") BigDecimal freeShippingThresholdAed,
-            @Value("${delivery.flat-fee-aed:25.00}") BigDecimal flatFeeAed,
-            QuiqupCoverage quiqupCoverage) {
+            @Value("${delivery.flat-fee-aed:25.00}") BigDecimal flatFeeAed) {
         this.freeShippingThresholdAed = freeShippingThresholdAed;
         this.flatFeeAed = flatFeeAed;
-        this.quiqupCoverage = quiqupCoverage;
     }
 
     /** The free-delivery threshold in AED, for display next to a "spend X more" nudge. */
@@ -72,15 +67,14 @@ public class DeliveryFeePolicy {
     }
 
     /**
-     * The delivery fee in AED for a method, a delivery country and an AED subtotal.
+     * The delivery fee in AED for a method and an AED subtotal.
      *
-     * <p>The country matters because Quiqup's rate may only be charged where Quiqup actually deliver.
-     * A standard order to a market they do not serve keeps the flat rate — it is carried by whatever
-     * arrangement covers that country, so billing it their Dubai price would be wrong.
-     *
-     * @param method       null is treated as standard, so a caller that has not resolved the method
-     *                     cannot accidentally get the free-delivery answer
-     * @param countryCode  the delivery address country, alpha-2 or alpha-3
+     * @param method       only PICKUP changes the answer. null is treated as a delivery, so a caller
+     *                     that has not resolved the method yet cannot accidentally get a free one
+     * @param countryCode  kept in the signature but no longer consulted — the rate is the same in
+     *                     every market. It stays because callers pass it and a future rate card may
+     *                     well be regional again; removing it would churn four call sites to save an
+     *                     unused argument
      * @param subtotalAed  the order/cart subtotal converted to AED
      */
     public BigDecimal feeAed(DeliveryMethod method, String countryCode, BigDecimal subtotalAed) {

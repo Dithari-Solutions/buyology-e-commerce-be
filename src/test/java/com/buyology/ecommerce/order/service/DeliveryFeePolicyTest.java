@@ -36,7 +36,7 @@ class DeliveryFeePolicyTest {
 
     /** The shipped defaults: free at 100, otherwise 25. */
     private final DeliveryFeePolicy policy = new DeliveryFeePolicy(
-            new BigDecimal("100.00"), new BigDecimal("25.00"), coverage);
+            new BigDecimal("100.00"), new BigDecimal("25.00"));
 
     // ── The flat rate ────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ class DeliveryFeePolicyTest {
     @Test
     void theRateFollowsItsConfiguration() {
         DeliveryFeePolicy dearer = new DeliveryFeePolicy(
-                new BigDecimal("100.00"), new BigDecimal("30.00"), coverage);
+                new BigDecimal("100.00"), new BigDecimal("30.00"));
         assertEquals(new BigDecimal("30.00"),
                 dearer.feeAed(DeliveryMethod.REGULAR, UAE, new BigDecimal("40.00")));
     }
@@ -147,15 +147,6 @@ class DeliveryFeePolicyTest {
     }
 
     // ── Quiqup coverage is no longer a price input, but is still the dispatch gate ──
-
-    @Test
-    void coverageNoLongerChangesThePrice() {
-        // It used to select between two rates. It is kept as a bean because QuiqupDispatchService gates
-        // on it to decide whether an order may be handed to Quiqup at all — so it is load-bearing
-        // elsewhere, and deleting it would break dispatch rather than pricing.
-        assertEquals(policy.feeAed(DeliveryMethod.REGULAR, UAE, new BigDecimal("40.00")),
-                policy.feeAed(DeliveryMethod.REGULAR, AZERBAIJAN, new BigDecimal("40.00")));
-    }
 
     @Test
     void theUaeIsRecognisedByBothItsAlphaTwoAndAlphaThreeCodes() {
