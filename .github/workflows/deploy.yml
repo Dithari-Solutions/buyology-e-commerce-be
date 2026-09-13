@@ -42,7 +42,11 @@ jobs:
   # ── Job 1: Build JAR, build & push Docker image (once) ─────────────────────
   build-and-push:
     needs: test
-    if: github.event_name == 'push'
+    # Both the automatic push and the manual run. The manual trigger was added without widening this,
+    # so clicking "Run workflow" ran the tests and then skipped both the build and the deploy — it
+    # looked like a successful run and changed nothing on the server, which is the worst possible
+    # failure for a button whose whole purpose is applying a config change.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -84,7 +88,7 @@ jobs:
   # nodes racing on Hibernate ddl-auto during a first-time empty-DB boot.
   deploy:
     needs: build-and-push
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 1
