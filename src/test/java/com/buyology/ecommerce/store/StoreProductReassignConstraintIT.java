@@ -4,8 +4,10 @@ import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.domain.ProductCategory;
 import com.buyology.ecommerce.product.repository.ProductCategoryRepository;
 import com.buyology.ecommerce.product.repository.ProductRepository;
+import com.buyology.ecommerce.store.domain.Country;
 import com.buyology.ecommerce.store.domain.Store;
 import com.buyology.ecommerce.store.domain.StoreProduct;
+import com.buyology.ecommerce.store.repository.CountryRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.store.repository.StoreRepository;
 import org.junit.jupiter.api.Test;
@@ -68,6 +70,9 @@ class StoreProductReassignConstraintIT {
 
     @Autowired
     ProductCategoryRepository categoryRepository;
+
+    @Autowired
+    CountryRepository countryRepository;
 
     @Autowired
     EntityManager em;
@@ -149,9 +154,35 @@ class StoreProductReassignConstraintIT {
 
     private record Fixture(Store store, Product product) {}
 
+    /**
+     * A unique country code that fits the column.
+     *
+     * <p>{@code countries.code} is {@code length = 3} and unique, so a UUID will not do. Each test rolls
+     * back, so uniqueness only has to hold within one test — but a counter keeps it honest if that ever
+     * changes.
+     */
+    private static int codeSeq = 0;
+
+    private static String shortCode() {
+        codeSeq = (codeSeq + 1) % 1000;
+        return String.format("Z%02d", codeSeq);
+    }
+
     private Fixture fixture() {
+        // A store needs a country, a name AND a slug — all three are NOT NULL, and the slug is unique.
+        // Spelled out rather than trusted to a default: nothing here has a @PrePersist that invents them,
+        // so an incomplete fixture fails inside the insert with a constraint error that looks exactly
+        // like the one under test.
+        Country country = new Country();
+        country.setCode(shortCode());
+        country.setName("Testland");
+        country.setCurrency("AED");
+        country = countryRepository.saveAndFlush(country);
+
         Store store = new Store();
+        store.setCountry(country);
         store.setName("Store " + UUID.randomUUID());
+        store.setSlug("store-" + UUID.randomUUID());
         store = storeRepository.saveAndFlush(store);
 
         ProductCategory category = new ProductCategory();
