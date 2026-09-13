@@ -15,6 +15,20 @@ import java.util.UUID;
 public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID> {
 
     Optional<StoreProduct> findByStore_IdAndProduct_IdAndIsActiveTrue(UUID storeId, UUID productId);
+
+    /**
+     * Every row for this store/product pair, INCLUDING a soft-deleted one.
+     *
+     * <p>The variant above filters {@code isActive}, which makes it the wrong tool for deciding whether
+     * an assignment may be created: removing an assignment soft-deletes the row rather than deleting
+     * it, so the filtered lookup answers "no such assignment" while the row is still sitting in the
+     * table — and the unconditional {@code UNIQUE (store_id, product_id)} constraint then rejects the
+     * insert with "A record with the same unique value already exists". A product could be removed from
+     * a store exactly once and never added back.
+     *
+     * <p>So assignment resolves through this one and revives the tombstone instead of inserting.
+     */
+    Optional<StoreProduct> findByStore_IdAndProduct_Id(UUID storeId, UUID productId);
     Optional<StoreProduct> findByProduct_Id(UUID productId);
 
     List<StoreProduct> findByStore_IdAndDeletedAtIsNull(UUID storeId);
