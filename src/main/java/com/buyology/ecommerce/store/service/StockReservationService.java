@@ -128,6 +128,10 @@ public class StockReservationService {
                 // either side. Untracked products return 0 rows here and that is correct — nothing
                 // was taken from them, so there is nothing to give back.
                 productRepo.returnAvailableQuantity(item.getProductId(), qty);
+                // And bring it back on sale, mirroring the flip the take performs. Without this a
+                // product sold out and then fully cancelled would stay marked OUT_OF_STOCK with units
+                // on the shelf.
+                productRepo.markInStockIfAvailableReplenished(item.getProductId());
 
                 productRepo.incrementStock(item.getProductId(), qty);
                 productRepo.markInStockIfReplenished(item.getProductId());

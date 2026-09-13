@@ -99,8 +99,12 @@ services:
       ENFORCE_PRODUCT_STOCK: ${ENFORCE_PRODUCT_STOCK:-false}
 
       # ── VAT ──
-      # Added ON TOP of catalogue prices, so this assumes they are NET of tax. Set
-      # VAT_RATE_PERCENT=0 if they are already VAT-inclusive, or every customer pays it twice.
+      # Catalogue prices INCLUDE this. Nothing is added at checkout — the rate is used to work out how
+      # much of a total already IS tax, for the "VAT 5% included" line and the invoice.
+      #
+      # So do NOT set this to 0 to avoid double-charging: nothing is charged twice, and 0 instead blanks
+      # the VAT figure everywhere and stops orders recording the rate they were taxed at. (Earlier
+      # comments here said the opposite; they belonged to the version that added the tax on top.)
       VAT_RATE_PERCENT: ${VAT_RATE_PERCENT:-5}
       VAT_COUNTRIES: ${VAT_COUNTRIES:-}
 
@@ -198,8 +202,6 @@ services:
       ASSISTANT_KNOWLEDGE_PATH: ${ASSISTANT_KNOWLEDGE_PATH:-}
 
       # ── Delivery pricing (AED) ──
-      # DELIVERY_QUIQUP_FEE_AED is the rate Quiqup bills us for a standard delivery, passed through
-      # to the customer on orders under the free-shipping threshold. Defaults to the previous 15.00.
       DELIVERY_FREE_SHIPPING_THRESHOLD_AED: ${DELIVERY_FREE_SHIPPING_THRESHOLD_AED:-100.00}
       # ONE delivery rate for every method and every market, below the free-shipping threshold above.
       # Pickup stays free. Tiered pricing was how the cart's quote and the order's charge drifted apart.
@@ -208,11 +210,13 @@ services:
       # button in the clients closes nothing (a client can post the method, and the payment webhook
       # takes it from metadata the client wrote).
       DELIVERY_EXPRESS_ENABLED: ${DELIVERY_EXPRESS_ENABLED:-false}
-      # Retired — no longer read. Kept so an environment still exporting it does not look broken.
+      # RETIRED — all three are read by nothing. Delivery is the single DELIVERY_FLAT_FEE_AED above,
+      # for every method and every market, so raising any of these changes no price. Kept only so an
+      # environment still exporting them does not look broken; delete once nothing does.
       DELIVERY_EXPRESS_FEE_AED: ${DELIVERY_EXPRESS_FEE_AED:-20.00}
       DELIVERY_QUIQUP_FEE_AED: ${DELIVERY_QUIQUP_FEE_AED:-15.00}
       DELIVERY_STANDARD_FEE_AED: ${DELIVERY_STANDARD_FEE_AED:-15.00}
-      # Quiqup is UAE-only; a standard order elsewhere is not theirs and keeps the flat rate.
+      # Still live, but for DISPATCH not pricing: which countries an order may be handed to Quiqup in.
       DELIVERY_QUIQUP_COUNTRIES: ${DELIVERY_QUIQUP_COUNTRIES:-UAE}
 
       # ── Website visitor analytics (storefront page-view beacon) ──

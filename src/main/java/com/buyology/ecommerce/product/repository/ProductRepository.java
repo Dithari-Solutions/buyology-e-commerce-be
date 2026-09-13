@@ -267,6 +267,46 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
                                  @Param("inStock") Product.AvailabilityStatus inStock,
                                  @Param("outOfStock") Product.AvailabilityStatus outOfStock);
 
+    /**
+     * Marks a product out of stock once its STATED count reaches zero.
+     *
+     * <p>The available_quantity counterpart of {@link #markOutOfStockIfDepleted}, which keys on the
+     * legacy stockQuantity column and therefore never fired for a product whose real count ran out.
+     * Without this the storefront went on showing a sold-out product as available with a live Add to
+     * Cart button — it derives that badge from availabilityStatus alone — and the customer only found
+     * out when the add was refused.
+     *
+     * <p>Moves only IN_STOCK to OUT_OF_STOCK. PRE_ORDER is left alone: it means "accept orders we
+     * cannot fill yet", and flipping it would contradict the order path, which DOES still sell a
+     * pre-order product against its stated count.
+     */
+    @Modifying
+    @Query("update Product p set p.availabilityStatus = :outOfStock " +
+           "where p.id = :productId and p.availableQuantity is not null and p.availableQuantity <= 0 " +
+           "and p.availabilityStatus = :inStock")
+    int markOutOfStockIfAvailableDepleted(@Param("productId") UUID productId,
+                                          @Param("outOfStock") Product.AvailabilityStatus outOfStock,
+                                          @Param("inStock") Product.AvailabilityStatus inStock);
+
+    /** The mirror, for when units are returned by a cancellation. */
+    @Modifying
+    @Query("update Product p set p.availabilityStatus = :inStock " +
+           "where p.id = :productId and p.availableQuantity is not null and p.availableQuantity > 0 " +
+           "and p.availabilityStatus = :outOfStock")
+    int markInStockIfAvailableReplenished(@Param("productId") UUID productId,
+                                          @Param("inStock") Product.AvailabilityStatus inStock,
+                                          @Param("outOfStock") Product.AvailabilityStatus outOfStock);
+
+    default int markOutOfStockIfAvailableDepleted(UUID productId) {
+        return markOutOfStockIfAvailableDepleted(productId,
+                Product.AvailabilityStatus.OUT_OF_STOCK, Product.AvailabilityStatus.IN_STOCK);
+    }
+
+    default int markInStockIfAvailableReplenished(UUID productId) {
+        return markInStockIfAvailableReplenished(productId,
+                Product.AvailabilityStatus.IN_STOCK, Product.AvailabilityStatus.OUT_OF_STOCK);
+    }
+
     /** Keeps the enum arguments out of every call site. */
     default int markOutOfStockIfDepleted(UUID productId) {
         return markOutOfStockIfDepleted(productId,

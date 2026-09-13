@@ -508,9 +508,16 @@ public class OrderService {
                         cartItem.getVariant().getId(),
                         cartItem.getQuantity());
                 if (updated != 1) {
-                    throw new IllegalStateException("Insufficient stock for product "
-                            + cartItem.getProduct().getId() + " variant " + cartItem.getVariant().getId()
-                            + " (requested " + cartItem.getQuantity() + ")");
+                    // The same exception type as the product-level refusal, deliberately. These are the
+                    // same event to a customer, and while this one was an IllegalStateException it (a)
+                    // answered them with raw UUIDs and (b) slipped past the catch in the cart-first
+                    // webhook path that exists to stop a stock refusal losing a captured payment — and
+                    // for a product WITH variants this is the refusal that actually fires.
+                    throw new InsufficientStockException(
+                            cartItem.getProduct().getId(),
+                            cartItem.getProduct().getSku(),
+                            cartItem.getQuantity(),
+                            null);
                 }
             }
 
@@ -567,6 +574,11 @@ public class OrderService {
                             cartItem.getQuantity(),
                             orderedProduct.getAvailableQuantity());
                 }
+                // Selling the last unit is what makes a product sold out, and the storefront derives
+                // its in-stock badge and its Add to Cart gate from availabilityStatus alone — so
+                // without this a depleted product went on advertising itself as available and refused
+                // the add instead.
+                productRepository.markOutOfStockIfAvailableDepleted(orderedProduct.getId());
             }
 
             boolean tracksStock = orderedProduct.getStockQuantity() != null
@@ -576,9 +588,11 @@ public class OrderService {
                 int taken = productRepository.decrementStockIfAvailable(
                         orderedProduct.getId(), cartItem.getQuantity());
                 if (taken != 1) {
-                    throw new IllegalStateException("Insufficient stock for product "
-                            + orderedProduct.getId() + " (requested " + cartItem.getQuantity()
-                            + ", available " + orderedProduct.getStockQuantity() + ")");
+                    throw new InsufficientStockException(
+                            orderedProduct.getId(),
+                            orderedProduct.getSku(),
+                            cartItem.getQuantity(),
+                            orderedProduct.getStockQuantity());
                 }
             } else if (orderedProduct.getStockQuantity() != null) {
                 // The historical behaviour: count down, floor at zero, never refuse. Kept so the
@@ -1073,7 +1087,20 @@ public class OrderService {
                         tx, null, null,
                         "cart-first: payment settled but the order could not be created — "
                                 + e.describeForLog(), "LISTENER");
-                return;
+                // RETHROWN, not swallowed. createOrder is called here by plain self-invocation, so its
+                // @Transactional is not a boundary — it runs inside THIS method's transaction. A cart
+                // with two lines can therefore have taken units for the first before the second was
+                // refused, and returning normally would COMMIT that partial take. Worse, the loop
+                // throws before order.setStockReservedAt(...) is reached, and StockReservationService
+                // refuses to return units for an order that never recorded reserving any — so those
+                // units would be unreachable by every restore path there is, permanently. The same
+                // commit would also persist a truncated order with no tracking history and a promo
+                // reservation nothing will ever release.
+                //
+                // Rethrowing rolls all of that back. The anomaly survives because it is written on its
+                // own connection (PaymentAnomalyService.insert is REQUIRES_NEW, for exactly this
+                // reason), so the refund still happens and the event infrastructure logs the throw.
+                throw e;
             }
 
             // Transition immediately to PAID — unless the amount actually paid does not

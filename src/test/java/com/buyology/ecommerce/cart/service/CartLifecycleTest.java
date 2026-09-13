@@ -87,7 +87,8 @@ class CartLifecycleTest {
                 mock(ProductVariantRepository.class),
                 mock(ProductSpecOptionRepository.class),
                 mock(StoreProductRepository.class),
-                false,
+                false,   // enforceProductStock — the legacy stock_quantity guard, off
+                false,   // expressEnabled — 30-minute delivery, off
                 mock(StoreProductVariantRepository.class),
                 mock(StoreLocationRepository.class),
                 mock(StoreOperatingHoursRepository.class),

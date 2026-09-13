@@ -239,6 +239,64 @@ class AvailableQuantityGuardIT {
         assertEquals(2, legacyStockOf(id));
     }
 
+    // ─── Selling the last unit takes it off sale ──────────────────────────────
+
+    @Test
+    void sellingTheLastUnitMarksTheProductOutOfStock() {
+        // The storefront derives both its in-stock badge and its Add to Cart gate from
+        // availabilityStatus alone, so a depleted product that stays IN_STOCK goes on advertising
+        // itself and refuses the add instead. The legacy flip keys on stock_quantity and so never
+        // fired for a product whose STATED count ran out.
+        UUID id = product(1, Product.AvailabilityStatus.IN_STOCK);
+
+        productRepository.takeAvailableQuantity(id, 1);
+        assertEquals(1, productRepository.markOutOfStockIfAvailableDepleted(id));
+        assertEquals(Product.AvailabilityStatus.OUT_OF_STOCK, availabilityOf(id));
+    }
+
+    @Test
+    void aProductWithUnitsLeftIsNotMarkedOutOfStock() {
+        UUID id = product(5, Product.AvailabilityStatus.IN_STOCK);
+
+        productRepository.takeAvailableQuantity(id, 1);
+        assertEquals(0, productRepository.markOutOfStockIfAvailableDepleted(id));
+        assertEquals(Product.AvailabilityStatus.IN_STOCK, availabilityOf(id));
+    }
+
+    @Test
+    void aPreOrderProductIsNeverFlippedOutOfStock() {
+        // PRE_ORDER means "accept orders we cannot fill yet". The order path DOES sell a pre-order
+        // product against its stated count, so flipping the status here would contradict it.
+        UUID id = product(1, Product.AvailabilityStatus.PRE_ORDER);
+
+        productRepository.takeAvailableQuantity(id, 1);
+        assertEquals(0, productRepository.markOutOfStockIfAvailableDepleted(id));
+        assertEquals(Product.AvailabilityStatus.PRE_ORDER, availabilityOf(id));
+    }
+
+    @Test
+    void anUntrackedProductIsNeverFlippedEitherWay() {
+        UUID id = product(null, Product.AvailabilityStatus.IN_STOCK);
+
+        assertEquals(0, productRepository.markOutOfStockIfAvailableDepleted(id));
+        assertEquals(Product.AvailabilityStatus.IN_STOCK, availabilityOf(id));
+    }
+
+    @Test
+    void returningUnitsPutsTheProductBackOnSale() {
+        // The mirror of the flip above. Without it, a product that sold out and was then cancelled
+        // would sit at OUT_OF_STOCK with units on the shelf.
+        UUID id = product(1, Product.AvailabilityStatus.IN_STOCK);
+
+        productRepository.takeAvailableQuantity(id, 1);
+        productRepository.markOutOfStockIfAvailableDepleted(id);
+        assertEquals(Product.AvailabilityStatus.OUT_OF_STOCK, availabilityOf(id));
+
+        productRepository.returnAvailableQuantity(id, 1);
+        assertEquals(1, productRepository.markInStockIfAvailableReplenished(id));
+        assertEquals(Product.AvailabilityStatus.IN_STOCK, availabilityOf(id));
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private UUID product(Integer availableQuantity, Product.AvailabilityStatus availability) {
@@ -286,5 +344,10 @@ class AvailableQuantityGuardIT {
     private Integer legacyStockOf(UUID id) {
         em.clear();
         return productRepository.findById(id).orElseThrow().getStockQuantity();
+    }
+
+    private Product.AvailabilityStatus availabilityOf(UUID id) {
+        em.clear();
+        return productRepository.findById(id).orElseThrow().getAvailabilityStatus();
     }
 }

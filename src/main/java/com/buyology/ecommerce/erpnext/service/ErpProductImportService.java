@@ -171,10 +171,17 @@ public class ErpProductImportService {
         Product existing = productRepository.findBySku(sku).orElse(null);
         if (existing != null) {
             existing.setStockQuantity(qty);
-            // The count that refuses an order, not just the urgency hint. ERP's warehouse figure is
-            // the closest thing to a real number this platform has, and these products have no
-            // variants — so before this column they had no ceiling of any kind and one physical
-            // machine could be sold repeatedly. Refreshed on every import, like availability.
+            // The count that refuses an order, not just the urgency hint. ERP's warehouse figure is the
+            // closest thing to a real number this platform has, and these products have no variants —
+            // so before this column they had no ceiling of any kind and one physical machine could be
+            // sold repeatedly.
+            //
+            // Refreshed on every import, which DOES overwrite a number an admin typed. That is the
+            // intended direction for an ERP-managed item — ERP is its inventory system, and
+            // ErpOrderSyncService pushes our orders back to it, so its figure accounts for what we
+            // sold. The caveat is the lag: between a sale and the next import ERP is behind, so a
+            // refresh can raise the count back above what is physically there. If order sync is ever
+            // turned off, this line has to stop refreshing or it will oversell.
             existing.setAvailableQuantity(qty);
             existing.setAvailabilityStatus(availability);
             productRepository.save(existing);

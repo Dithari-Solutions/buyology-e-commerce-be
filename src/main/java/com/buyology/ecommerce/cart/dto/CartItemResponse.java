@@ -1,5 +1,7 @@
 package com.buyology.ecommerce.cart.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -35,12 +37,14 @@ public class CartItemResponse {
      * limit from a rejected PATCH. Nothing in the cart response carried availability before, so every
      * stepper counted up freely to MAX_QTY and the customer found out at the cart or the payment page.
      *
-     * <p>Null means no ceiling — absent, not zero. A client must never render "0 left" for a missing
-     * value, or every untracked product reads as sold out.
+     * <p>Null means no ceiling, and is OMITTED from the JSON rather than sent as an explicit null, so
+     * the field matches the contract ProductResponse.availableQuantity already states. A client must
+     * never render a missing value as "0 left", or every untracked product reads as sold out.
      *
      * <p>A courtesy figure, not a reservation: the cart holds nothing, so this can be stale by the time
      * the order is placed. The binding refusal is the conditional decrement in createOrder.
      */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer availableUnits;
 
     /**
@@ -55,6 +59,7 @@ public class CartItemResponse {
      * (three lines of 33.33 do not). The order-level figure is the authoritative one; this annotates a
      * line.
      */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigDecimal vatAmount;
 
     private List<CartItemSpecSelectionResponse> selectedSpecs;

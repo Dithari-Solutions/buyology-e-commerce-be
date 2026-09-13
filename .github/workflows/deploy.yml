@@ -161,8 +161,13 @@ jobs:
           # (V55) is what limits orders now, and needs no flag: null means not tracked.
           ENFORCE_PRODUCT_STOCK: ${{ vars.ENFORCE_PRODUCT_STOCK || 'false' }}
           # ── VAT ──
-          # Assumes catalogue prices are NET of tax. If they are already VAT-inclusive this bills
-          # it twice; VAT_RATE_PERCENT=0 turns it off with a restart rather than a deploy.
+          # Catalogue prices INCLUDE this. Nothing is added at checkout — the rate is only used to work
+          # out how much of a total already IS tax, for the "VAT 5% included" line and the invoice.
+          #
+          # Do NOT set it to 0 to avoid double-charging: nothing is charged twice, and 0 instead removes
+          # the VAT figure from every cart, checkout and invoice and stops orders recording the rate they
+          # were taxed at. (This comment used to advise the opposite — that belonged to the version that
+          # added the tax on top of the price.)
           VAT_RATE_PERCENT: ${{ vars.VAT_RATE_PERCENT || '5' }}
           VAT_COUNTRIES: ${{ vars.VAT_COUNTRIES || '' }}
           # ── Email ──
@@ -265,10 +270,12 @@ jobs:
           DELIVERY_FLAT_FEE_AED: ${{ vars.DELIVERY_FLAT_FEE_AED || '25.00' }}
           # 30-minute delivery, off. Enforced server-side — hiding the client button closes nothing.
           DELIVERY_EXPRESS_ENABLED: ${{ vars.DELIVERY_EXPRESS_ENABLED || 'false' }}
-          # Retired, no longer read.
+          # RETIRED — all three are read by nothing. Delivery is DELIVERY_FLAT_FEE_AED above, for every
+          # method and market, so changing any of these changes no price.
           DELIVERY_EXPRESS_FEE_AED: ${{ vars.DELIVERY_EXPRESS_FEE_AED || '20.00' }}
           DELIVERY_QUIQUP_FEE_AED: ${{ vars.DELIVERY_QUIQUP_FEE_AED || '15.00' }}
           DELIVERY_STANDARD_FEE_AED: ${{ vars.DELIVERY_STANDARD_FEE_AED || '15.00' }}
+          # Still live, but for DISPATCH not pricing: where an order may be handed to Quiqup.
           DELIVERY_QUIQUP_COUNTRIES: ${{ vars.DELIVERY_QUIQUP_COUNTRIES || 'UAE' }}
           # ── Website visitor analytics ──
           # ANALYTICS_ENABLED is the kill switch on the storefront page-view beacon, the only

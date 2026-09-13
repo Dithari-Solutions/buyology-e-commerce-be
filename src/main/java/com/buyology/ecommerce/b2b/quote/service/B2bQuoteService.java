@@ -91,6 +91,7 @@ public class B2bQuoteService {
     private final B2bMembershipApplicationRepository membershipApplicationRepo;
     private final ProductMediaRepository productMediaRepository;
     private final com.buyology.ecommerce.store.service.StockReservationService stockReservationService;
+    private final com.buyology.ecommerce.order.service.VatPolicy vatPolicy;
 
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String procurementEmail;
@@ -114,7 +115,8 @@ public class B2bQuoteService {
                            ContaboObjectService contaboObjectService,
                            B2bMembershipApplicationRepository membershipApplicationRepo,
                            ProductMediaRepository productMediaRepository,
-                           com.buyology.ecommerce.store.service.StockReservationService stockReservationService) {
+                           com.buyology.ecommerce.store.service.StockReservationService stockReservationService,
+                           com.buyology.ecommerce.order.service.VatPolicy vatPolicy) {
         this.quoteRepo = quoteRepo;
         this.itemRepo = itemRepo;
         this.membershipRepo = membershipRepo;
@@ -128,6 +130,7 @@ public class B2bQuoteService {
         this.emailService = emailService;
         this.pushNotificationService = pushNotificationService;
         this.userRoleRepository = userRoleRepository;
+        this.vatPolicy = vatPolicy;
         this.contaboObjectService = contaboObjectService;
         this.membershipApplicationRepo = membershipApplicationRepo;
         this.productMediaRepository = productMediaRepository;
@@ -907,6 +910,12 @@ public class B2bQuoteService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         order.setSubtotal(subtotal);
         order.setTotalAmount(subtotal);
+        // Record the VAT contained in that total, as the retail pipeline does. Quoted prices are
+        // VAT-inclusive like every other price here, so leaving these at the entity default said a
+        // 10,000 AED order contained no tax at all — correct while VAT was ADDED on top and simply
+        // wrong now that it is extracted, and it left B2B invoices naming no VAT.
+        order.setVatAmount(vatPolicy.vatIncludedIn(subtotal, order.getCountry()));
+        order.setVatRatePercent(vatPolicy.appliesTo(order.getCountry()) ? vatPolicy.ratePercent() : null);
         order = orderRepo.save(order);
 
         for (B2bQuoteItem line : lines) {
