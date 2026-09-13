@@ -123,6 +123,12 @@ public class StockReservationService {
             // stock: it subtracted from a count already at 0, changing nothing, then added one
             // back. The decrement refuses instead of flooring, so that asymmetry is gone.
             if (item.getProductId() != null) {
+                // The stated count, if this product has one. An exact mirror of the take in
+                // createOrder: same column, same untracked-is-null predicate, no extra condition on
+                // either side. Untracked products return 0 rows here and that is correct — nothing
+                // was taken from them, so there is nothing to give back.
+                productRepo.returnAvailableQuantity(item.getProductId(), qty);
+
                 productRepo.incrementStock(item.getProductId(), qty);
                 productRepo.markInStockIfReplenished(item.getProductId());
             }

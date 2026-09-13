@@ -2,6 +2,7 @@ package com.buyology.ecommerce.order.service;
 
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
+import com.buyology.ecommerce.product.domain.InsufficientStockException;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
 import com.buyology.ecommerce.product.repository.ProductMediaRepository;
@@ -517,6 +518,31 @@ public class OrderService {
             // Real inventory is StoreProductVariant.stock, guarded unconditionally above. Nothing
             // here weakens that.
             Product orderedProduct = cartItem.getProduct();
+
+            // ── The count that is allowed to refuse this order ───────────────────────────────────
+            //
+            // available_quantity: null means nobody has stated a figure for this product, so it
+            // sells without a ceiling exactly as the whole catalogue did before V55. A number means
+            // somebody vouched for it, and we do not sell past it.
+            //
+            // A conditional UPDATE decides, not a comparison here, because two customers can be in
+            // this method at the same time for the same last unit. Postgres evaluates `>= :qty`
+            // while holding the row lock, so exactly one of them gets a row back.
+            //
+            // Enforced for PRE_ORDER products too, unlike the legacy guard below — see
+            // ProductRepository.takeAvailableQuantity for why.
+            if (orderedProduct.tracksAvailableQuantity()) {
+                int taken = productRepository.takeAvailableQuantity(
+                        orderedProduct.getId(), cartItem.getQuantity());
+                if (taken != 1) {
+                    throw new InsufficientStockException(
+                            orderedProduct.getId(),
+                            orderedProduct.getSku(),
+                            cartItem.getQuantity(),
+                            orderedProduct.getAvailableQuantity());
+                }
+            }
+
             boolean tracksStock = orderedProduct.getStockQuantity() != null
                     && orderedProduct.getAvailabilityStatus() != Product.AvailabilityStatus.PRE_ORDER;
 
@@ -531,8 +557,14 @@ public class OrderService {
             } else if (orderedProduct.getStockQuantity() != null) {
                 // The historical behaviour: count down, floor at zero, never refuse. Kept so the
                 // urgency message keeps working while the guard is off.
-                orderedProduct.setStockQuantity(
-                        Math.max(0, orderedProduct.getStockQuantity() - cartItem.getQuantity()));
+                //
+                // A statement, not a write to the loaded entity. Mutating it here was overwriting the
+                // bulk restore that supersedeStaleOrder had just performed in this same transaction,
+                // because the entity still held its pre-restore value and won at flush — so every Buy
+                // Now retry sank this counter by an extra unit. See
+                // ProductRepository.decrementStockFlooredAtZero.
+                productRepository.decrementStockFlooredAtZero(
+                        orderedProduct.getId(), cartItem.getQuantity());
             }
 
             // Safe either way: selling the last unit is what makes a product out of stock, and
@@ -996,7 +1028,27 @@ public class OrderService {
                 req.setShippingFee(shippingFee);
             }
 
-            OrderResponse orderResponse = createOrder(userId, authCredentialId, req);
+            // The money is already captured at this point — this flow settles first and builds the
+            // order from the cart afterwards — so a stock refusal must NOT be allowed to propagate.
+            // Throwing here rolls this transaction back and leaves a captured payment with no order
+            // and no record that anything went wrong: the customer is charged, sees a confirmation,
+            // and nothing ships. Recorded as an anomaly instead, in the same queue and with the same
+            // reasoning as the underpayment branch below. STOCK_UNAVAILABLE auto-refunds, because no
+            // order exists and the money unambiguously bought nothing.
+            OrderResponse orderResponse;
+            try {
+                orderResponse = createOrder(userId, authCredentialId, req);
+            } catch (InsufficientStockException e) {
+                log.error("[ORDER] Cart-first order for tx {} cannot be created — the units are gone ({}). "
+                                + "The payment is already captured; recording it for refund.",
+                        tx.getId(), e.describeForLog());
+                paymentAnomalyService.recordAndAlert(
+                        com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.STOCK_UNAVAILABLE,
+                        tx, null, null,
+                        "cart-first: payment settled but the order could not be created — "
+                                + e.describeForLog(), "LISTENER");
+                return;
+            }
 
             // Transition immediately to PAID — unless the amount actually paid does not
             // cover the order total computed server-side from the cart (amount tampering).

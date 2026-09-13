@@ -300,10 +300,20 @@ public class CartService {
             // and never blocked), so a well-selling product sits at 0 while still on sale. Capping
             // against it refused add-to-cart for those products. PRE_ORDER has no ceiling either
             // way: it means "accept orders we cannot fill yet".
-            availableUnits = (!enforceProductStock
-                    || product.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER)
-                    ? null
-                    : product.getStockQuantity();
+            //
+            // available_quantity is the count that DOES cap, and needs no switch: it is null on
+            // every product until an admin states a figure, so there is no drifted history to
+            // protect anyone from. It caps PRE_ORDER products too — an explicit number is an
+            // explicit number, and PRE_ORDER is the default for a new product, so exempting it
+            // would mean the figure did nothing on most of the catalogue.
+            if (product.tracksAvailableQuantity()) {
+                availableUnits = product.getAvailableQuantity();
+            } else {
+                availableUnits = (!enforceProductStock
+                        || product.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER)
+                        ? null
+                        : product.getStockQuantity();
+            }
         }
 
         // Stamp the cart with country + currency on first item
@@ -423,6 +433,14 @@ public class CartService {
                     .orElse(null);
         }
         Product p = item.getProduct();
+
+        // A stated count wins, and needs no switch: available_quantity is null until an admin
+        // vouches for a figure, so there is no untrustworthy history to guard against here — which
+        // is the whole reason it is a separate column from stockQuantity (see V55).
+        if (p.tracksAvailableQuantity()) {
+            return p.getAvailableQuantity();
+        }
+
         return (!enforceProductStock
                 || p.getAvailabilityStatus() == Product.AvailabilityStatus.PRE_ORDER)
                 ? null
@@ -874,6 +892,9 @@ public class CartService {
             response.setOriginalTotalPrice(
                     item.getOriginalUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
         }
+        // What a stepper is allowed to count up to. Resolved by the same helper the PATCH ceiling
+        // uses, so the number the client shows and the number the server enforces cannot disagree.
+        response.setAvailableUnits(availableUnitsFor(item));
         response.setQuickDelivery(item.getStoreId() != null && nearbyStoreIds.contains(item.getStoreId()));
         response.setCreatedAt(item.getCreatedAt());
         response.setUpdatedAt(item.getUpdatedAt());

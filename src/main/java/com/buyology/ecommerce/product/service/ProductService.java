@@ -261,6 +261,9 @@ public class ProductService {
                 request.getIsSuperDeal(),
                 request.getIsLimitedStock());
         product.setStockQuantity(request.getStockQuantity());
+        // Null means this product's stock is not tracked and it sells without a ceiling — which is
+        // how the whole catalogue behaves until somebody states a figure. See V55.
+        product.setAvailableQuantity(request.getAvailableQuantity());
         Product savedProduct = productRepository.save(product);
 
         // 5. Save translations
@@ -473,6 +476,15 @@ public class ProductService {
         }
         if (request.getStockQuantity() != null) {
             product.setStockQuantity(request.getStockQuantity());
+        }
+        // Untracking is checked FIRST and wins, so "stop limiting this product" cannot be defeated by
+        // a stale number the client happened to send alongside it. An omitted availableQuantity leaves
+        // the figure alone, as every other field here does — the explicit flag exists because that
+        // convention otherwise leaves no way to say "back to not tracked".
+        if (Boolean.TRUE.equals(request.getUntrackAvailableQuantity())) {
+            product.setAvailableQuantity(null);
+        } else if (request.getAvailableQuantity() != null) {
+            product.setAvailableQuantity(request.getAvailableQuantity());
         }
         if (request.getIsRefurbished() != null) {
             product.setIsRefurbished(request.getIsRefurbished());
@@ -2184,6 +2196,7 @@ public class ProductService {
         response.setSku(product.getSku());
         response.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
         response.setStockQuantity(product.getStockQuantity());
+        response.setAvailableQuantity(product.getAvailableQuantity());
         response.setIsSuperDeal(product.getIsSuperDeal());
         response.setIsLimitedStock(product.getIsLimitedStock());
         if (includeStatus) {

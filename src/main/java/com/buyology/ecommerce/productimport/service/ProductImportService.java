@@ -316,6 +316,10 @@ public class ProductImportService {
         // single items.
         int qty = row.getRawQuantity() == null ? 1 : Math.max(0, row.getRawQuantity());
         req.setStockQuantity(qty);
+        // Also the enforced count. A refurbished machine off a supplier sheet is one specific
+        // physical item, and it has no variant row to limit it — so without this the sheet's "1"
+        // was a display hint and nothing stopped it being sold five times.
+        req.setAvailableQuantity(qty);
         req.setAvailabilityStatus(qty > 0
                 ? Product.AvailabilityStatus.IN_STOCK
                 : Product.AvailabilityStatus.OUT_OF_STOCK);

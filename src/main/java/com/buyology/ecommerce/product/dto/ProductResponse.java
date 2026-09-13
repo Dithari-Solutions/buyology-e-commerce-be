@@ -23,9 +23,18 @@ public class ProductResponse {
     private String availabilityStatus;
     private Boolean isSuperDeal;
     private Boolean isLimitedStock;
-    /** Admin-managed stock count; the storefront shows an urgency message when low (< 5). */
+    /** Admin-managed urgency hint; the storefront shows a message when low (< 5). Does NOT cap orders. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer stockQuantity;
+    /**
+     * Units on hand, when this product's stock is tracked.
+     *
+     * <p>Absent means not tracked — it sells without a limit, and a client must not render "0 left"
+     * for a missing field. Present is the real ceiling: an order for more than this is refused, so
+     * this is the number a quantity stepper should cap at and the number "only N left" should quote.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer availableQuantity;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -342,6 +351,8 @@ public class ProductResponse {
     public void setIsLimitedStock(Boolean isLimitedStock) { this.isLimitedStock = isLimitedStock; }
     public Integer getStockQuantity() { return stockQuantity; }
     public void setStockQuantity(Integer stockQuantity) { this.stockQuantity = stockQuantity; }
+    public Integer getAvailableQuantity() { return availableQuantity; }
+    public void setAvailableQuantity(Integer availableQuantity) { this.availableQuantity = availableQuantity; }
     public String getProductType() { return productType; }
     public void setProductType(String productType) { this.productType = productType; }
     public Boolean getIsRefurbished() { return isRefurbished; }

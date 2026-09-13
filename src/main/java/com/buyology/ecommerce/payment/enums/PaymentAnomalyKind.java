@@ -32,13 +32,26 @@ public enum PaymentAnomalyKind {
     ORPHANED_NO_ORDER,
 
     /**
+     * The payment settled but the order could not be created because the units were gone.
+     *
+     * <p>Only reachable on the cart-first flow, where the gateway captures the money and the order is
+     * built afterwards from the cart. Somebody else took the last unit in between.
+     *
+     * <p>Auto-refunded, and it belongs in that set for exactly the reason the other two do: no order
+     * exists, nothing will ever ship, so the money unambiguously bought nothing. It is also the one
+     * anomaly the customer is guaranteed to notice, because they are sitting in front of a payment
+     * confirmation for something they will never receive.
+     */
+    STOCK_UNAVAILABLE,
+
+    /**
      * Anything else — the branch where we explicitly do not know what happened, which is exactly
      * where automation must not move money.
      */
     UNEXPECTED_ORDER_STATE;
 
-    /** Which kinds the sweep may refund without a human. The two unambiguous "money bought nothing" cases only. */
+    /** Which kinds the sweep may refund without a human. The unambiguous "money bought nothing" cases only. */
     public boolean autoRefunds() {
-        return this == PAID_AFTER_CANCELLED || this == DUPLICATE_CHARGE;
+        return this == PAID_AFTER_CANCELLED || this == DUPLICATE_CHARGE || this == STOCK_UNAVAILABLE;
     }
 }

@@ -37,3 +37,10 @@ build/
 !.env.example
 !.env.dev.example
 src/main/resources/application.properties
+
+# macOS AppleDouble metadata. The repo lives on a non-APFS volume, so the OS writes a "._name"
+# sidecar next to every file it touches. They are not source, and surefire tries to load the ones
+# under src/test as test classes ("Unable to create test class ...._SomeTest"), which fails the whole
+# build before a single test runs.
+._*
+.DS_Store

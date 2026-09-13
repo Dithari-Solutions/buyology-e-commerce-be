@@ -104,6 +104,21 @@ public class GlobalExceptionHandler {
 
     // ── Server-side errors ────────────────────────────────────────────────────
 
+    /**
+     * A refused sale, because the units are not there.
+     *
+     * <p>409 like any other conflict, but with wording written for a shopper — see
+     * {@link com.buyology.ecommerce.product.domain.InsufficientStockException}. The identifiers go to
+     * the log rather than into the response, which is the opposite of what the older stock refusals
+     * did. Logged at INFO, not ERROR: two people wanting the last unit is the system working.
+     */
+    @ExceptionHandler(com.buyology.ecommerce.product.domain.InsufficientStockException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInsufficientStock(
+            com.buyology.ecommerce.product.domain.InsufficientStockException ex) {
+        log.info("[STOCK] Refused a sale for units that are not there: {}", ex.describeForLog());
+        return ApiResponse.failure(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         log.error("Illegal state: {}", ex.getMessage(), ex);

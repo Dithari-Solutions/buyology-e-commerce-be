@@ -6,6 +6,7 @@ import com.buyology.ecommerce.product.domain.Product.RefurbGrade;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
@@ -31,8 +32,16 @@ public class CreateProductRequest {
     @Schema(description = "Mark product as limited stock", defaultValue = "false")
     private Boolean isLimitedStock = false;
 
-    @Schema(description = "Available stock count. Null = not tracked; < 5 shows a low-stock urgency message")
+    @Schema(description = "Low-stock urgency hint only. Null = no message; < 5 shows \"almost sold out\". "
+            + "This does NOT limit orders — use availableQuantity for that.")
+    @Min(value = 0, message = "Stock quantity cannot be negative")
     private Integer stockQuantity;
+
+    @Schema(description = "Units on hand. Null = stock not tracked, sells without a limit. Any number is "
+            + "a hard ceiling: an order for more than this is refused, and it is decremented as orders "
+            + "are placed and restored when one is cancelled.")
+    @Min(value = 0, message = "Available quantity cannot be negative")
+    private Integer availableQuantity;
 
     @NotNull(message = "Product type is required")
     @Schema(description = "Type of the product", allowableValues = {"SIMPLE", "DIY", "ACCESSORY"})
@@ -201,5 +210,13 @@ public class CreateProductRequest {
 
     public void setStockQuantity(Integer stockQuantity) {
         this.stockQuantity = stockQuantity;
+    }
+
+    public Integer getAvailableQuantity() {
+        return availableQuantity;
+    }
+
+    public void setAvailableQuantity(Integer availableQuantity) {
+        this.availableQuantity = availableQuantity;
     }
 }

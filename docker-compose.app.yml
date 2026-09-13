@@ -88,6 +88,16 @@ services:
       COD_COUNTRIES: ${COD_COUNTRIES:-}
       COD_MAX_ORDER_AED: ${COD_MAX_ORDER_AED:-0}
 
+      # ── Stock ──
+      # Whether the LEGACY products.stock_quantity column may refuse an order. Leave false: it is an
+      # urgency hint that has been counting down past whatever an admin typed since V12 and has never
+      # had units returned, so a product that merely sold well reads 0 and enforcing it refuses
+      # checkout on the best-selling catalogue. Audit and backfill that column before touching this.
+      #
+      # products.available_quantity (V55) is the number that actually limits orders and needs no flag,
+      # because it is null — "not tracked", no ceiling — until somebody states a figure.
+      ENFORCE_PRODUCT_STOCK: ${ENFORCE_PRODUCT_STOCK:-false}
+
       # ── VAT ──
       # Added ON TOP of catalogue prices, so this assumes they are NET of tax. Set
       # VAT_RATE_PERCENT=0 if they are already VAT-inclusive, or every customer pays it twice.

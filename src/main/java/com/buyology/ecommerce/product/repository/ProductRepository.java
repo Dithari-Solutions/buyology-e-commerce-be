@@ -138,6 +138,42 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
                        @Param("qty") int qty,
                        @Param("preOrder") Product.AvailabilityStatus preOrder);
 
+    /**
+     * The legacy urgency-hint decrement: counts down, floors at zero, never refuses.
+     *
+     * <p>What {@code createOrder} does to {@code stockQuantity} while its guard is switched off, and
+     * the behaviour the column has always had. Here as a statement rather than the read-modify-write
+     * it used to be, for two reasons that are both live bugs.
+     *
+     * <p>It could not compose with {@link #incrementStock}. Buy Now supersedes a stale order —
+     * restoring units with a bulk statement the persistence context cannot see — and then decrements
+     * the SAME already-loaded Product instance from its stale pre-restore value, so the entity flush
+     * at commit overwrote the restore. Net effect: every Buy Now retry sank the counter by an extra
+     * unit, which is a good part of why this column cannot be trusted today. The normal cart path
+     * escaped only because {@code CartItem.product} is LAZY and nothing dereferenced it early enough —
+     * luck, not design.
+     *
+     * <p>And it carries the PRE_ORDER predicate, which the old inline version did not. The restore has
+     * always had it, so the pair was asymmetric the other way: a PRE_ORDER product with a tracked
+     * count WAS decremented and then refused its units back, losing them permanently on every
+     * cancelled pre-order. Same class of bug as the floored-take/unfloored-restore asymmetry, opposite
+     * direction. The two are exact mirrors now.
+     *
+     * @return 1 when the row was matched, 0 when untracked or PRE_ORDER
+     */
+    @Modifying
+    @Query("update Product p set p.stockQuantity = "
+           + "case when p.stockQuantity < :qty then 0 else p.stockQuantity - :qty end "
+           + "where p.id = :productId and p.stockQuantity is not null "
+           + "and (p.availabilityStatus is null or p.availabilityStatus <> :preOrder)")
+    int decrementStockFlooredAtZero(@Param("productId") UUID productId,
+                                    @Param("qty") int qty,
+                                    @Param("preOrder") Product.AvailabilityStatus preOrder);
+
+    default int decrementStockFlooredAtZero(UUID productId, int qty) {
+        return decrementStockFlooredAtZero(productId, qty, Product.AvailabilityStatus.PRE_ORDER);
+    }
+
     /** Keeps the PRE_ORDER argument out of every call site. */
     default int decrementStockIfAvailable(UUID productId, int qty) {
         return decrementStockIfAvailable(productId, qty, Product.AvailabilityStatus.PRE_ORDER);
@@ -146,6 +182,57 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     default int incrementStock(UUID productId, int qty) {
         return incrementStock(productId, qty, Product.AvailabilityStatus.PRE_ORDER);
     }
+
+    // ── available_quantity: the count that is allowed to refuse an order ─────────────────────────
+    //
+    // Separate statements from the stockQuantity pair above, on a separate column, because the two
+    // numbers mean different things — see Product.availableQuantity and V55. In short: stockQuantity
+    // is a display hint that has drifted for as long as it has existed, so enforcing it refused
+    // checkout on the best-selling catalogue; availableQuantity is null everywhere until an admin
+    // states a figure, so it can be enforced from the first deploy without refusing anything.
+
+    /**
+     * Takes {@code qty} units, and only if that many are there.
+     *
+     * <p>A conditional UPDATE, not a read-modify-write. That is the entire concurrency argument: the
+     * {@code >= :qty} predicate is evaluated by Postgres while it holds the row lock, so two
+     * customers buying the last unit cannot both succeed — one of them gets 0 rows back. Checking in
+     * Java and then writing would let both read 2, both write 1, and sell one item twice.
+     *
+     * <p>It also has to be a statement rather than an entity mutation so it composes with
+     * {@link #returnAvailableQuantity} inside a single transaction, which is exactly what happens in
+     * {@code createOrder} when a stale order is cancelled (returning units) and the replacement then
+     * takes them again. An entity write would be computed from the value loaded BEFORE the bulk
+     * restore and would overwrite it on flush — the live Buy Now defect that makes the legacy
+     * display counter sink by an extra unit on every retry.
+     *
+     * <p>Unlike {@link #decrementStockIfAvailable} this does NOT exempt PRE_ORDER: a number an admin
+     * typed is a statement about units that exist, and PRE_ORDER is the default for a new product, so
+     * exempting it would mean the count did nothing on most of the catalogue. Untracked is spelled
+     * null, which the {@code is not null} predicate already excludes.
+     *
+     * @return 1 when the units were taken, 0 when there were not enough or the product is untracked
+     */
+    @Modifying
+    @Query("update Product p set p.availableQuantity = p.availableQuantity - :qty " +
+           "where p.id = :productId and p.availableQuantity is not null and p.availableQuantity >= :qty")
+    int takeAvailableQuantity(@Param("productId") UUID productId, @Param("qty") int qty);
+
+    /**
+     * Puts units back when an order dies.
+     *
+     * <p>No upper guard: returning units cannot oversell. An exact mirror of
+     * {@link #takeAvailableQuantity} — same column, same untracked predicate, no extra condition on
+     * either side. That symmetry is the point. Every stock bug in this file's history has been an
+     * asymmetry: a take that floored at zero paired with a restore that did not invented units, and a
+     * take that ignored PRE_ORDER paired with a restore that honoured it loses them.
+     *
+     * @return 1 when the product was found and tracks a count, 0 otherwise
+     */
+    @Modifying
+    @Query("update Product p set p.availableQuantity = p.availableQuantity + :qty " +
+           "where p.id = :productId and p.availableQuantity is not null")
+    int returnAvailableQuantity(@Param("productId") UUID productId, @Param("qty") int qty);
 
     /**
      * Marks a tracked product OUT_OF_STOCK once its last unit is sold.

@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.product.dto;
 
+import jakarta.validation.constraints.Min;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,7 +30,26 @@ public class UpdateProductRequest {
     private AvailabilityStatus availabilityStatus;
     private Boolean isSuperDeal;
     private Boolean isLimitedStock;
+    @Min(value = 0, message = "Stock quantity cannot be negative")
     private Integer stockQuantity;
+
+    @Schema(description = "Units on hand. Omitted leaves it unchanged. Any number is a hard ceiling on "
+            + "orders; to stop tracking stock for this product send untrackAvailableQuantity=true.")
+    @Min(value = 0, message = "Available quantity cannot be negative")
+    private Integer availableQuantity;
+
+    /**
+     * Stops tracking stock for this product — the ceiling is removed and it sells without a limit.
+     *
+     * <p>Needed because an omitted field means "leave unchanged" on a PATCH, which leaves no way to
+     * say "set this back to nothing". That gap is live for stockQuantity today: ProductService only
+     * writes it when non-null and the dashboard sends undefined for a cleared box, so once a number
+     * is set, null — the state that means "not tracked" — is unreachable through the API. Being
+     * unable to UNDO enforcement is a bad property for a field whose whole job is refusing orders.
+     */
+    @Schema(description = "Set true to stop tracking stock for this product (clears availableQuantity, "
+            + "removing the order ceiling). Takes precedence over availableQuantity.")
+    private Boolean untrackAvailableQuantity;
 
     @Schema(description = "New SKU (optional). Must stay globally unique. Blank/omitted leaves it unchanged.")
     private String sku;
@@ -147,6 +167,22 @@ public class UpdateProductRequest {
 
     public void setStockQuantity(Integer stockQuantity) {
         this.stockQuantity = stockQuantity;
+    }
+
+    public Integer getAvailableQuantity() {
+        return availableQuantity;
+    }
+
+    public void setAvailableQuantity(Integer availableQuantity) {
+        this.availableQuantity = availableQuantity;
+    }
+
+    public Boolean getUntrackAvailableQuantity() {
+        return untrackAvailableQuantity;
+    }
+
+    public void setUntrackAvailableQuantity(Boolean untrackAvailableQuantity) {
+        this.untrackAvailableQuantity = untrackAvailableQuantity;
     }
 
     public TranslationPatch getTranslations() {

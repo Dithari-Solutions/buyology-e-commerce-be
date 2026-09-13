@@ -171,6 +171,11 @@ public class ErpProductImportService {
         Product existing = productRepository.findBySku(sku).orElse(null);
         if (existing != null) {
             existing.setStockQuantity(qty);
+            // The count that refuses an order, not just the urgency hint. ERP's warehouse figure is
+            // the closest thing to a real number this platform has, and these products have no
+            // variants — so before this column they had no ceiling of any kind and one physical
+            // machine could be sold repeatedly. Refreshed on every import, like availability.
+            existing.setAvailableQuantity(qty);
             existing.setAvailabilityStatus(availability);
             productRepository.save(existing);
             return ErpImportResult.updated(sku, existing.getId().toString(),
@@ -191,6 +196,7 @@ public class ErpProductImportService {
                 availability,
                 false, false);
         product.setStockQuantity(qty);
+        product.setAvailableQuantity(qty);
         Product saved = productRepository.save(product);
 
         String title = item.itemName() != null && !item.itemName().isBlank() ? item.itemName().trim() : sku;

@@ -48,8 +48,33 @@ public class Product {
 
     // Admin-managed stock count. Null = not tracked. Drives the storefront's
     // low-stock urgency message (shown when 0 < stockQuantity < 5).
+    //
+    // NOT an inventory count and never has been — see availableQuantity below, and V55.
     @Column(name = "stock_quantity")
     private Integer stockQuantity;
+
+    /**
+     * Units on hand, and the number allowed to REFUSE an order.
+     *
+     * <p>Null means this product's stock is not tracked: it sells without a ceiling, which is how the
+     * whole catalogue behaves until somebody states a count. Any number is a claim that we hold that
+     * many, and the order path will not sell past it.
+     *
+     * <p>Distinct from {@link #stockQuantity} deliberately. That one is a display hint that has been
+     * decrementing past whatever an admin typed since V12, with nothing ever putting units back, so a
+     * product that merely sold well reads 0 — which is why enforcing it refused checkout for the
+     * best-selling catalogue and had to be rolled back. This column has no such history: every
+     * existing row is null, so enforcement costs nothing until the number is somebody's word.
+     *
+     * <p>Enforced whatever the {@link AvailabilityStatus}, PRE_ORDER included. stockQuantity's guard
+     * exempts PRE_ORDER because "accept orders we cannot fill yet" is an instruction to skip a stock
+     * check — but that reasoning does not survive an admin typing an explicit number, and PRE_ORDER is
+     * the DEFAULT for a new product, so exempting it here would mean the count silently did nothing on
+     * most of the catalogue. If you want a product to sell without a ceiling, leave this null; that is
+     * what null is for.
+     */
+    @Column(name = "available_quantity")
+    private Integer availableQuantity;
 
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
@@ -284,6 +309,19 @@ public class Product {
 
     public void setStockQuantity(Integer stockQuantity) {
         this.stockQuantity = stockQuantity;
+    }
+
+    public Integer getAvailableQuantity() {
+        return availableQuantity;
+    }
+
+    public void setAvailableQuantity(Integer availableQuantity) {
+        this.availableQuantity = availableQuantity;
+    }
+
+    /** Whether this product has a stated count, and therefore a ceiling an order cannot exceed. */
+    public boolean tracksAvailableQuantity() {
+        return availableQuantity != null;
     }
 
     public UUID getSupplierId() { return supplierId; }

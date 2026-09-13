@@ -27,12 +27,31 @@ public class CartItemResponse {
      * set it still means "will be ordered" — the safe direction, matching the entity default.
      */
     private boolean selected = true;
+
+    /**
+     * How many units of this line can actually be ordered, or null when its stock is not tracked.
+     *
+     * <p>Exists so a client can cap a quantity stepper at what is really there instead of learning the
+     * limit from a rejected PATCH. Nothing in the cart response carried availability before, so every
+     * stepper counted up freely to MAX_QTY and the customer found out at the cart or the payment page.
+     *
+     * <p>Null means no ceiling — absent, not zero. A client must never render "0 left" for a missing
+     * value, or every untracked product reads as sold out.
+     *
+     * <p>A courtesy figure, not a reservation: the cart holds nothing, so this can be stale by the time
+     * the order is placed. The binding refusal is the conditional decrement in createOrder.
+     */
+    private Integer availableUnits;
+
     private List<CartItemSpecSelectionResponse> selectedSpecs;
     private Instant createdAt;
     private Instant updatedAt;
 
     public CartItemResponse() {
     }
+
+    public Integer getAvailableUnits() { return availableUnits; }
+    public void setAvailableUnits(Integer availableUnits) { this.availableUnits = availableUnits; }
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
