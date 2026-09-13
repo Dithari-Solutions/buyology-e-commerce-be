@@ -752,7 +752,9 @@ public class AuthService {
         // dashboard signed them out on an ordinary page reload.
         var refreshToken = tokenService.generateRefreshToken(
                 credentials, extractDeviceInfo(httpRequest), audience);
-        String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.rawValue());
+        // Into the cookie slot belonging to THIS client. The dashboard has its own, so signing in to
+        // the storefront in the same browser no longer overwrites an admin's dashboard session.
+        String cookieHeader = tokenService.buildRefreshTokenCookieString(refreshToken.rawValue(), audience);
 
         SignInResponse body = new SignInResponse(accessToken, tokenService.getAccessTokenExpirySeconds());
 

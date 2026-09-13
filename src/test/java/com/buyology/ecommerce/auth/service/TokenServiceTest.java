@@ -266,4 +266,71 @@ class TokenServiceTest {
 
         assertThrows(SecurityException.class, () -> svc.rotateTokens(raw, "device", "web"));
     }
+
+    // ── The dashboard's own cookie slot ──────────────────────────────────────────────────────────
+    //
+    // The dashboard, the supplier portal and the storefront all talk to one api host, so while they
+    // shared the cookie NAME they shared one session: signing in to the storefront in the same
+    // browser overwrote the admin's cookie, and signing out of it revoked the admin's token.
+
+    @Test
+    void refreshCookie_givesTheDashboardItsOwnSlot() {
+        assertEquals(TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE,
+                TokenService.refreshCookieNameFor("dashboard"));
+        assertEquals(TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE,
+                TokenService.refreshCookieNameFor("DASHBOARD"),
+                "the client type arrives from a header and its case is not ours to rely on");
+        assertNotEquals(TokenService.REFRESH_TOKEN_COOKIE, TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE);
+    }
+
+    @Test
+    void refreshCookie_leavesEveryOtherClientOnTheSharedName() {
+        // Storefront and mobile sessions already in the field keep working untouched.
+        assertEquals(TokenService.REFRESH_TOKEN_COOKIE, TokenService.refreshCookieNameFor("web"));
+        assertEquals(TokenService.REFRESH_TOKEN_COOKIE, TokenService.refreshCookieNameFor("mobile"));
+        assertEquals(TokenService.REFRESH_TOKEN_COOKIE, TokenService.refreshCookieNameFor(null));
+        assertEquals(TokenService.REFRESH_TOKEN_COOKIE, TokenService.refreshCookieNameFor(""));
+    }
+
+    @Test
+    void rotate_writesTheReplacementIntoTheSessionsOwnSlot() {
+        // A dashboard session still holding the old shared cookie is migrated by its next rotation:
+        // the audience comes from the stored row, so the Set-Cookie names the dashboard's slot even
+        // though the request that carried it said nothing.
+        String raw = "dashboard-session-to-migrate";
+        RefreshToken dashboardSession = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        dashboardSession.setClientType("dashboard");
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw)))
+                .thenReturn(Optional.of(dashboardSession));
+
+        var result = svc.rotateTokens(raw, "device", "web");
+
+        assertTrue(result.refreshCookieHeader()
+                        .startsWith(TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE + "="),
+                "a dashboard session must be renewed into the dashboard's cookie, not the shared one");
+    }
+
+    @Test
+    void rotate_keepsAStorefrontSessionOnTheSharedCookie() {
+        String raw = "storefront-session";
+        RefreshToken webSession = new RefreshToken(creds, SecurityUtils.sha256Hex(raw),
+                Instant.now().plus(1, ChronoUnit.DAYS), "device");
+        webSession.setClientType("web");
+        when(refreshRepo.findByToken(SecurityUtils.sha256Hex(raw))).thenReturn(Optional.of(webSession));
+
+        var result = svc.rotateTokens(raw, "device", "web");
+
+        assertTrue(result.refreshCookieHeader().startsWith(TokenService.REFRESH_TOKEN_COOKIE + "="));
+    }
+
+    @Test
+    void clearingTheCookie_onlyClearsTheClientThatAskedToSignOut() {
+        // Signing out of the storefront must not clear the dashboard's cookie, or a shopper logging
+        // out ends an admin's session in another tab.
+        assertTrue(svc.buildClearRefreshTokenCookieString("web")
+                .startsWith(TokenService.REFRESH_TOKEN_COOKIE + "="));
+        assertTrue(svc.buildClearRefreshTokenCookieString("dashboard")
+                .startsWith(TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE + "="));
+    }
 }

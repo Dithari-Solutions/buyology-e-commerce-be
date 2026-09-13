@@ -127,22 +127,26 @@ public class AuthController {
                     "A new HttpOnly cookie with the rotated refresh token is also set.")
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<SignInResponse>> refresh(
-            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String sharedRefreshToken,
+            @CookieValue(name = TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE, required = false)
+                    String dashboardRefreshToken,
             HttpServletRequest httpRequest) {
 
-        if (refreshToken == null || refreshToken.isBlank()) {
+        String audience = resolveAudience(httpRequest);
+
+        // Prefer the slot that belongs to this client, and fall back to the shared one. The fallback
+        // is what migrates a dashboard session issued before the split: it presents the old shared
+        // cookie once, and the rotation below writes the replacement into the dashboard's own slot.
+        String refreshToken = "dashboard".equals(audience)
+                ? firstPresent(dashboardRefreshToken, sharedRefreshToken)
+                : firstPresent(sharedRefreshToken, dashboardRefreshToken);
+
+        if (refreshToken == null) {
             return ApiResponse.failure(HttpStatus.UNAUTHORIZED, "No refresh token provided");
         }
 
         try {
             String deviceInfo = httpRequest.getHeader("User-Agent");
-            String audienceHeader = httpRequest.getHeader("X-Client-Type");
-            String audience = (audienceHeader == null || audienceHeader.isBlank())
-                    ? "web"
-                    : switch (audienceHeader.trim().toLowerCase()) {
-                        case "dashboard", "web", "mobile" -> audienceHeader.trim().toLowerCase();
-                        default -> "web";
-                    };
             RotateTokensResult result = tokenService.rotateTokens(refreshToken, deviceInfo, audience);
 
             return ResponseEntity.ok()
@@ -163,15 +167,50 @@ public class AuthController {
             description = "Revokes the refresh token in the database and clears the HttpOnly cookie.")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<String>> logout(
-            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
+            @CookieValue(name = TokenService.REFRESH_TOKEN_COOKIE, required = false) String sharedRefreshToken,
+            @CookieValue(name = TokenService.DASHBOARD_REFRESH_TOKEN_COOKIE, required = false)
+                    String dashboardRefreshToken,
+            HttpServletRequest httpRequest) {
 
-        if (refreshToken != null && !refreshToken.isBlank()) {
+        String audience = resolveAudience(httpRequest);
+
+        // Sign out only the client that asked. Revoking every slot would make a storefront sign-out
+        // end the admin's dashboard session in another tab, which is exactly what the split cookie
+        // was introduced to stop.
+        String refreshToken = "dashboard".equals(audience)
+                ? firstPresent(dashboardRefreshToken, sharedRefreshToken)
+                : firstPresent(sharedRefreshToken, dashboardRefreshToken);
+
+        if (refreshToken != null) {
             tokenService.revokeRefreshToken(refreshToken);
         }
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, tokenService.buildClearRefreshTokenCookieString())
+                .header(HttpHeaders.SET_COOKIE, tokenService.buildClearRefreshTokenCookieString(audience))
                 .body(new ApiResponse<>(200, "Logged out successfully", null));
+    }
+
+    /** The client this request speaks for, defaulting to the storefront when it does not say. */
+    private static String resolveAudience(HttpServletRequest request) {
+        String header = request == null ? null : request.getHeader("X-Client-Type");
+        if (header == null || header.isBlank()) {
+            return "web";
+        }
+        return switch (header.trim().toLowerCase()) {
+            case "dashboard", "web", "mobile" -> header.trim().toLowerCase();
+            default -> "web";
+        };
+    }
+
+    /** The first of these cookie values that actually carries something, or null. */
+    private static String firstPresent(String preferred, String fallback) {
+        if (preferred != null && !preferred.isBlank()) {
+            return preferred;
+        }
+        if (fallback != null && !fallback.isBlank()) {
+            return fallback;
+        }
+        return null;
     }
 
     // ── Google OAuth ──────────────────────────────────────────────────────────

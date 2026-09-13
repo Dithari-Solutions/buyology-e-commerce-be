@@ -48,6 +48,15 @@ services:
 
       # ── Auth / security ──
       JWT_SECRET: ${JWT_SECRET}
+      # How long a session survives without renewal, and how long it can be renewed for. An admin
+      # entering products works for hours, and every access-token expiry is a chance for the session
+      # to END rather than renew, so the access window is deliberately wide. Levers, not code:
+      # shortening the access token is the way to make a revoked role bite sooner.
+      JWT_ACCESS_TOKEN_MINUTES: ${JWT_ACCESS_TOKEN_MINUTES:-60}
+      JWT_REFRESH_TOKEN_DAYS: ${JWT_REFRESH_TOKEN_DAYS:-30}
+      # Seconds a just-rotated refresh token is still honoured, so a client racing itself (or retrying
+      # on a slow connection) is not mistaken for a replay and signed out. 0 = strict single use.
+      JWT_REFRESH_REUSE_GRACE_SECONDS: ${JWT_REFRESH_REUSE_GRACE_SECONDS:-120}
       MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY}
       MFA_ENABLED: ${MFA_ENABLED:-false}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
@@ -62,6 +71,12 @@ services:
       TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-false}
       # Per-minute cap for ONE admin on /api/admin/** (0 = built-in 300). Bump if admins see 429s.
       ADMIN_RATE_LIMIT_PER_MINUTE: ${ADMIN_RATE_LIMIT_PER_MINUTE:-0}
+      # Both of these are budgets for the WHOLE PLATFORM while TRUST_FORWARDED_HEADERS is false,
+      # because every tier except ADMIN is keyed on the proxy's IP. 0 = the built-in ceiling
+      # (1200/min refresh, 100/min public). These are the levers to raise during an incident
+      # without waiting for a release — a throttled refresh shows up as people being signed out.
+      AUTH_REFRESH_RATE_LIMIT_PER_MINUTE: ${AUTH_REFRESH_RATE_LIMIT_PER_MINUTE:-0}
+      PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-0}
       # false 500s every endpoint that reads a lazy association while assembling its response.
       # Here so recovering is a restart rather than a deploy.
       SPRING_JPA_OPEN_IN_VIEW: ${SPRING_JPA_OPEN_IN_VIEW:-true}

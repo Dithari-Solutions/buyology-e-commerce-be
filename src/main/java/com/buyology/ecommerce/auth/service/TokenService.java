@@ -43,6 +43,24 @@ public class TokenService {
 
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
+    /**
+     * The dashboard's own refresh-token cookie.
+     *
+     * <p>A cookie is a single slot per name per host, and the dashboard, the supplier portal, the
+     * storefront and the mobile web view all talk to the SAME api host. While they shared the name
+     * {@code refresh_token} they shared one session: an admin who signed in to the storefront in the
+     * same browser OVERWROTE their own dashboard cookie, and a storefront sign-out revoked the token
+     * and cleared the cookie — ending the dashboard session from another tab, with no action in the
+     * dashboard at all. That is invisible from inside the dashboard and looks exactly like "it logs
+     * me out by itself".
+     *
+     * <p>Only the dashboard is given a separate name. The storefront and mobile keep
+     * {@code refresh_token} so sessions already in the field are untouched by this change; a
+     * dashboard session holding the old name is migrated on its next rotation, because
+     * {@code AuthController} reads both and writes the one that belongs to the caller.
+     */
+    public static final String DASHBOARD_REFRESH_TOKEN_COOKIE = "refresh_token_dashboard";
+
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final RefreshTokenRepository refreshTokenRepository;
@@ -249,12 +267,28 @@ public class TokenService {
     // ---------------------------
 
     /**
+     * The cookie name a given client's refresh token belongs in.
+     *
+     * <p>See {@link #DASHBOARD_REFRESH_TOKEN_COOKIE} for why the dashboard needs its own slot.
+     */
+    public static String refreshCookieNameFor(String audience) {
+        return "dashboard".equalsIgnoreCase(audience == null ? "" : audience.trim())
+                ? DASHBOARD_REFRESH_TOKEN_COOKIE
+                : REFRESH_TOKEN_COOKIE;
+    }
+
+    /**
      * Returns the Set-Cookie header value for a new refresh token.
-     * HttpOnly=true, Path=/auth/refresh, MaxAge=7d.
+     * HttpOnly=true, Path=/auth/refresh, MaxAge=jwt.refresh-token-validity-days.
      * Secure flag is driven by the cookie.secure property (false in dev, true in prod).
      */
     public String buildRefreshTokenCookieString(String tokenValue) {
-        return ResponseCookie.from(REFRESH_TOKEN_COOKIE, tokenValue)
+        return buildRefreshTokenCookieString(tokenValue, null);
+    }
+
+    /** As above, in the cookie slot belonging to {@code audience} — see {@link #refreshCookieNameFor}. */
+    public String buildRefreshTokenCookieString(String tokenValue, String audience) {
+        return ResponseCookie.from(refreshCookieNameFor(audience), tokenValue)
                 .httpOnly(true)
                 .secure(cookieSecure)
                 // Frontends live on different subdomains (buyology.online / admin. /
@@ -275,7 +309,17 @@ public class TokenService {
      * Used by /auth/logout to force the browser to delete it.
      */
     public String buildClearRefreshTokenCookieString() {
-        return ResponseCookie.from(REFRESH_TOKEN_COOKIE, "")
+        return buildClearRefreshTokenCookieString(null);
+    }
+
+    /**
+     * Clears only the cookie belonging to {@code audience}.
+     *
+     * <p>Scoped deliberately: clearing every slot would make a storefront sign-out end the admin's
+     * dashboard session, which is the behaviour the split cookie exists to stop.
+     */
+    public String buildClearRefreshTokenCookieString(String audience) {
+        return ResponseCookie.from(refreshCookieNameFor(audience), "")
                 .httpOnly(true)
                 .secure(cookieSecure)
                 // Frontends live on different subdomains (buyology.online / admin. /
@@ -375,7 +419,7 @@ public class TokenService {
 
         return new RotateTokensResult(
                 new SignInResponse(newAccessToken, getAccessTokenExpirySeconds()),
-                buildRefreshTokenCookieString(newRefreshToken.rawValue())
+                buildRefreshTokenCookieString(newRefreshToken.rawValue(), effectiveAudience)
         );
     }
 

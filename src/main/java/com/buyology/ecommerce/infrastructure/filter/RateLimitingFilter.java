@@ -71,7 +71,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
      * Overrides for the two tiers that every visitor currently shares.
      *
      * <p>While {@code app.trust-forwarded-headers} is false, every tier except ADMIN is keyed on
-     * the proxy's IP, so PUBLIC's 100/min and AUTH_REFRESH's 300/min are budgets for the WHOLE
+     * the proxy's IP, so PUBLIC's 100/min and AUTH_REFRESH's 1200/min are budgets for the WHOLE
      * platform rather than per visitor. These exist so those ceilings can be raised from the
      * environment during an incident instead of waiting for a release. 0 or less means "use the
      * tier's built-in default".
@@ -437,7 +437,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         },
 
-        // 300 req/min — token refresh, and it needs its own tier.
+        // 1200 req/min — token refresh, and it needs its own tier.
         //
         // /auth/refresh used to fall into AUTH_GENERAL's 10/min. Because every tier except ADMIN is
         // keyed on the client IP, and app.trust-forwarded-headers is false behind the proxy, that
@@ -451,11 +451,19 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         // code. Refresh presents a 256-bit opaque token that is looked up by hash and rejected if
         // it is unknown, revoked or expired, so guessing is not a threat model and the throttle
         // buys nothing against it. It is here only to bound abuse volume.
+        // Raised from 300 because this one number is a budget for the WHOLE PLATFORM, not per
+        // person: every tier except ADMIN is keyed on the client IP, and with
+        // app.trust-forwarded-headers=false that is the proxy's address, so every storefront
+        // visitor, every mobile cold start and every admin draw from the same 300. A refresh that
+        // is throttled is a logout on a client that cannot tell 429 from "your session is gone",
+        // which is a self-inflicted outage on the one endpoint whose whole job is to KEEP people
+        // signed in. Guessing is not the threat model here (see above), so the ceiling exists only
+        // to bound abuse volume and there is no reason for it to be tight.
         AUTH_REFRESH {
 
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
-                        .addLimit(Bandwidth.builder().capacity(300).refillGreedy(300, Duration.ofMinutes(1)).build())
+                        .addLimit(Bandwidth.builder().capacity(1200).refillGreedy(1200, Duration.ofMinutes(1)).build())
                         .build();
             }
         },
