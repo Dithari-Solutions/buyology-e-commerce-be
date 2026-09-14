@@ -230,13 +230,25 @@ class QuiqupOrderMapperTest {
     }
 
     @Test
-    void sendsAPostcodeFieldEvenWhenWeHaveNone() {
-        // The staging dashboard showed "Post Code: N/A" on both ends because we never sent the
-        // field at all. It is present now, and absent-but-present beats missing.
+    void omitsThePostcodeRatherThanSendingADashForIt() {
+        // It used to send "-" when we had none, so their dashboard would show something instead of
+        // "Post Code: N/A". That traded a cosmetic improvement for an unrecognised field value, and a
+        // rejected job is a delivery that never happens. Most UAE addresses have no postcode, so this
+        // is the normal case.
         ObjectNode payload = mapper.toCreatePayload(order(), origin(), "+971500000001", List.of());
 
-        assertTrue(payload.get("origin").get("address").has("postcode"));
-        assertTrue(payload.get("destination").get("address").has("postcode"));
+        assertFalse(payload.get("origin").get("address").has("postcode"));
+        assertFalse(payload.get("destination").get("address").has("postcode"));
+    }
+
+    @Test
+    void sendsTheRealPostcodeWhenThereIsOne() {
+        Order withPostcode = order();
+        withPostcode.setPostalCode("00000");
+
+        ObjectNode payload = mapper.toCreatePayload(withPostcode, origin(), "+971500000001", List.of());
+
+        assertEquals("00000", payload.get("destination").get("address").get("postcode").asText());
     }
 
     @Test

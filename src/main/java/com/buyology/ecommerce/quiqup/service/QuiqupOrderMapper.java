@@ -121,7 +121,7 @@ public class QuiqupOrderMapper {
         ObjectNode address = objectMapper.createObjectNode();
         address.put("address1", blankToDash(origin.getAddress()));
         address.put("address2", blankToDash(origin.getCity()));
-        address.put("postcode", blankToDash(origin.getPostalCode()));
+        putPostcodeIfPresent(address, origin.getPostalCode());
         address.set("coords", coords(objectMapper, origin.getLongitude(), origin.getLatitude()));
         address.put("country", blankToDash(origin.getCountry()));
         address.put("town", blankToDash(origin.getCity()));
@@ -141,7 +141,7 @@ public class QuiqupOrderMapper {
         ObjectNode address = objectMapper.createObjectNode();
         address.put("address1", blankToDash(order.getAddressLine1()));
         address.put("address2", blankToDash(order.getAddressLine2()));
-        address.put("postcode", blankToDash(order.getPostalCode()));
+        putPostcodeIfPresent(address, order.getPostalCode());
         address.set("coords", coords(objectMapper,
                 order.getDeliveryLongitude(), order.getDeliveryLatitude()));
         // Order.country is alpha-3 ("UAE"). Confirmed accepted: Quiqup normalise it to "AE" on
@@ -214,6 +214,21 @@ public class QuiqupOrderMapper {
         String last = order.getRecipientLastName() == null ? "" : order.getRecipientLastName().trim();
         String full = (first + " " + last).trim();
         return full.isEmpty() ? "-" : full;
+    }
+
+    /**
+     * Sends a postcode only when there is one.
+     *
+     * <p>It used to send {@code "-"} in its place, on the reasoning that their dashboard showed
+     * "Post Code: N/A" when the field was absent and that present-but-empty read better. That was a
+     * cosmetic call about a display, and it was never verified against a job Quiqup ACCEPTED — a dash
+     * is not a postcode, and an unrecognised value is a 422 that stops a delivery happening at all.
+     * Most UAE addresses have no postcode, so this is the common case rather than an edge one.
+     */
+    private static void putPostcodeIfPresent(ObjectNode address, String postcode) {
+        if (postcode != null && !postcode.isBlank()) {
+            address.put("postcode", postcode.trim());
+        }
     }
 
     /**
