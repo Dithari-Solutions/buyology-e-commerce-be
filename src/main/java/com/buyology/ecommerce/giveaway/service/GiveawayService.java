@@ -233,6 +233,13 @@ public class GiveawayService {
                 .map(GiveawayEntryAdminResponse::from);
     }
 
+    /** Every entry as an .xlsx workbook — the list the winner is drawn from, taken off the dashboard. */
+    @Transactional(readOnly = true)
+    public byte[] exportEntries() {
+        return GiveawayEntriesWorkbook.write(
+                repository.findByCampaignOrderByCreatedAtAsc(GiveawayEntry.DEFAULT_CAMPAIGN));
+    }
+
     // =========================================================================
     // Internals
     // =========================================================================

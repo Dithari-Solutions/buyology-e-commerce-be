@@ -2,8 +2,14 @@ package com.buyology.ecommerce.giveaway.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
 import com.buyology.ecommerce.giveaway.dto.GiveawayEntryAdminResponse;
+import com.buyology.ecommerce.giveaway.service.GiveawayEntriesWorkbook;
 import com.buyology.ecommerce.giveaway.service.GiveawayService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +31,8 @@ import java.util.UUID;
 @RequestMapping("/api/admin/giveaway")
 public class AdminGiveawayController {
 
+    private static final Logger log = LoggerFactory.getLogger(AdminGiveawayController.class);
+
     private final GiveawayService giveawayService;
 
     public AdminGiveawayController(GiveawayService giveawayService) {
@@ -37,6 +45,22 @@ public class AdminGiveawayController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         return ApiResponse.success(giveawayService.listAll(page, size), "Giveaway entries fetched");
+    }
+
+    /**
+     * Every entry as an Excel workbook, for the draw. All of them in one file, where the list above
+     * is paged — and the same data the list shows, so the same permission.
+     */
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('giveaway:entry:read') or @rbacPolicy.legacyAdmin()")
+    @GetMapping("/entries/export")
+    public ResponseEntity<byte[]> exportEntries(@AuthenticationPrincipal UUID adminId) {
+        byte[] file = giveawayService.exportEntries();
+        log.info("[GIVEAWAY] entries exported by {} ({} bytes)", adminId, file.length);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(GiveawayEntriesWorkbook.CONTENT_TYPE))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename("giveaway-entries.xlsx").build().toString())
+                .body(file);
     }
 
     /** Current open/closed state, so the dashboard shows the truth before anyone touches it. */
