@@ -43,6 +43,20 @@ public class QuiqupOrderMapper {
         return node;
     }
 
+    /**
+     * Quiqup's {@code payment_mode} for a job the courier collects cash on.
+     *
+     * <p>Confirmed by Quiqup in September 2026, together with {@link #PAYMENT_MODE_PREPAID}, as the
+     * whole enum. It used to be a setting defaulting to "cod", which was our guess from a sample pack
+     * that only ever showed pre_paid: Quiqup rejected every cash job with a 422
+     * ({@code invalid_enum} on payment_mode), so no cash order ever reached a courier. It is a
+     * constant now because the value is known, and a stale override could only reintroduce that.
+     */
+    static final String PAYMENT_MODE_CASH = "paid_on_delivery";
+
+    /** Quiqup's {@code payment_mode} for a job that is already paid: the courier collects nothing. */
+    static final String PAYMENT_MODE_PREPAID = "pre_paid";
+
     private final ObjectMapper objectMapper;
     private final QuiqupProperties props;
 
@@ -77,19 +91,14 @@ public class QuiqupOrderMapper {
         // recorded as collected, is prepaid by the time it reaches a courier and must not be
         // charged twice.
         if (order.isCashOnDelivery() && !order.isMoneyCollected()) {
-            // The mode string is CONFIGURABLE because it is not confirmed. It is modelled on Quiqup's
-            // sample pack, which only ever shows pre_paid and describes itself as a best guess — and
-            // the cost of it being wrong is a courier who is not asked for the money, i.e. the parcel
-            // handed over free. Confirm the value with Quiqup and correct it with a restart rather
-            // than a release.
-            root.put("payment_mode", props.getDispatch().getCodPaymentMode());
+            root.put("payment_mode", PAYMENT_MODE_CASH);
             // setScale(2), not doubleValue(). This is the figure a human counts out at a door: it must
             // serialise as 105.50, never as a float artefact, and never lose a fils.
             root.put("payment_amount", order.getTotalAmount() == null
                     ? java.math.BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP)
                     : order.getTotalAmount().setScale(2, java.math.RoundingMode.HALF_UP));
         } else {
-            root.put("payment_mode", "pre_paid");
+            root.put("payment_mode", PAYMENT_MODE_PREPAID);
             root.put("payment_amount", 0);
         }
 
@@ -109,7 +118,11 @@ public class QuiqupOrderMapper {
      * string in both systems.
      */
     public static String partnerOrderId(Order order) {
-        return "BUY-" + order.getId().toString().substring(0, 8).toUpperCase();
+        return partnerOrderId(order.getId());
+    }
+
+    public static String partnerOrderId(java.util.UUID orderId) {
+        return "BUY-" + orderId.toString().substring(0, 8).toUpperCase();
     }
 
     private ObjectNode originNode(StoreLocation origin, String contactPhone, String collectionNote) {

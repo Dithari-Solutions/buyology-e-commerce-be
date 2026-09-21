@@ -21,10 +21,11 @@ import java.util.List;
  * healthy, and no courier is ever coming.
  *
  * <p>Deliberately narrow about what it retries — an undispatched order is a real delivery that has
- * not started, so the bias is toward trying again, but not forever and not for orders whose refusal
- * is permanent (a multi-store order will be refused identically on every attempt until a human
- * splits it). {@code maxAttempts} is approximated by the presence of an error string rather than an
- * attempt counter: an order that keeps failing keeps its error, and the horizon stops it eventually.
+ * not started, so the bias is toward trying again, but not forever and not blindly. Every create
+ * call is counted on the order, and {@link QuiqupDispatchService} stops retries for an order after
+ * {@code maxAttempts}, or at once when retrying cannot help or is not safe: Quiqup rejected the job
+ * itself, or a create may have gone through unanswered. Before that, a 422 was sent unchanged every
+ * five minutes from both replicas, about 425 times in a day for one order.
  *
  * <p><strong>Not cluster-safe.</strong> This repo has no ShedLock, so with two app replicas both
  * will run this job. That is tolerable only because {@link QuiqupDispatchService#dispatch} skips an

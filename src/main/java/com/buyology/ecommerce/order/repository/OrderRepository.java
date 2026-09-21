@@ -85,10 +85,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * on Thursday for a Monday checkout would never be picked up, and nobody would be told. The lower
      * bound stays on createdAt, because that one is a grace period for a brand-new order the event
      * listener is already handling.
+     *
+     * <p>An order whose automatic retries have stopped is left out: Quiqup rejected the job itself,
+     * a create may have gone through unanswered, or the attempts ran out. Sending it again unchanged
+     * either fails the same way or books a second courier, so it waits for an admin.
      */
     @Query("""
             SELECT o FROM Order o
             WHERE o.quiqupOrderId IS NULL
+              AND o.quiqupDispatchStoppedAt IS NULL
               AND o.status IN (com.buyology.ecommerce.order.domain.enums.OrderStatus.PAID,
                                com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING)
               AND o.deliveryMethod = com.buyology.ecommerce.order.domain.enums.DeliveryMethod.REGULAR

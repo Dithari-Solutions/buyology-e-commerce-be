@@ -137,7 +137,9 @@ class QuiqupOrderMapperTest {
 
         ObjectNode payload = mapper.toCreatePayload(cash, origin(), "+971500000001", List.of());
 
-        assertEquals("cod", payload.get("payment_mode").asText());
+        // A literal, not the constant: this pins the string Quiqup confirmed. "cod", our earlier guess,
+        // is not in their enum and got every cash job refused with a 422.
+        assertEquals("paid_on_delivery", payload.get("payment_mode").asText());
         assertEquals(0, new java.math.BigDecimal("105.50")
                         .compareTo(payload.get("payment_amount").decimalValue()),
                 "the amount must be exact to the fils — a human counts this out at a door");

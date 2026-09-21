@@ -398,6 +398,20 @@ public class Order {
     @Column(name = "quiqup_dispatch_claimed_at")
     private Instant quiqupDispatchClaimedAt;
 
+    /** Create calls sent to Quiqup for this order, counted before each one leaves. */
+    @Column(name = "quiqup_dispatch_attempts")
+    private Integer quiqupDispatchAttempts = 0;
+
+    /**
+     * When automatic retries stopped for this order, or null while the retry job may still try.
+     *
+     * <p>Set when retrying cannot help or is not safe: Quiqup rejected the job itself, a create may
+     * have gone through without an answer coming back, or the attempts ran out. The reason is in
+     * {@link #quiqupDispatchError}. Only an admin dispatching the order by hand moves it on.
+     */
+    @Column(name = "quiqup_dispatch_stopped_at")
+    private Instant quiqupDispatchStoppedAt;
+
     // ── Trash ─────────────────────────────────────────────────────────────────
 
     /**
@@ -683,6 +697,10 @@ public class Order {
 
     public Instant getQuiqupDispatchClaimedAt() { return quiqupDispatchClaimedAt; }
     public void setQuiqupDispatchClaimedAt(Instant v) { this.quiqupDispatchClaimedAt = v; }
+    public Integer getQuiqupDispatchAttempts() { return quiqupDispatchAttempts; }
+    public void setQuiqupDispatchAttempts(Integer v) { this.quiqupDispatchAttempts = v; }
+    public Instant getQuiqupDispatchStoppedAt() { return quiqupDispatchStoppedAt; }
+    public void setQuiqupDispatchStoppedAt(Instant v) { this.quiqupDispatchStoppedAt = v; }
 
     public String getQuiqupDispatchError() { return quiqupDispatchError; }
     public void setQuiqupDispatchError(String quiqupDispatchError) { this.quiqupDispatchError = quiqupDispatchError; }

@@ -165,22 +165,15 @@ public class QuiqupProperties {
         /** How long a paid order may go undispatched before the retry job picks it up, minutes. */
         private int retryAfterMinutes = 10;
 
-        /** Give up after this many attempts, so a permanently unmappable order stops being retried. */
+        /**
+         * Stop retrying after this many create calls for one order. Only failures a retry can fix
+         * (Quiqup unreachable, rate-limited, briefly unavailable) use them up; a rejection or an
+         * unanswered create stops retries on the first attempt.
+         */
         private int maxAttempts = 5;
 
         /** Orders inactive for longer than this are never auto-dispatched — see the retry job. */
         private int retryHorizonHours = 48;
-
-        /**
-         * The value Quiqup expect in {@code payment_mode} for a cash-on-delivery job.
-         *
-         * <p>Configurable because it is NOT confirmed. It is modelled on Quiqup's sample pack, which
-         * only ever shows {@code pre_paid} and describes itself as a best guess — so "cod" is our
-         * inference, and the cost of it being wrong is a courier who is never asked for the money and a
-         * parcel handed over free. Confirm the string with Quiqup and correct it with a restart instead
-         * of a release.
-         */
-        private String codPaymentMode = "cod";
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -188,8 +181,6 @@ public class QuiqupProperties {
         public void setKind(String kind) { this.kind = kind; }
         public boolean isAutoReadyForCollection() { return autoReadyForCollection; }
         public void setAutoReadyForCollection(boolean v) { this.autoReadyForCollection = v; }
-        public String getCodPaymentMode() { return codPaymentMode; }
-        public void setCodPaymentMode(String v) { this.codPaymentMode = v; }
         public int getRetryAfterMinutes() { return retryAfterMinutes; }
         public void setRetryAfterMinutes(int v) { this.retryAfterMinutes = v; }
         public int getMaxAttempts() { return maxAttempts; }

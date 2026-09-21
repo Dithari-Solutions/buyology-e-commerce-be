@@ -98,6 +98,10 @@ public class QuiqupClient {
         QuiqupApiResult blocked = guardProductionWrite(method);
         if (blocked != null) return blocked;
 
+        // Set once the request is handed to the connection. Before that point a failure (missing
+        // credentials, a failed token exchange) means nothing was sent, which is the difference
+        // between a create that is safe to repeat and one that may already have booked a courier.
+        boolean handedOff = false;
         try {
             HttpMethod httpMethod = HttpMethod.valueOf(method.toUpperCase());
             Map<String, String> authHeaders = authHeaders(); // may throw if creds missing
@@ -111,6 +115,7 @@ public class QuiqupClient {
                 finalSpec = spec.contentType(MediaType.APPLICATION_JSON).bodyValue(body);
             }
 
+            handedOff = true;
             QuiqupApiResult result = finalSpec.exchangeToMono(resp ->
                     resp.bodyToMono(String.class).defaultIfEmpty("")
                             .map(raw -> new QuiqupApiResult(
@@ -126,8 +131,25 @@ public class QuiqupClient {
         } catch (Exception e) {
             log.error("[QUIQUP] call failed {} {} — {}: {}", method, path,
                     e.getClass().getSimpleName(), e.getMessage(), e);
-            return new QuiqupApiResult(502, false, describeFailure(method, path, e));
+            return new QuiqupApiResult(502, false, describeFailure(method, path, e),
+                    handedOff && !neverConnected(e));
         }
+    }
+
+    /**
+     * True when the failure happened before a connection existed, so the request cannot have
+     * reached Quiqup. A response timeout or a connection dropped mid-exchange is NOT this: the
+     * request may have arrived and been acted on, and only the answer was lost.
+     */
+    static boolean neverConnected(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.net.UnknownHostException
+                    || t instanceof java.net.ConnectException
+                    || t.getClass().getName().contains("ConnectTimeout")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -203,7 +225,7 @@ public class QuiqupClient {
                 "Blocked: '" + candidate + "' is not a path relative to the configured Quiqup base "
                         + "URL (" + props.getBaseUrl() + "). An absolute URL would bypass the "
                         + "staging/production guard and would send the Quiqup API key to whatever "
-                        + "host it names. Use a leading-slash path such as /orders.");
+                        + "host it names. Use a leading-slash path such as /orders.", false);
     }
 
     private QuiqupApiResult guardProductionWrite(String method) {
@@ -217,7 +239,8 @@ public class QuiqupClient {
                 "Blocked: " + method + " is a write against a non-staging Quiqup base URL ("
                         + props.getBaseUrl() + "). Creating or dispatching an order here sends a real "
                         + "courier to a real address on the live account. Read-only calls (GET) are "
-                        + "allowed. To permit writes deliberately, set QUIQUP_ALLOW_PRODUCTION_WRITES=true.");
+                        + "allowed. To permit writes deliberately, set QUIQUP_ALLOW_PRODUCTION_WRITES=true.",
+                false);
     }
 
     /**

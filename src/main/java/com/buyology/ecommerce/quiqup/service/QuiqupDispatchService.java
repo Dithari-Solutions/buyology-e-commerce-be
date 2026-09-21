@@ -163,6 +163,12 @@ public class QuiqupDispatchService {
      * @return a short human-readable outcome, for the admin page and the logs
      */
     public String dispatch(UUID orderId) {
+        // Where the attempt got to, for the catch below. Releasing a claim this call never took
+        // would free another instance's in-flight dispatch; freeing the order after the create was
+        // sent would let the retry book a second courier.
+        boolean claimed = false;
+        boolean sent = false;
+        int attempt = 0;
         try {
             Snapshot snap = txTemplate.execute(status -> loadSnapshot(orderId));
             if (snap == null) {
@@ -198,33 +204,30 @@ public class QuiqupDispatchService {
                 log.info("[QUIQUP] Order {} already claimed by another instance; standing down", orderId);
                 return "Already being dispatched by another instance";
             }
+            claimed = true;
+
+            // Counted before the call, like the cancel leg: an attempt that dies mid-flight must
+            // still count, or a create that keeps failing is sent forever.
+            attempt = countAttempt(orderId);
 
             ObjectNode payload = mapper.toCreatePayload(
                     snap.order, snap.origin, snap.originPhone, snap.items);
 
+            sent = true;
             QuiqupApiResult result = client.request("POST", props.getPaths().getCreate(), payload);
             if (result == null || !result.ok()) {
-                String reason = "Quiqup rejected the job: "
-                        + (result == null ? "no response" : result.status() + " " + result.body());
-                releaseClaim(orderId);
-                recordFailure(orderId, reason);
-                log.error("[QUIQUP] Dispatch failed for order {} — {}", orderId, reason);
-                return reason;
+                String reason = result == null
+                        ? "No response from Quiqup"
+                        : "Create call failed with " + result.status() + ": " + result.body();
+                return settleFailure(orderId, attempt, classifyFailure(result), reason);
             }
 
             String quiqupId = extractOrderId(result);
             if (quiqupId == null) {
-                // Accepted but unidentifiable. Recording a failure would let the retry create a
-                // SECOND job for the same parcel, which is worse than a stuck order — so this is
-                // recorded as needing a human, not as retryable.
-                // Deliberately NOT released: Quiqup may well have created the job, and freeing the
-                // claim would let the retry book a second courier for the same parcel. The claim
-                // staying put is what keeps this in a human's hands.
-                String reason = "Quiqup accepted the job but returned no id; check for a duplicate "
-                        + "before retrying. Response: " + result.body();
-                recordFailure(orderId, reason);
-                log.error("[QUIQUP] Dispatch ambiguous for order {} — {}", orderId, reason);
-                return reason;
+                // Accepted but unidentifiable: Quiqup may well have created the job, and retrying
+                // would book a second courier for the same parcel, which is worse than a stuck order.
+                return settleFailure(orderId, attempt, Failure.UNKNOWN,
+                        "Quiqup accepted the job but returned no id. Response: " + result.body());
             }
 
             recordSuccess(orderId, quiqupId, extractTrackingUrl(result));
@@ -237,11 +240,105 @@ public class QuiqupDispatchService {
 
         } catch (Exception e) {
             String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
-            releaseClaim(orderId);
-            recordFailure(orderId, reason);
             log.error("[QUIQUP] Dispatch failed for order {}", orderId, e);
+            if (sent) {
+                // Failed after the create went out, e.g. while recording Quiqup's id. The job may
+                // exist, so this is the same as an unanswered create.
+                return settleFailure(orderId, attempt, Failure.UNKNOWN,
+                        "Failed after sending the job to Quiqup: " + reason);
+            }
+            if (claimed) {
+                return settleFailure(orderId, attempt, Failure.RETRY, reason);
+            }
+            recordFailure(orderId, reason);
             return reason;
         }
+    }
+
+    // =========================================================================
+    // Failed creates
+    // =========================================================================
+
+    /** What a failed create means for the order, and so whether the retry job may send it again. */
+    enum Failure {
+        /** Nothing was created and a later attempt may work. Retried, up to max-attempts. */
+        RETRY,
+        /** Refused outright, by Quiqup or by our own guard. The same payload fails the same way. */
+        REJECTED,
+        /**
+         * The create may have gone through without an answer. Quiqup do not deduplicate on
+         * partner_order_id, so sending it again can book a second courier for the same parcel.
+         */
+        UNKNOWN
+    }
+
+    /**
+     * Sorts a failed create. Pure, so every branch is tested without a network.
+     *
+     * <p>A 422 is the case that forced this. Quiqup refused every cash job on payment_mode, and the
+     * retry job sent the identical payload every five minutes from both replicas, about 425 times
+     * in a day for one order, until Quiqup asked us to stop.
+     */
+    static Failure classifyFailure(QuiqupApiResult result) {
+        if (result == null) {
+            return Failure.UNKNOWN;
+        }
+        if (!result.mayHaveReachedQuiqup()) {
+            // Never left this server. Our own guard refusing the write is configuration, which no
+            // retry fixes; anything else (Quiqup unreachable, a token exchange failing) may clear.
+            return isBlockedByOurOwnGuard(result) ? Failure.REJECTED : Failure.RETRY;
+        }
+        int status = result.status();
+        // Answers that say the request was not processed: timed out waiting for it, rate-limited,
+        // or not serving at all.
+        if (status == 408 || status == 429 || status == 503) {
+            return Failure.RETRY;
+        }
+        if (status >= 400 && status < 500) {
+            return Failure.REJECTED;
+        }
+        // 500, 502, 504 and no answer at all: it may have created the job before failing.
+        return Failure.UNKNOWN;
+    }
+
+    /** Both client guards return a plain string body starting with "Blocked:". */
+    private static boolean isBlockedByOurOwnGuard(QuiqupApiResult result) {
+        return result.body() instanceof String s && s.startsWith("Blocked:");
+    }
+
+    /** Records a failed create and decides whether the retry job may try again. */
+    private String settleFailure(UUID orderId, int attempt, Failure failure, String reason) {
+        switch (failure) {
+            case RETRY -> {
+                releaseClaim(orderId);
+                int max = props.getDispatch().getMaxAttempts();
+                if (attempt >= max) {
+                    reason = "Automatic retries stopped after " + attempt + " attempts. Last: " + reason;
+                    stop(orderId, reason);
+                } else {
+                    recordFailure(orderId, reason);
+                }
+            }
+            case REJECTED -> {
+                // Nothing was created, so the claim goes back: an admin who corrects the order can
+                // dispatch it straight away.
+                releaseClaim(orderId);
+                reason = "Automatic retries stopped: " + reason;
+                stop(orderId, reason);
+            }
+            case UNKNOWN -> {
+                // Claim deliberately kept. Quiqup may have created the job, and only a human who has
+                // looked for it should send another.
+                // The instruction goes first: the column holds 1000 characters and a response body
+                // can fill it.
+                reason = "Automatic retries stopped: Quiqup may have created this job. Look for "
+                        + QuiqupOrderMapper.partnerOrderId(orderId)
+                        + " in the Quiqup dashboard before dispatching again. " + reason;
+                stop(orderId, reason);
+            }
+        }
+        log.error("[QUIQUP] Dispatch failed for order {} (attempt {}, {}) — {}", orderId, attempt, failure, reason);
+        return reason;
     }
 
     /**
@@ -455,11 +552,45 @@ public class QuiqupDispatchService {
         }
     }
 
+    /**
+     * Counts a create attempt and returns the new total.
+     *
+     * <p>Also clears a previous stop: a new attempt is an admin dispatching by hand (the retry job
+     * never picks up a stopped order), and its own outcome decides whether retries stop again.
+     */
+    private int countAttempt(UUID orderId) {
+        Integer attempts = txTemplate.execute(status -> {
+            Order o = orderRepo.findById(orderId).orElse(null);
+            if (o == null) return 0;
+            int n = (o.getQuiqupDispatchAttempts() == null ? 0 : o.getQuiqupDispatchAttempts()) + 1;
+            o.setQuiqupDispatchAttempts(n);
+            o.setQuiqupDispatchStoppedAt(null);
+            orderRepo.save(o);
+            return n;
+        });
+        return attempts == null ? 0 : attempts;
+    }
+
+    /** Records the failure and takes the order out of the retry job's worklist. */
+    private void stop(UUID orderId, String reason) {
+        try {
+            txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
+                o.setQuiqupDispatchError(reason.length() > 1000 ? reason.substring(0, 1000) : reason);
+                o.setQuiqupDispatchStoppedAt(Instant.now());
+                orderRepo.save(o);
+            }));
+        } catch (Exception e) {
+            // Same rule as recordFailure: recording the failure must never become the failure.
+            log.error("[QUIQUP] Could not stop retries on order {}: {}", orderId, e.getMessage());
+        }
+    }
+
     private void recordSuccess(UUID orderId, String quiqupOrderId, String trackingUrl) {
         txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
             o.setQuiqupOrderId(quiqupOrderId);
             o.setQuiqupDispatchedAt(Instant.now());
             o.setQuiqupDispatchError(null);
+            o.setQuiqupDispatchStoppedAt(null);
             o.setCarrierName("Quiqup");
             // trackingCode is surfaced to the customer on OrderResponse, so it holds the thing a
             // customer can actually use. Quiqup's numeric job id is not that — it means nothing

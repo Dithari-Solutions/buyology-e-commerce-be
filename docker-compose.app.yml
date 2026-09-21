@@ -153,9 +153,6 @@ services:
       QUIQUP_CONNECT_TIMEOUT_MS: ${QUIQUP_CONNECT_TIMEOUT_MS:-5000}
       # ── Quiqup automatic dispatch (paid order -> real courier; independent of QUIQUP_ENABLED) ──
       QUIQUP_DISPATCH_ENABLED: ${QUIQUP_DISPATCH_ENABLED:-false}
-      # Quiqup's payment_mode value for a CASH job. Inferred, not confirmed — if it is wrong the
-      # courier is never asked for the money. Correct it here with a restart.
-      QUIQUP_COD_PAYMENT_MODE: ${QUIQUP_COD_PAYMENT_MODE:-cod}
       QUIQUP_DISPATCH_KIND: ${QUIQUP_DISPATCH_KIND:-partner_next_day}
       QUIQUP_DISPATCH_AUTO_READY: ${QUIQUP_DISPATCH_AUTO_READY:-false}
       QUIQUP_DISPATCH_RETRY_AFTER_MINUTES: ${QUIQUP_DISPATCH_RETRY_AFTER_MINUTES:-10}
