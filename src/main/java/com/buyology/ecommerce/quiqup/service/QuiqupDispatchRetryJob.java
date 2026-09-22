@@ -83,4 +83,38 @@ public class QuiqupDispatchRetryJob {
             log.error("[QUIQUP] Dispatch retry pass failed", e);
         }
     }
+
+    /**
+     * Releases packed orders whose Quiqup job was never marked ready for collection.
+     *
+     * <p>The release normally happens the moment the order reaches PACKAGING. This catches the
+     * ones where that call failed or never ran (a restart, Quiqup briefly down) — without it the
+     * order looks dispatched, the job sits invisible to Quiqup's dispatching, and no courier comes.
+     * Retries are spaced by {@code retry-after-minutes} and capped by {@code max-attempts}.
+     */
+    @Scheduled(fixedDelayString = "${quiqup.dispatch.retry-interval-ms:300000}")
+    public void retryUnreleased() {
+        if (!dispatchService.enabled() || !props.getDispatch().isReleaseOnPackaging()) {
+            return;
+        }
+        try {
+            Instant now = Instant.now();
+            Instant olderThan = now.minus(Duration.ofMinutes(props.getDispatch().getRetryAfterMinutes()));
+            Instant horizon = now.minus(Duration.ofHours(props.getDispatch().getRetryHorizonHours()));
+
+            List<Order> waiting = orderRepo.findUnreleasedQuiqupOrders(
+                    props.getDispatch().getMaxAttempts(), olderThan, horizon,
+                    org.springframework.data.domain.PageRequest.of(0, BATCH_LIMIT));
+            if (waiting.isEmpty()) {
+                return;
+            }
+            log.info("[QUIQUP] Releasing {} packed order(s) whose courier was never summoned", waiting.size());
+            for (Order order : waiting) {
+                log.info("[QUIQUP] Release retry for order {}: {}",
+                        order.getId(), dispatchService.release(order.getId(), false));
+            }
+        } catch (Exception e) {
+            log.error("[QUIQUP] Release retry pass failed", e);
+        }
+    }
 }

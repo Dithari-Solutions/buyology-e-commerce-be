@@ -55,6 +55,22 @@ public class QuiqupCancelService {
         NEEDS_HUMAN
     }
 
+    /**
+     * The detail of a CONFIRMED that was already on the order, as opposed to one this call earned.
+     * Callers that release money on a confirmation must not do it again for this one.
+     */
+    public static final String ALREADY_CONFIRMED = "already confirmed";
+
+    /**
+     * True when the order's Quiqup job was created after the order was cancelled — the dispatch
+     * raced the cancel. That cancel found no job, so nothing was held back: its refund, stock and
+     * emails already went out. Stopping the late job is still needed; repeating those is not.
+     */
+    public static boolean jobCreatedAfterCancel(Order order) {
+        return order.getQuiqupDispatchedAt() != null && order.getCancelledAt() != null
+                && order.getQuiqupDispatchedAt().isAfter(order.getCancelledAt());
+    }
+
     public record CancelResult(Outcome outcome, String detail) {
         /** Only a verified stop — or the absence of any job — lets money leave. */
         public boolean refundAllowed() {
@@ -120,7 +136,7 @@ public class QuiqupCancelService {
         // 2. Idempotent short-circuits: a decided case stays decided, and costs no HTTP.
         String recorded = snapshot.getQuiqupCancelStatus();
         if (Outcome.CONFIRMED.name().equals(recorded) || "CONFIRMED_BY_PARTNER".equals(recorded)) {
-            return new CancelResult(Outcome.CONFIRMED, "already confirmed");
+            return new CancelResult(Outcome.CONFIRMED, ALREADY_CONFIRMED);
         }
         if (Outcome.REFUSED_TOO_LATE.name().equals(recorded)) {
             return new CancelResult(Outcome.REFUSED_TOO_LATE, "already refused: " + snapshot.getQuiqupCancelError());
@@ -166,10 +182,9 @@ public class QuiqupCancelService {
             return n;
         });
 
-        // 5. The call, exactly as the working admin endpoint makes it: PUT the batch path, id in body.
-        ObjectNode body = objectMapper.createObjectNode();
-        body.putArray("order_ids").add(quiqupOrderId);
-        QuiqupApiResult put = client.request("PUT", props.getPaths().getCancel(), body);
+        // 5. The call: PUT the batch path, id in body — Quiqup's one documented cancel.
+        QuiqupApiResult put = client.request("PUT", props.getPaths().getCancel(),
+                cancelBody(objectMapper, quiqupOrderId));
 
         // 6. Decide what actually happened — never on the PUT alone.
         CancelResult result = interpret(put, quiqupOrderId);
@@ -190,6 +205,60 @@ public class QuiqupCancelService {
                             + result.outcome() + ". " + truncate(result.detail(), 120));
         }
         return result;
+    }
+
+    /**
+     * Makes a cancelled order's courier cancel eligible to run again, for an admin's manual retry.
+     *
+     * <p>A decided outcome normally stays decided: NEEDS_HUMAN and REFUSED_TOO_LATE short-circuit
+     * every later call, and the retry job gives up after max-attempts. That is right for the
+     * automatic path and wrong once a human has acted, typically by cancelling the job in Quiqup's
+     * own dashboard. This resets the attempt count and puts the order back to PENDING, so the next
+     * call asks Quiqup again and, if the job now reads as cancelled, confirms it. A confirmed
+     * stop is left alone.
+     *
+     * <p>A claim held by a call in flight is kept: the retry job may be talking to Quiqup about this
+     * order right now, and clearing its claim would let a second call run alongside it and release
+     * the money twice. A claim left by a dead instance goes stale on its own.
+     *
+     * @return true when the order was re-armed
+     */
+    public boolean rearm(UUID orderId) {
+        Boolean rearmed = txTemplate.execute(status -> {
+            Order o = orderRepo.findById(orderId).orElse(null);
+            if (o == null || o.getQuiqupOrderId() == null || o.getQuiqupOrderId().isBlank()) {
+                return false;
+            }
+            String recorded = o.getQuiqupCancelStatus();
+            if (Outcome.CONFIRMED.name().equals(recorded) || "CONFIRMED_BY_PARTNER".equals(recorded)) {
+                return false;
+            }
+            o.setQuiqupCancelStatus("PENDING");
+            o.setQuiqupCancelAttempts(0);
+            if (o.getQuiqupCancelRequestedAt() == null) o.setQuiqupCancelRequestedAt(Instant.now());
+            orderRepo.save(o);
+            return true;
+        });
+        return Boolean.TRUE.equals(rearmed);
+    }
+
+    /**
+     * The batch-cancel body, {@code {"order_ids": [26012997]}}.
+     *
+     * <p>The id goes as a JSON number when it is one. Quiqup's ids are integers in every example
+     * they publish, including this endpoint's own response, and the spec leaves the array's item
+     * type open. We used to send the string "26012997", which nothing ever confirmed Quiqup
+     * accepts. A non-numeric id is sent as it is rather than dropped.
+     */
+    static ObjectNode cancelBody(ObjectMapper mapper, String quiqupOrderId) {
+        ObjectNode body = mapper.createObjectNode();
+        var ids = body.putArray("order_ids");
+        if (quiqupOrderId != null && quiqupOrderId.matches("\\d{1,18}")) {
+            ids.add(Long.parseLong(quiqupOrderId));
+        } else {
+            ids.add(quiqupOrderId);
+        }
+        return body;
     }
 
     // ── Classification ───────────────────────────────────────────────────────
@@ -215,7 +284,42 @@ public class QuiqupCancelService {
         // endpoint is a batch that could silently skip our id, and this outcome releases money.
         QuiqupApiResult get = client.request("GET",
                 QuiqupClient.fillPath(props.getPaths().getGet(), quiqupOrderId), null);
-        return interpretVerification(put.ok(), get);
+        return withQuiqupsAnswer(interpretVerification(put.ok(), get), put, quiqupOrderId);
+    }
+
+    /**
+     * Adds what Quiqup actually said to an unsuccessful outcome.
+     *
+     * <p>Without it the order only ever showed "job still reads as 'pending'", and the one thing
+     * that explains a cancel that did nothing — Quiqup's own status code and message — was thrown
+     * away. Their docs describe the 2xx reply as the array of orders they cancelled, so a reply
+     * that leaves our id out is called out too: that is Quiqup skipping the job, in their words.
+     */
+    static CancelResult withQuiqupsAnswer(CancelResult result, QuiqupApiResult put, String quiqupOrderId) {
+        if (result.outcome() == Outcome.CONFIRMED || put == null) {
+            return result;
+        }
+        StringBuilder detail = new StringBuilder(result.detail())
+                .append(". Quiqup answered the cancel with ").append(put.status());
+        if (put.ok() && put.body() instanceof JsonNode node && node.isArray() && !mentions(node, quiqupOrderId)) {
+            detail.append(" and left this job out of the orders it cancelled");
+        }
+        String body = put.body() == null ? "" : put.body().toString();
+        if (!body.isBlank()) {
+            detail.append(": ").append(truncate(body, 300));
+        }
+        return new CancelResult(result.outcome(), detail.toString());
+    }
+
+    /** Whether a batch reply lists this job, by Quiqup's numeric id. */
+    private static boolean mentions(JsonNode array, String quiqupOrderId) {
+        for (JsonNode element : array) {
+            JsonNode id = element.isObject() ? element.get("id") : element;
+            if (id != null && quiqupOrderId.equals(id.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The verdict, from the verifying GET alone. Pure — fully unit-testable. */

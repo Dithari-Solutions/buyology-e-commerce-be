@@ -124,8 +124,14 @@ public class QuiqupClient {
                                     parse(raw))))
                     .timeout(Duration.ofMillis(props.getTimeoutMs()))
                     .block();
-            if (result != null) {
-                log.info("[QUIQUP] → {} ok={}", result.status(), result.ok());
+            if (result != null && result.ok()) {
+                log.info("[QUIQUP] → {} ok=true", result.status());
+            } else if (result != null) {
+                // Quiqup's reason, not just its status code. A refusal used to leave only "→ 422
+                // ok=false" in the log, which is how a cancel that did nothing stayed unexplained.
+                String answer = result.body() == null ? "" : result.body().toString();
+                log.warn("[QUIQUP] → {} ok=false body={}", result.status(),
+                        answer.length() > 500 ? answer.substring(0, 500) + "…" : answer);
             }
             return result;
         } catch (Exception e) {

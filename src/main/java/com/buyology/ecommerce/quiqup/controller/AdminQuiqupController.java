@@ -37,19 +37,19 @@ public class AdminQuiqupController {
     private final QuiqupTestEventRepository eventRepository;
     private final ObjectMapper objectMapper;
     private final com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService;
-    private final com.buyology.ecommerce.quiqup.service.QuiqupCancelService cancelService;
+    private final com.buyology.ecommerce.order.service.OrderService orderService;
 
     public AdminQuiqupController(QuiqupProperties props, QuiqupClient client, QuiqupSamples samples,
                                  QuiqupTestEventRepository eventRepository, ObjectMapper objectMapper,
                                  com.buyology.ecommerce.quiqup.service.QuiqupDispatchService dispatchService,
-                                 com.buyology.ecommerce.quiqup.service.QuiqupCancelService cancelService) {
+                                 com.buyology.ecommerce.order.service.OrderService orderService) {
         this.props = props;
         this.client = client;
         this.samples = samples;
         this.eventRepository = eventRepository;
         this.objectMapper = objectMapper;
         this.dispatchService = dispatchService;
-        this.cancelService = cancelService;
+        this.orderService = orderService;
     }
 
     public record RawRequest(String method, String path, JsonNode body) {}
@@ -211,16 +211,23 @@ public class AdminQuiqupController {
      *
      * <p>Takes our own order id rather than a hand-typed Quiqup job id, which is what made the old
      * cancel control unusable: the dashboard never displayed the job id it demanded. An admin
-     * looking at a cancelled order whose refund is held (quiqupCancelStatus REFUSED_TOO_LATE or
-     * NEEDS_HUMAN, surfaced on the admin order view) presses this; the outcome and its consequences
-     * are decided by exactly the same service and gates as the automatic path.
+     * looking at a cancelled order whose stock or refund is held (quiqupCancelStatus NEEDS_HUMAN,
+     * REFUSED_TOO_LATE or UNCONFIRMED, shown on the admin order view) presses this — typically
+     * after cancelling the job in Quiqup's own dashboard.
+     *
+     * <p>It used to call the cancel service as-is, which returned the stored NEEDS_HUMAN or
+     * REFUSED_TOO_LATE without asking Quiqup anything — so pressing it for exactly the states it
+     * was documented for did nothing — and a stop it did confirm never released what the cancel
+     * had held. Both now go through {@code OrderService.retryQuiqupCancel}, which re-arms the
+     * cancel, asks Quiqup again, and on a confirmed stop releases the stock and refund the same way
+     * the retry job does. Refused (409) for an order that is not cancelled.
      */
     @io.swagger.v3.oas.annotations.Operation(summary = "Retry stopping the Quiqup job for a cancelled order")
     @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('quiqup:order:cancel') or @rbacPolicy.legacyAdmin()")
     @PostMapping("/cancel/{orderId}")
     public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> cancelForOrder(
             @PathVariable java.util.UUID orderId) {
-        var result = cancelService.cancelForOrder(orderId, "Manual retry from the admin dashboard");
+        var result = orderService.retryQuiqupCancel(orderId);
         return ApiResponse.success(java.util.Map.of(
                         "orderId", orderId.toString(),
                         "outcome", result.outcome().name(),

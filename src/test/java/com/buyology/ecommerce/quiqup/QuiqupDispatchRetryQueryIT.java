@@ -97,6 +97,94 @@ class QuiqupDispatchRetryQueryIT {
         assertTrue(worklist().contains(legacy));
     }
 
+    // ── Release (summoning the courier) ──────────────────────────────────────
+
+    private List<UUID> releaseWorklist() {
+        Instant now = Instant.now();
+        return orderRepository.findUnreleasedQuiqupOrders(5,
+                        now.plusSeconds(60), now.minusSeconds(3600), PageRequest.of(0, 25))
+                .stream().map(Order::getId).toList();
+    }
+
+    @Test
+    void aPackedJobNobodyReleasedIsPickedUpAndNothingElseIs() {
+        UUID waiting = order(o -> {
+            o.setStatus(OrderStatus.PACKAGING);
+            o.setQuiqupOrderId("1001");
+            o.setQuiqupReleaseAttempts(null);   // a row from before V57
+        });
+        UUID released = order(o -> {
+            o.setStatus(OrderStatus.PACKAGING);
+            o.setQuiqupOrderId("1002");
+            o.setQuiqupReleasedAt(Instant.now());
+        });
+        UUID notPackedYet = order(o -> o.setQuiqupOrderId("1003"));   // PAID
+        UUID noJob = order(o -> o.setStatus(OrderStatus.PACKAGING));
+        UUID givenUp = order(o -> {
+            o.setStatus(OrderStatus.PACKAGING);
+            o.setQuiqupOrderId("1004");
+            o.setQuiqupReleaseAttempts(5);
+        });
+
+        List<UUID> worklist = releaseWorklist();
+
+        assertTrue(worklist.contains(waiting));
+        assertFalse(worklist.contains(released));
+        assertFalse(worklist.contains(notPackedYet), "released when it is packed, not before");
+        assertFalse(worklist.contains(noJob));
+        assertFalse(worklist.contains(givenUp), "at the attempt cap");
+    }
+
+    @Test
+    void onlyOneCallerWinsEachReleaseAttempt() {
+        UUID id = order(o -> {
+            o.setStatus(OrderStatus.PACKAGING);
+            o.setQuiqupOrderId("1005");
+            o.setQuiqupReleaseAttempts(null);
+        });
+
+        assertEquals(1, orderRepository.claimQuiqupRelease(id, 0, false), "NULL counts as no attempts");
+        assertEquals(0, orderRepository.claimQuiqupRelease(id, 0, false), "the other replica loses");
+        assertEquals(1, orderRepository.claimQuiqupRelease(id, 1, false), "the next attempt is claimable");
+        assertEquals(2, orderRepository.findById(id).orElseThrow().getQuiqupReleaseAttempts());
+    }
+
+    @Test
+    void aReleasedJobCannotBeClaimedAgain() {
+        UUID id = order(o -> {
+            o.setStatus(OrderStatus.PACKAGING);
+            o.setQuiqupOrderId("1006");
+            o.setQuiqupReleasedAt(Instant.now());
+        });
+
+        assertEquals(0, orderRepository.claimQuiqupRelease(id, 0, false));
+    }
+
+    @Test
+    void aReleaseIsOnlyClaimedWhileTheOrderIsBeingPacked() {
+        UUID cancelled = order(o -> {
+            o.setStatus(OrderStatus.CANCELLED);
+            o.setQuiqupOrderId("1007");
+        });
+        UUID paid = order(o -> o.setQuiqupOrderId("1008"));
+
+        assertEquals(0, orderRepository.claimQuiqupRelease(cancelled, 0, true),
+                "cancelled since it was read: no courier");
+        assertEquals(0, orderRepository.claimQuiqupRelease(paid, 0, false), "not packed yet");
+        assertEquals(1, orderRepository.claimQuiqupRelease(paid, 0, true), "auto-ready releases at PAID");
+    }
+
+    @Test
+    void aCancelledOrderCannotBeClaimedForDispatch() {
+        // Cancelled between the snapshot and the claim: no job may be created for it.
+        UUID cancelled = order(o -> o.setStatus(OrderStatus.CANCELLED));
+        UUID paid = order(o -> {});
+        Instant now = Instant.now();
+
+        assertEquals(0, orderRepository.claimForQuiqupDispatch(cancelled, now, now.minusSeconds(300)));
+        assertEquals(1, orderRepository.claimForQuiqupDispatch(paid, now, now.minusSeconds(300)));
+    }
+
     @Test
     void theCountersSurviveARoundTrip() {
         Instant stoppedAt = Instant.parse("2026-09-21T08:00:00Z");

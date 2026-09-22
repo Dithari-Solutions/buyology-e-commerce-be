@@ -3,6 +3,7 @@ package com.buyology.ecommerce.quiqup.service;
 import com.buyology.ecommerce.order.domain.Order;
 import com.buyology.ecommerce.order.domain.OrderItem;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
+import com.buyology.ecommerce.order.event.OrderPackagingEvent;
 import com.buyology.ecommerce.order.event.OrderPaidEvent;
 import com.buyology.ecommerce.order.repository.OrderItemRepository;
 import com.buyology.ecommerce.order.repository.OrderRepository;
@@ -127,7 +128,8 @@ public class QuiqupDispatchService {
             return;
         }
         log.warn("[QUIQUP] Automatic dispatch is ON against {} — paid orders will be sent to REAL "
-                + "couriers (autoReadyForCollection={}).", props.getBaseUrl(),
+                + "couriers (releaseOnPackaging={}, autoReadyForCollection={}).", props.getBaseUrl(),
+                props.getDispatch().isReleaseOnPackaging(),
                 props.getDispatch().isAutoReadyForCollection());
     }
 
@@ -151,6 +153,54 @@ public class QuiqupDispatchService {
             // dispatch() already recorded the reason on the order; this is the last-resort guard so
             // an escaping exception cannot kill the async executor's thread silently.
             log.error("[QUIQUP] dispatch threw for order {}: {}", event.getOrderId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Summons the courier once the order is being packed.
+     *
+     * <p>A card order was dispatched when it was paid, so its job exists and only needs releasing.
+     * A cash order is not dispatchable until now, so its job is created here and released straight
+     * after — {@link #dispatch} does both. Asynchronous and after commit for the same reasons as
+     * {@link #onOrderPaid}.
+     *
+     * <p>An order whose automatic dispatch has stopped is left alone: that stop means Quiqup
+     * rejected the job or may already hold one, and creating another is an admin's decision.
+     */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onOrderPackaging(OrderPackagingEvent event) {
+        if (!enabled()) return;
+        UUID orderId = event.getOrderId();
+        try {
+            Order order = txTemplate.execute(status -> orderRepo.findById(orderId).orElse(null));
+            if (order == null) return;
+            if (order.getQuiqupOrderId() == null || order.getQuiqupOrderId().isBlank()) {
+                if (!coverage.covers(order.getDeliveryMethod(), order.getCountry())) {
+                    // Pickup, express, or a market Quiqup do not serve: not theirs, and silently so.
+                    // Dispatching would stamp "Not a Quiqup delivery" on the order in red.
+                    return;
+                }
+                if (order.getQuiqupDispatchStoppedAt() != null) {
+                    log.info("[QUIQUP] Order {} is being packed but its dispatch was stopped; an admin "
+                            + "dispatches it by hand", orderId);
+                    return;
+                }
+                String outcome = dispatch(orderId);
+                log.info("[QUIQUP] Order {} is being packed: {}", orderId, outcome);
+                if (!outcome.startsWith("Already dispatched")) {
+                    // dispatch() released a job it created itself, and a failed or refused create
+                    // has nothing to release. Releasing again here would spend a second attempt.
+                    return;
+                }
+                // "Already dispatched": the payment-time dispatch finished in parallel. It read the
+                // status before the order reached PACKAGING, so it left the job unreleased.
+            }
+            if (props.getDispatch().isReleaseOnPackaging()) {
+                log.info("[QUIQUP] Order {} release: {}", orderId, release(orderId, false));
+            }
+        } catch (Exception e) {
+            log.error("[QUIQUP] packaging hand-off threw for order {}: {}", orderId, e.getMessage(), e);
         }
     }
 
@@ -233,10 +283,15 @@ public class QuiqupDispatchService {
             recordSuccess(orderId, quiqupId, extractTrackingUrl(result));
             log.info("[QUIQUP] Order {} dispatched as Quiqup order {}", orderId, quiqupId);
 
+            String outcome = "Dispatched (Quiqup order " + quiqupId + ")";
             if (props.getDispatch().isAutoReadyForCollection()) {
-                markReadyForCollection(orderId, quiqupId);
+                outcome += "; " + release(orderId, true);
+            } else if (props.getDispatch().isReleaseOnPackaging()) {
+                // A no-op for a card order dispatched on payment, which is released when it is
+                // packed. A cash order is only dispatched once it is packing, so it goes now.
+                outcome += "; " + release(orderId, false);
             }
-            return "Dispatched (Quiqup order " + quiqupId + ")";
+            return outcome;
 
         } catch (Exception e) {
             String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -381,29 +436,118 @@ public class QuiqupDispatchService {
     }
 
     /**
-     * Tells Quiqup the parcel is packed and ready, which is what actually summons a courier.
+     * Marks the order's Quiqup job ready for collection, which is what summons a courier.
      *
-     * <p>Separate from {@link #dispatch} because it is the irreversible half: creating a job is a
-     * booking, releasing it sends a van. A failure here leaves the job created — the parcel is
-     * still going, just not yet — so it is recorded and not treated as a dispatch failure, which
-     * would otherwise make the retry job create a duplicate job.
+     * <p>Creating a job is only a booking. Quiqup's docs: a new order "will be created in a pending
+     * state and will only be visible on your Quiqup Portal, but it is not visible for our
+     * dispatching system". Releasing it is what sends a van, so it waits until the shop has the
+     * order in hand — PACKAGING — unless {@code auto-ready-for-collection} asks for it at creation.
+     *
+     * <p>Separate from {@link #dispatch}, and failures here are recorded without touching the
+     * dispatch: the job exists, and treating a failed release as a failed dispatch would create a
+     * second one. Repeating a release is harmless — it is the same job moving to the same state —
+     * so a failure is simply retried by the sweep, up to max-attempts.
+     *
+     * @param evenBeforePackaging release a PAID order too (the auto-ready setting); otherwise only
+     *                            a PACKAGING order is released
+     * @return a short human-readable outcome, for the logs
      */
-    public String markReadyForCollection(UUID orderId, String quiqupOrderId) {
+    public String release(UUID orderId, boolean evenBeforePackaging) {
         try {
-            String path = QuiqupClient.fillPath(props.getPaths().getReadyForCollection(), quiqupOrderId);
-            QuiqupApiResult result = client.request("PUT", path, null);
-            if (result == null || !result.ok()) {
-                String reason = "Ready-for-collection failed: "
-                        + (result == null ? "no response" : result.status() + " " + result.body());
-                log.error("[QUIQUP] {} for order {} (Quiqup {})", reason, orderId, quiqupOrderId);
-                return reason;
+            Order order = txTemplate.execute(status -> orderRepo.findById(orderId).orElse(null));
+            if (order == null) {
+                return "Order not found";
             }
-            log.info("[QUIQUP] Quiqup order {} marked ready for collection", quiqupOrderId);
-            return "Ready for collection";
+            String jobId = order.getQuiqupOrderId();
+            if (jobId == null || jobId.isBlank()) {
+                return "Not released: no Quiqup job yet";
+            }
+            if (order.getQuiqupReleasedAt() != null) {
+                return "Already released for collection";
+            }
+            OrderStatus status = order.getStatus();
+            if (status != OrderStatus.PACKAGING && !(evenBeforePackaging && status == OrderStatus.PAID)) {
+                return "Not released: order is " + status + "; the courier is summoned at PACKAGING";
+            }
+            int done = order.getQuiqupReleaseAttempts() == null ? 0 : order.getQuiqupReleaseAttempts();
+            int max = props.getDispatch().getMaxAttempts();
+            if (done >= max) {
+                return "Not released: automatic release stopped after " + done + " attempts";
+            }
+            // The counter is the claim: only the instance that moves it from `done` calls Quiqup.
+            // It re-checks the status too, so an order cancelled since the read above is not released.
+            Integer won = txTemplate.execute(s -> orderRepo.claimQuiqupRelease(orderId, done, evenBeforePackaging));
+            if (won == null || won == 0) {
+                return "Not released: another instance is releasing it, or the order moved on";
+            }
+            int attempt = done + 1;
+
+            String path = QuiqupClient.fillPath(props.getPaths().getReadyForCollection(), jobId);
+            QuiqupApiResult result = client.request("PUT", path, null);
+            if (result != null && result.ok()) {
+                recordReleased(orderId);
+                log.info("[QUIQUP] Order {} released for collection (Quiqup order {})", orderId, jobId);
+                return "Released for collection";
+            }
+
+            // Refused, or no answer. The job may already be past pending — released by hand in
+            // Quiqup's dashboard, or the call got through and only the answer was lost — and
+            // then there is nothing left to do. Only a job still waiting is worth another try.
+            String state = currentState(jobId);
+            if (isPastPending(state)) {
+                recordReleased(orderId);
+                log.info("[QUIQUP] Order {}: Quiqup job {} already reads as '{}'; treating it as released",
+                        orderId, jobId, state);
+                return "Already released (job reads as '" + state + "')";
+            }
+            String reason = "Ready for collection failed with "
+                    + (result == null ? "no response" : result.status() + ": " + result.body())
+                    + (state == null ? "" : " (job reads as '" + state + "')");
+            boolean jobCancelled = QuiqupStatusMapper.toOrderStatus(state) == OrderStatus.CANCELLED;
+            if (jobCancelled) {
+                reason = "Courier not summoned: Quiqup job " + jobId + " is cancelled at Quiqup, so "
+                        + "there is nothing to release. Dispatch the order again if it should still go. "
+                        + reason;
+                // Nothing to retry against: stop the sweep now rather than after max attempts.
+                int cap = Math.max(max, attempt);
+                txTemplate.executeWithoutResult(s -> orderRepo.findById(orderId).ifPresent(o -> {
+                    o.setQuiqupReleaseAttempts(cap);
+                    orderRepo.save(o);
+                }));
+            } else if (attempt >= max) {
+                reason = "Courier not summoned: automatic release stopped after " + attempt + " attempts. "
+                        + "Release Quiqup job " + jobId + " from Quiqup's dashboard. " + reason;
+            } else {
+                reason = "Courier not summoned yet: release attempt " + attempt + " of " + max
+                        + " failed and will be retried. " + reason;
+            }
+            recordFailure(orderId, reason);
+            log.error("[QUIQUP] Order {} (Quiqup {}): {}", orderId, jobId, reason);
+            return reason;
         } catch (Exception e) {
-            log.error("[QUIQUP] Ready-for-collection threw for order {}", orderId, e);
+            log.error("[QUIQUP] Release threw for order {}", orderId, e);
             return e.getClass().getSimpleName() + ": " + e.getMessage();
         }
+    }
+
+    /** The job's state at Quiqup, or null when it cannot be read. */
+    private String currentState(String jobId) {
+        try {
+            QuiqupApiResult get = client.request("GET",
+                    QuiqupClient.fillPath(props.getPaths().getGet(), jobId), null);
+            return get != null && get.ok() ? QuiqupCancelService.extractState(get) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** True when a job is already released or beyond, so releasing it again has no purpose. */
+    static boolean isPastPending(String state) {
+        if (state == null) return false;
+        if ("ready_for_collection".equalsIgnoreCase(state)) return true;
+        OrderStatus mapped = QuiqupStatusMapper.toOrderStatus(state);
+        return mapped == OrderStatus.IN_COURIER || mapped == OrderStatus.IN_TRANSIT
+                || mapped == OrderStatus.DELIVERED;
     }
 
     // =========================================================================
@@ -540,6 +684,8 @@ public class QuiqupDispatchService {
         Instant staleBefore = now.minus(staleClaimWindow());
         Integer claimed = txTemplate.execute(status ->
                 orderRepo.claimForQuiqupDispatch(orderId, now, staleBefore));
+        // The claim also refuses an order that stopped being PAID or PACKAGING since the snapshot
+        // was read — cancelled in the meantime, most importantly.
         return claimed != null && claimed > 0;
     }
 
@@ -587,6 +733,15 @@ public class QuiqupDispatchService {
 
     private void recordSuccess(UUID orderId, String quiqupOrderId, String trackingUrl) {
         txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
+            if (o.getStatus() == OrderStatus.CANCELLED && o.getQuiqupCancelStatus() == null) {
+                // Cancelled while the create was in flight. Its cancel ran before this id existed,
+                // found nothing to stop and recorded nothing, so this job would be left running.
+                // Record the intent to stop it; the cancel retry job picks it up within a minute.
+                o.setQuiqupCancelStatus("PENDING");
+                o.setQuiqupCancelRequestedAt(Instant.now());
+                log.warn("[QUIQUP] Order {} was cancelled while Quiqup job {} was being created; "
+                        + "queued the job for cancellation", orderId, quiqupOrderId);
+            }
             o.setQuiqupOrderId(quiqupOrderId);
             o.setQuiqupDispatchedAt(Instant.now());
             o.setQuiqupDispatchError(null);
@@ -600,6 +755,15 @@ public class QuiqupDispatchService {
             } else {
                 o.setTrackingCode(quiqupOrderId);
             }
+            orderRepo.save(o);
+        }));
+    }
+
+    private void recordReleased(UUID orderId) {
+        txTemplate.executeWithoutResult(status -> orderRepo.findById(orderId).ifPresent(o -> {
+            o.setQuiqupReleasedAt(Instant.now());
+            // The job exists, so any error still on the order is about releasing it, and it is done.
+            o.setQuiqupDispatchError(null);
             orderRepo.save(o);
         }));
     }

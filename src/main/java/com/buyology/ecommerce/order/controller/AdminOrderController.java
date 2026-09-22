@@ -81,12 +81,18 @@ public class AdminOrderController {
      */
     @PatchMapping("/{orderId}/status")
     @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('order:status:update') or @rbacPolicy.legacyAdmin()")
-    public ResponseEntity<ApiResponse<OrderResponse>> updateStatus(
+    public ResponseEntity<ApiResponse<OrderAdminResponse>> updateStatus(
             @AuthenticationPrincipal UUID adminUserId,
             @PathVariable UUID orderId,
             @Valid @RequestBody AdminStatusUpdateRequest request) {
+        orderService.adminUpdateStatus(orderId, adminUserId, request);
+        // Re-read, rather than returning what adminUpdateStatus built. That was built before the
+        // commit, so it could not know how the Quiqup cancel went (which runs after the commit,
+        // on this thread, before we get here) and, being the customer-facing shape, it carried no
+        // Quiqup fields at all: the dashboard swapped it in and the order's Quiqup card vanished
+        // right when the admin needed to see whether the courier had been stopped.
         return ApiResponse.success(
-                orderService.adminUpdateStatus(orderId, adminUserId, request),
+                orderService.getFreshOrderForAdmin(orderId),
                 "Order status updated successfully");
     }
 

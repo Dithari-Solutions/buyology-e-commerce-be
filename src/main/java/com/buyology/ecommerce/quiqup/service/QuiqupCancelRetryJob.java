@@ -77,10 +77,12 @@ public class QuiqupCancelRetryJob {
                 var result = cancelService.cancelForOrder(order.getId(), order.getCancellationReason());
                 log.info("[QUIQUP] Cancel retry for order {}: {} ({})",
                         order.getId(), result.outcome(), result.detail());
-                if (result.refundAllowed()) {
+                if (result.refundAllowed() && !QuiqupCancelService.jobCreatedAfterCancel(order)) {
                     // The courier is now verifiably stopped: release everything the gate withheld —
                     // refund, B2B credit, stock, and the customer's emails. Through the injected
-                    // proxy, so the method's REQUIRES_NEW actually applies.
+                    // proxy, so the method's REQUIRES_NEW actually applies. Skipped for a job created
+                    // after the cancel (the dispatch raced it): that cancel found no job, held
+                    // nothing back, and already refunded and emailed; only the job needed stopping.
                     orderService.applyCancellationSideEffects(
                             order, order.getCancellationReason(), true);
                 }

@@ -123,11 +123,62 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             UPDATE Order o SET o.quiqupDispatchClaimedAt = :now
             WHERE o.id = :orderId
               AND o.quiqupOrderId IS NULL
+              AND o.status IN (com.buyology.ecommerce.order.domain.enums.OrderStatus.PAID,
+                               com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING)
               AND (o.quiqupDispatchClaimedAt IS NULL OR o.quiqupDispatchClaimedAt < :staleBefore)
             """)
     int claimForQuiqupDispatch(@Param("orderId") UUID orderId,
                                @Param("now") Instant now,
                                @Param("staleBefore") Instant staleBefore);
+
+    /**
+     * Claims one release call for an order's Quiqup job: moves the attempt counter from
+     * {@code expected} to {@code expected + 1}, and returns 1 only to the caller that did.
+     *
+     * <p>A compare-and-set on the counter rather than a timestamp claim, because a release needs no
+     * lock held across the call: repeating it is harmless (the same job, the same state). What it
+     * does stop is both replicas' sweeps calling Quiqup for the same order every pass.
+     *
+     * <p>The status is checked here, in the same statement, and not only by the caller: an order
+     * cancelled between the caller reading it and this claim must not have a courier summoned.
+     * PAID qualifies only when {@code evenWhenPaid} — the auto-ready setting.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Order o SET o.quiqupReleaseAttempts = :expected + 1
+            WHERE o.id = :orderId
+              AND o.quiqupOrderId IS NOT NULL
+              AND o.quiqupReleasedAt IS NULL
+              AND COALESCE(o.quiqupReleaseAttempts, 0) = :expected
+              AND (o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING
+                   OR (:evenWhenPaid = true
+                       AND o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.PAID))
+            """)
+    int claimQuiqupRelease(@Param("orderId") UUID orderId, @Param("expected") int expected,
+                           @Param("evenWhenPaid") boolean evenWhenPaid);
+
+    /**
+     * Packed orders whose Quiqup job was never released — the release sweep's worklist.
+     *
+     * <p>Releasing normally happens the moment an order reaches PACKAGING; this catches the ones
+     * where that call failed or never ran. Both bounds are on {@code updatedAt}: every failed
+     * attempt saves the order, so {@code olderThan} spaces the retries out, and {@code horizon}
+     * ignores orders nobody has touched for days.
+     */
+    @Query("""
+            SELECT o FROM Order o
+            WHERE o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.PACKAGING
+              AND o.quiqupOrderId IS NOT NULL
+              AND o.quiqupReleasedAt IS NULL
+              AND COALESCE(o.quiqupReleaseAttempts, 0) < :maxAttempts
+              AND o.updatedAt < :olderThan
+              AND o.updatedAt > :horizon
+            ORDER BY o.updatedAt ASC
+            """)
+    List<Order> findUnreleasedQuiqupOrders(@Param("maxAttempts") int maxAttempts,
+                                           @Param("olderThan") Instant olderThan,
+                                           @Param("horizon") Instant horizon,
+                                           org.springframework.data.domain.Pageable pageable);
 
     /**
      * Releases a claim after a failed attempt, so the retry job can pick the order up immediately

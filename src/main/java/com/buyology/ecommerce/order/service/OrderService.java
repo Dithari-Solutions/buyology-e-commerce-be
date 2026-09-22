@@ -39,6 +39,7 @@ import com.buyology.ecommerce.order.domain.enums.DeliveryMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderPaymentMethod;
 import com.buyology.ecommerce.order.domain.enums.OrderStatus;
 import com.buyology.ecommerce.order.dto.*;
+import com.buyology.ecommerce.order.event.OrderPackagingEvent;
 import com.buyology.ecommerce.order.event.OrderPaidEvent;
 import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
 import com.buyology.ecommerce.order.event.PaymentFailedEvent;
@@ -152,6 +153,13 @@ public class OrderService {
     private final com.buyology.ecommerce.payment.repository.PaymentAnomalyRepository paymentAnomalyRepo;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+
+    /**
+     * Only for {@link #getFreshOrderForAdmin}. Field-injected so the constructor, which a dozen
+     * tests call directly, keeps its shape.
+     */
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
 
     public OrderService(OrderRepository orderRepo,
                         OrderTrackingEventRepository trackingRepo,
@@ -1479,6 +1487,26 @@ public class OrderService {
         return toOrderResponse(order);
     }
 
+    /**
+     * The admin view of an order as the database holds it right now.
+     *
+     * <p>For answering a status change. With open-in-view on (production's default) the request's
+     * persistence context still holds the order as the status change loaded it, while the Quiqup
+     * cancel that ran after the commit wrote its outcome through transactions of its own. A plain
+     * read would hand back that cached copy — cancel status still PENDING — so this refreshes it
+     * from the database first.
+     *
+     * <p>The plain admin view, without the payment card and proof photos the with-proof read adds:
+     * a caller allowed to change a status is not thereby allowed to read those.
+     */
+    @Transactional(readOnly = true)
+    public OrderAdminResponse getFreshOrderForAdmin(UUID orderId) {
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        entityManager.refresh(order);
+        return toAdminOrderResponse(order);
+    }
+
     public OrderAdminResponse getOrderWithProofForAdmin(UUID orderId, UUID adminUserId) {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
@@ -1642,21 +1670,68 @@ public class OrderService {
         // constraint failure at flush/commit rolls the status back while the customer has
         // already been emailed/pushed (the exact "email sent but status didn't update" bug).
         runAfterCommit(() -> {
-            broadcastStatusUpdate(saved, null);
-            notifyCustomerStatus(saved);
             if (saved.getStatus() == OrderStatus.CANCELLED) {
                 // Stop the courier BEFORE any money moves. An admin cancellation is authoritative,
                 // so the order stays CANCELLED whatever Quiqup says — only the money leg is gated
                 // on the courier being verifiably stopped. No transaction is open here (the
                 // committed one is still bound to the thread but does nothing), and the cancel
                 // service does its own writes in REQUIRES_NEW.
-                var courier = quiqupCancelService.cancelForOrder(saved.getId(), req.getCancellationReason());
-                selfProvider.getObject().applyCancellationSideEffects(
-                        saved, req.getCancellationReason(), courier.refundAllowed());
+                //
+                // First in this callback, not after the broadcast: one exception ends the whole
+                // callback, and a WebSocket hiccup must not be what leaves a courier driving. Caught
+                // here for the same reason the other way round: the PENDING intent is committed, so
+                // the retry job finishes a cancel that failed, but nothing would re-send the
+                // customer's notification.
+                try {
+                    var courier = quiqupCancelService.cancelForOrder(saved.getId(), req.getCancellationReason());
+                    selfProvider.getObject().applyCancellationSideEffects(
+                            saved, req.getCancellationReason(), courier.refundAllowed());
+                } catch (Exception e) {
+                    log.error("[ORDER] Cancel of order {} could not stop the courier or settle the money "
+                            + "yet; the Quiqup cancel retry job will: {}", saved.getId(), e.getMessage(), e);
+                }
             }
+            broadcastStatusUpdate(saved, null);
+            notifyCustomerStatus(saved);
         });
 
         return toOrderResponse(saved);
+    }
+
+    /**
+     * Tries again to stop the Quiqup job of a cancelled order, on an admin's request.
+     *
+     * <p>The automatic path gives up after a few attempts, and a refusal or "too late" is final
+     * for it. This is the way back: typically the admin has cancelled the job in Quiqup's own
+     * dashboard, and pressing retry re-reads it, confirms the stop, and releases what was held
+     * (the stock, and for a prepaid order the refund) exactly as the retry job would have.
+     *
+     * <p>Not {@code @Transactional}: it makes HTTP calls, and every write inside is its own short
+     * transaction.
+     */
+    public com.buyology.ecommerce.quiqup.service.QuiqupCancelService.CancelResult retryQuiqupCancel(UUID orderId) {
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        if (order.getStatus() != OrderStatus.CANCELLED) {
+            // Stopping the courier of an order that is still live would strand its parcel.
+            throw new IllegalStateException("Order " + orderId + " is " + order.getStatus()
+                    + ", not CANCELLED; its Quiqup job is left alone");
+        }
+        if (!quiqupCancelService.rearm(orderId)) {
+            // Already confirmed (whoever confirmed it released the money then) or no job at all:
+            // report that, without asking Quiqup or releasing anything a second time.
+            return quiqupCancelService.cancelForOrder(orderId, order.getCancellationReason());
+        }
+        var result = quiqupCancelService.cancelForOrder(orderId, order.getCancellationReason());
+        // Released here only when THIS call confirmed the stop. "Already confirmed" means another
+        // caller (the retry job) got there in between and released it; a job created after the
+        // cancel never had anything held back.
+        if (result.refundAllowed()
+                && !com.buyology.ecommerce.quiqup.service.QuiqupCancelService.ALREADY_CONFIRMED.equals(result.detail())
+                && !com.buyology.ecommerce.quiqup.service.QuiqupCancelService.jobCreatedAfterCancel(order)) {
+            selfProvider.getObject().applyCancellationSideEffects(order, order.getCancellationReason(), true);
+        }
+        return result;
     }
 
     @SuppressWarnings("unused") // kept for future re-enable of courier-backend integration
@@ -3038,6 +3113,14 @@ public class OrderService {
         applyMilestoneTimestamp(order, target);
         order.setStatus(target);
 
+        if (target == OrderStatus.PACKAGING && from != OrderStatus.PACKAGING) {
+            // Here rather than in each caller: three paths reach PACKAGING (admin status, admin
+            // tracking, supplier), and a courier that is summoned by one of them only is a parcel
+            // that waits on the shelf for the others. Listeners run after commit, so a rolled-back
+            // status change never summons anybody.
+            eventPublisher.publishEvent(new OrderPackagingEvent(order.getId()));
+        }
+
         if (releasesStock(from, target)) {
             if (target == OrderStatus.CANCELLED && courierNotConfirmedStopped(order)) {
                 // The one case where "cancelled" does not mean "the goods are ours again": a
@@ -3236,6 +3319,7 @@ public class OrderService {
         res.setQuiqupStatus(o.getQuiqupStatus());
         res.setQuiqupDispatchedAt(o.getQuiqupDispatchedAt());
         res.setQuiqupDispatchError(o.getQuiqupDispatchError());
+        res.setQuiqupReleasedAt(o.getQuiqupReleasedAt());
         // The cancel leg, so an admin can see WHY a cancelled order's refund is being held and
         // recover it — before this, the only cancel control needed a Quiqup job id shown nowhere.
         res.setQuiqupCancelStatus(o.getQuiqupCancelStatus());

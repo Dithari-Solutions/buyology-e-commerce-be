@@ -162,6 +162,16 @@ public class QuiqupProperties {
          */
         private boolean autoReadyForCollection = false;
 
+        /**
+         * Mark the job ready for collection when the order moves to PACKAGING.
+         *
+         * <p>On by default: PACKAGING is when the shop has the order in hand, and until a job is
+         * released Quiqup's dispatching cannot see it, so no courier ever comes. A cash order is
+         * also dispatched at that moment, since it is not dispatchable before. Turning this off
+         * leaves every job waiting to be released by hand in Quiqup's dashboard.
+         */
+        private boolean releaseOnPackaging = true;
+
         /** How long a paid order may go undispatched before the retry job picks it up, minutes. */
         private int retryAfterMinutes = 10;
 
@@ -181,6 +191,8 @@ public class QuiqupProperties {
         public void setKind(String kind) { this.kind = kind; }
         public boolean isAutoReadyForCollection() { return autoReadyForCollection; }
         public void setAutoReadyForCollection(boolean v) { this.autoReadyForCollection = v; }
+        public boolean isReleaseOnPackaging() { return releaseOnPackaging; }
+        public void setReleaseOnPackaging(boolean v) { this.releaseOnPackaging = v; }
         public int getRetryAfterMinutes() { return retryAfterMinutes; }
         public void setRetryAfterMinutes(int v) { this.retryAfterMinutes = v; }
         public int getMaxAttempts() { return maxAttempts; }

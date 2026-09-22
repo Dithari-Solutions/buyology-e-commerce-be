@@ -412,6 +412,19 @@ public class Order {
     @Column(name = "quiqup_dispatch_stopped_at")
     private Instant quiqupDispatchStoppedAt;
 
+    /**
+     * When the Quiqup job was marked ready for collection, or null while it is only booked.
+     *
+     * <p>A created job is invisible to Quiqup's dispatching until this happens, so no courier
+     * comes before it. Set when the order reaches PACKAGING, or at creation if it is already there.
+     */
+    @Column(name = "quiqup_released_at")
+    private Instant quiqupReleasedAt;
+
+    /** Release calls made for this order; caps the retries and serves as their claim. */
+    @Column(name = "quiqup_release_attempts")
+    private Integer quiqupReleaseAttempts = 0;
+
     // ── Trash ─────────────────────────────────────────────────────────────────
 
     /**
@@ -701,6 +714,10 @@ public class Order {
     public void setQuiqupDispatchAttempts(Integer v) { this.quiqupDispatchAttempts = v; }
     public Instant getQuiqupDispatchStoppedAt() { return quiqupDispatchStoppedAt; }
     public void setQuiqupDispatchStoppedAt(Instant v) { this.quiqupDispatchStoppedAt = v; }
+    public Instant getQuiqupReleasedAt() { return quiqupReleasedAt; }
+    public void setQuiqupReleasedAt(Instant v) { this.quiqupReleasedAt = v; }
+    public Integer getQuiqupReleaseAttempts() { return quiqupReleaseAttempts; }
+    public void setQuiqupReleaseAttempts(Integer v) { this.quiqupReleaseAttempts = v; }
 
     public String getQuiqupDispatchError() { return quiqupDispatchError; }
     public void setQuiqupDispatchError(String quiqupDispatchError) { this.quiqupDispatchError = quiqupDispatchError; }

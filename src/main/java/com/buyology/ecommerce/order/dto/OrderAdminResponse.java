@@ -56,6 +56,8 @@ public class OrderAdminResponse extends OrderResponse {
      */
     private String quiqupCancelStatus;
     private java.time.Instant quiqupCancelConfirmedAt;
+    /** When the job was released for collection — i.e. when a courier was summoned. */
+    private Instant quiqupReleasedAt;
     private String quiqupCancelError;
     /** When the cancellation refund was handed to the gateway. Null on a cancelled order = held. */
     private java.time.Instant cancelRefundInitiatedAt;
@@ -94,6 +96,8 @@ public class OrderAdminResponse extends OrderResponse {
     public java.time.Instant getQuiqupCancelConfirmedAt() { return quiqupCancelConfirmedAt; }
     public void setQuiqupCancelConfirmedAt(java.time.Instant v) { this.quiqupCancelConfirmedAt = v; }
     public String getQuiqupCancelError() { return quiqupCancelError; }
+    public Instant getQuiqupReleasedAt() { return quiqupReleasedAt; }
+    public void setQuiqupReleasedAt(Instant v) { this.quiqupReleasedAt = v; }
     public void setQuiqupCancelError(String v) { this.quiqupCancelError = v; }
     public java.time.Instant getCancelRefundInitiatedAt() { return cancelRefundInitiatedAt; }
     public void setCancelRefundInitiatedAt(java.time.Instant v) { this.cancelRefundInitiatedAt = v; }
