@@ -97,6 +97,16 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
+    /** Only for resolving the primary category by name — see {@link #primaryCategoryIds()}. */
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.buyology.ecommerce.product.repository.ProductCategoryTranslationRepository categoryTranslationRepository;
+
+    /** The category the default catalogue order leads with, by its English name. */
+    @org.springframework.beans.factory.annotation.Value("${app.catalog.first-category:Laptop}")
+    private String primaryCategoryName;
+
+    private volatile java.util.Set<UUID> primaryCategoryIdsCache;
+    private volatile long primaryCategoryIdsAt;
     private final BrandRepository brandRepository;
     private final BrandTranslationRepository brandTranslationRepository;
     private final GlobalSpecGroupRepository globalSpecGroupRepository;
@@ -838,6 +848,12 @@ public class ProductService {
                     .sorted(java.util.Comparator.comparing(Product::getCreatedAt,
                             java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
                     .toList();
+        } else {
+            // Default order leads with the category this shop is actually known for, so the first
+            // screen of "All products" is laptops rather than whatever the catalogue happened to
+            // list first. Applied before paging, so it holds as the shopper scrolls, and only when
+            // they have not chosen a sort of their own.
+            all = leadWithPrimaryCategory(all);
         }
 
         // toResponse() is expensive PER product (per-product association queries), so
@@ -858,6 +874,69 @@ public class ProductService {
     // catalog, but sourced from b2bEnabled store products in B2B-enabled
     // countries and with NO buyable price (quoteOnly = true).
     // ======================================================================
+
+    /**
+     * Puts the primary category's products first, keeping every product and the order within each
+     * group. Stable, so "featured" still means the catalogue's own order inside the two blocks.
+     */
+    private List<Product> leadWithPrimaryCategory(List<Product> products) {
+        return leadWithCategories(products, primaryCategoryIds());
+    }
+
+    /** The pure half of {@link #leadWithPrimaryCategory}, so the ordering itself is testable. */
+    static List<Product> leadWithCategories(List<Product> products, java.util.Set<UUID> lead) {
+        if (lead == null || lead.isEmpty() || products == null || products.isEmpty()) {
+            return products;
+        }
+        return products.stream()
+                .sorted(java.util.Comparator.comparing(
+                        (Product p) -> !(p.getCategory() != null && lead.contains(p.getCategory().getId()))))
+                .toList();
+    }
+
+    /**
+     * The primary category and everything under it, by its English name (configurable).
+     *
+     * <p>By name rather than a pasted id, so this survives a rebuilt category tree, and including
+     * descendants so a future "Laptops > Gaming" still leads. Cached for a few minutes: it is read
+     * on every catalogue page and the tree changes rarely.
+     */
+    private java.util.Set<UUID> primaryCategoryIds() {
+        java.util.Set<UUID> cached = primaryCategoryIdsCache;
+        if (cached != null && System.currentTimeMillis() - primaryCategoryIdsAt < 300_000L) {
+            return cached;
+        }
+        java.util.Set<UUID> ids = new java.util.HashSet<>();
+        try {
+            categoryTranslationRepository
+                    .findFirstByLanguageIgnoreCaseAndNameIgnoreCase("EN", primaryCategoryName)
+                    .ifPresent(translation -> {
+                        UUID rootId = translation.getCategory().getId();
+                        ids.add(rootId);
+                        // Descendants, walked over the whole (small) tree rather than recursively
+                        // querying: a category list is tens of rows, and this runs every 5 minutes.
+                        List<com.buyology.ecommerce.product.domain.ProductCategory> allCategories =
+                                categoryRepository.findAll();
+                        boolean grew = true;
+                        while (grew) {
+                            grew = false;
+                            for (var category : allCategories) {
+                                if (category.getParent() != null
+                                        && ids.contains(category.getParent().getId())
+                                        && ids.add(category.getId())) {
+                                    grew = true;
+                                }
+                            }
+                        }
+                    });
+        } catch (RuntimeException e) {
+            log.warn("[CATALOG] Could not resolve the primary category '{}': {}",
+                    primaryCategoryName, e.getMessage());
+        }
+        primaryCategoryIdsCache = ids;
+        primaryCategoryIdsAt = System.currentTimeMillis();
+        return ids;
+    }
 
     /** Selects the B2B catalog candidate products (country-scoped when a country is supplied). */
     private List<Product> selectB2bProducts(String countryCode) {
@@ -1100,10 +1179,16 @@ public class ProductService {
             return searchProducts(filter, lang, countryCode, currency, lat, lng);
         }
 
-        List<UUID> productIds = searchResults.stream()
-                .map(com.buyology.ecommerce.product.search.domain.ProductDocument::getId)
-                .collect(Collectors.toList());
-        
+        // The index first (it ranks, and it matches prefixes and typos), then the database's own
+        // title/SKU match for anything the index has not caught up with. A product added, renamed
+        // or re-activated since it was last indexed used to be invisible to search while sitting
+        // on the shelf; the shop is small enough that asking twice costs nothing.
+        java.util.LinkedHashSet<UUID> productIds = mergeKeepingOrder(
+                searchResults.stream()
+                        .map(com.buyology.ecommerce.product.search.domain.ProductDocument::getId)
+                        .toList(),
+                databaseMatchIds(query));
+
         if (productIds.isEmpty()) {
             return ApiResponse.success(List.of(), "No products found matching the query");
         }
@@ -1127,6 +1212,37 @@ public class ProductService {
         
         applyBatchCountryPricing(responses, orderedProducts, countryCode, currency, lat, lng);
         return ApiResponse.success(responses, "Search results fetched successfully");
+    }
+
+    /** Ranked ids first, then anything the second list adds. Order is the ranking, so it is kept. */
+    static java.util.LinkedHashSet<UUID> mergeKeepingOrder(List<UUID> ranked, List<UUID> extra) {
+        java.util.LinkedHashSet<UUID> merged = new java.util.LinkedHashSet<>(ranked);
+        merged.addAll(extra);
+        return merged;
+    }
+
+    /**
+     * Products whose title or SKU contains the words typed, straight from the database.
+     *
+     * <p>The recall net under the search index: it needs no index at all, so a stale or
+     * half-rebuilt index cannot hide a product that is on sale. Capped, and never allowed to fail
+     * the search — an empty list simply means the index result stands on its own.
+     */
+    private List<UUID> databaseMatchIds(String query) {
+        String text = query == null ? "" : query.trim();
+        if (text.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return productRepository
+                    .searchAdmin(text, "ACTIVE", org.springframework.data.domain.PageRequest.of(0, 100))
+                    .getContent().stream()
+                    .map(Product::getId)
+                    .toList();
+        } catch (RuntimeException e) {
+            log.warn("[SEARCH] Database match failed for '{}': {}", text, e.getMessage());
+            return List.of();
+        }
     }
 
     @Transactional

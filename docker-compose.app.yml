@@ -97,6 +97,8 @@ services:
       # products.available_quantity (V55) is the number that actually limits orders and needs no flag,
       # because it is null — "not tracked", no ceiling — until somebody states a figure.
       ENFORCE_PRODUCT_STOCK: ${ENFORCE_PRODUCT_STOCK:-false}
+      # Category the "All products" page leads with, by English name.
+      CATALOG_FIRST_CATEGORY: ${CATALOG_FIRST_CATEGORY:-Laptop}
 
       # ── VAT ──
       # Catalogue prices INCLUDE this. Nothing is added at checkout — the rate is used to work out how

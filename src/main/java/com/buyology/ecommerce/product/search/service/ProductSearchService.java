@@ -14,6 +14,7 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.IndexOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -93,17 +94,60 @@ public class ProductSearchService {
         productSearchRepository.deleteById(product.getId());
     }
 
+    /**
+     * How many hits to ask Elasticsearch for.
+     *
+     * <p>Not optional. The query carried no size, so Elasticsearch returned its default TEN, and
+     * the caller then dropped the ones that were not active or not sold in the shopper's country —
+     * after the cut. "macbook" came back empty on a shop with four MacBooks in stock, because ten
+     * other documents had scored higher and been filtered away afterwards.
+     */
+    private static final int MAX_HITS = 100;
+
+    /**
+     * Finds products for a shopper's words.
+     *
+     * <p>Three ways to match, because one is never enough for a laptop shop:
+     * <ul>
+     *   <li><strong>Prefix</strong> — "mac" must find MacBook, and "thinkp" ThinkPad. Fuzziness
+     *       cannot do this: on a three-letter word AUTO allows no edits at all, and "mac" is four
+     *       edits away from "macbook".</li>
+     *   <li><strong>Fuzzy</strong> — "macbok" and "lattitude" are typos of things we sell.</li>
+     *   <li><strong>Category, brand and SKU</strong> — "lenovo", "audio", a code off a label.</li>
+     * </ul>
+     *
+     * <p>Only ACTIVE documents, filtered inside the query rather than after it, so the hits that
+     * come back are hits that can be bought.
+     */
     public List<ProductDocument> search(String query) {
+        String text = query == null ? "" : query.trim();
+        if (text.isEmpty()) {
+            return Collections.emptyList();
+        }
         NativeQuery nativeQuery = NativeQuery.builder()
                 .withQuery(q -> q
                         .bool(b -> b
+                                .filter(f -> f.term(t -> t.field("status").value("ACTIVE")))
+                                .minimumShouldMatch("1")
+                                .should(s -> s
+                                        .nested(n -> n
+                                                .path("translations")
+                                                .query(nq -> nq
+                                                        .multiMatch(m -> m
+                                                                .fields("translations.title^4")
+                                                                .query(text)
+                                                                .type(TextQueryType.PhrasePrefix)
+                                                        )
+                                                )
+                                        )
+                                )
                                 .should(s -> s
                                         .nested(n -> n
                                                 .path("translations")
                                                 .query(nq -> nq
                                                         .multiMatch(m -> m
                                                                 .fields("translations.title^2", "translations.description")
-                                                                .query(query)
+                                                                .query(text)
                                                                 .fuzziness("AUTO")
                                                         )
                                                 )
@@ -112,12 +156,13 @@ public class ProductSearchService {
                                 .should(s -> s
                                         .multiMatch(m -> m
                                                 .fields("categoryName", "brandName", "sku")
-                                                .query(query)
+                                                .query(text)
                                                 .fuzziness("AUTO")
                                         )
                                 )
                         )
                 )
+                .withPageable(org.springframework.data.domain.PageRequest.of(0, MAX_HITS))
                 .build();
 
         try {
