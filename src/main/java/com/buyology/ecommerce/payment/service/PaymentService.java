@@ -51,6 +51,13 @@ public class PaymentService {
     private final PaymentRefundRepository refundRepo;
     private final RefundClaimStore refundClaimStore;
     private final PaymobClient paymobClient;
+
+    /**
+     * For locking and re-reading one payment row before settling it. Field-injected so the
+     * constructor keeps its shape.
+     */
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
     private final ObjectMapper objectMapper;
     private final UserProfileService userProfileService;
     private final UserAddressRepository addressRepo;
@@ -733,6 +740,9 @@ public class PaymentService {
             return;
         }
 
+        // Lock and re-read before deciding, as the re-check and the sweep do. Without it a webhook
+        // that read the row before a sweep settled it could overwrite SUCCESS and publish again.
+        entityManager.refresh(transaction, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         log.info("[WEBHOOK] Matched to Transaction: id={}, currentStatus={}", transaction.getId(), transaction.getStatus());
 
         if (isTerminal(transaction.getStatus())) {
@@ -743,12 +753,15 @@ public class PaymentService {
 
         // 4. Process status update
         try {
+            PaymentStatus before = transaction.getStatus();
             applyWebhookToTransaction(transaction, obj, providerTxnId);
             transactionRepo.saveAndFlush(transaction);
 
             log.info("[WEBHOOK] Transaction {} updated to {}", transaction.getId(), transaction.getStatus());
 
-            publishSettlementEvents(transaction);
+            if (transaction.getStatus() != before) {
+                publishSettlementEvents(transaction);
+            }
 
             saveWebhookEvent(provider, transaction, providerTxnIdStr, hmacValid, rawPayload, null);
         } catch (Exception e) {
@@ -878,111 +891,183 @@ public class PaymentService {
                     "This order already has a settled payment.");
         }
 
-        // An order can carry several unsettled attempts — a card try, then an instalment try, or a
-        // reload of the payment page. Prefer the one the gateway actually acknowledged (it has a
-        // provider transaction id) and, among those, the newest. Picking arbitrarily meant
-        // re-checking an abandoned attempt and reporting "no provider transaction id" for an order
-        // that had genuinely been paid on another attempt.
+        // Every unsettled attempt, newest first. An order can carry several — a card try, then an
+        // instalment try, or a reload of the payment page — and the paid one is not necessarily
+        // the newest, nor the one the gateway happened to tell us about.
         List<PaymentStatus> unsettled = List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING);
-        PaymentTransaction tx = all.stream()
+        List<PaymentTransaction> attempts = all.stream()
                 .filter(t -> unsettled.contains(t.getStatus()))
-                .sorted(Comparator
-                        .comparing((PaymentTransaction t) -> t.getPaymobTransactionId() != null)
-                        .thenComparing(t -> t.getCreatedAt() == null ? Instant.EPOCH : t.getCreatedAt())
+                .sorted(Comparator.comparing(
+                        (PaymentTransaction t) -> t.getCreatedAt() == null ? Instant.EPOCH : t.getCreatedAt())
                         .reversed())
-                .findFirst()
-                .orElse(null);
-        if (tx == null) {
+                .toList();
+        if (attempts.isEmpty()) {
             return new RecheckResult(false, null,
                     "No pending payment found for this order — nothing to re-check.");
         }
 
-        // The id to ask Paymob about: what the gateway told us, or what an admin read off the
-        // Paymob dashboard for a payment whose webhook never reached us at all.
-        String providerTxnId = tx.getPaymobTransactionId() != null
-                ? String.valueOf(tx.getPaymobTransactionId())
-                : (providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim());
-
-        PaymentProvider provider = tx.getMethodConfig() != null
-                ? tx.getMethodConfig().getProvider()
-                : providerRepo.findFirstByIsActiveTrue().orElse(null);
-        if (provider == null) {
-            throw new IllegalStateException("No payment provider configured for this transaction");
+        String typed = providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim();
+        if (typed != null && !typed.isBlank()) {
+            return recheckWithTypedId(orderId, attempts, typed);
         }
 
-        if (providerTxnId == null || providerTxnId.isBlank()) {
-            // No webhook ever reached us, so we never learned Paymob's id for this payment. Ask
-            // them by OUR reference instead before giving up — this is the case that left a paid
-            // Tabby order unsettled, and it is recoverable without a human reading the dashboard.
-            JsonNode found = null;
-            try {
-                found = paymobClient.inquireByMerchantOrderId(
-                        provider.getApiKey(), provider.getBaseUrl(), tx.getMerchantOrderId());
-            } catch (RuntimeException gatewayFailure) {
-                log.warn("[RECHECK] Merchant-order inquiry failed for order {} ({}): {}",
-                        orderId, tx.getMerchantOrderId(), gatewayFailure.getMessage());
+        // Without a typed id this only ever writes what Paymob confirms — paid, or pending with its
+        // transaction id — and never marks an attempt FAILED. It looks at every attempt, and an old
+        // abandoned card try that Paymob calls failed must not fail an order whose instalment
+        // payment is still settling. Failing an order (and releasing its promo code) takes an
+        // admin naming the exact transaction.
+        // The answer reported is the most important one across all attempts, not the last one
+        // asked: a lookup that failed must not be hidden behind an older abandoned attempt's "not
+        // found", nor a payment still settling behind it.
+        RecheckResult best = null;
+        for (PaymentTransaction tx : attempts) {
+            GatewayLookup lookup = lookUpAtGateway(orderId, tx);
+            RecheckResult result = lookup.reply() == null
+                    ? new RecheckResult(false, tx.getStatus().name(), lookup.note(), lookup.failed())
+                    : settleFromGateway(orderId, tx, lookup.reply(), false);
+            if (result.settled()) {
+                return result;
             }
-            if (found != null && found.hasNonNull("id")) {
-                providerTxnId = found.get("id").asText();
-                log.warn("[RECHECK] Recovered Paymob transaction {} for order {} by merchant order "
-                        + "id {} — no webhook had ever arrived", providerTxnId, orderId,
-                        tx.getMerchantOrderId());
-            } else {
-                return new RecheckResult(false, tx.getStatus().name(),
-                        "No webhook reached us for this payment and Paymob has no transaction under "
-                                + "our reference (" + tx.getMerchantOrderId() + "), which normally "
-                                + "means the shopper never completed payment. If the Paymob "
-                                + "dashboard shows otherwise, enter its transaction id here.");
+            if (best == null || importance(result) > importance(best)) {
+                best = result;
             }
         }
+        return best;
+    }
 
-        JsonNode obj;
+    /** Could-not-ask outranks still-pending, which outranks not-paid or not-found. */
+    private static int importance(RecheckResult result) {
+        if (result.gatewayUnreachable()) return 3;
+        if (PaymentStatus.PROCESSING.name().equals(result.status())) return 2;
+        return 1;
+    }
+
+    /** What Paymob said about one attempt, or why we could not ask. */
+    private record GatewayLookup(JsonNode reply, String note, boolean failed) {
+        GatewayLookup(JsonNode reply, String note) {
+            this(reply, note, false);
+        }
+    }
+
+    /**
+     * Finds an attempt's transaction at Paymob using only what we hold: the transaction id a
+     * callback gave us, Paymob's order id (stored for every attempt at creation), or our own
+     * reference. No hand-typed id needed — which is what lets the sweep settle a Tabby or Tamara
+     * payment whose callbacks never reached us.
+     */
+    private GatewayLookup lookUpAtGateway(UUID orderId, PaymentTransaction tx) {
+        PaymentProvider provider = providerFor(tx);
         try {
-            obj = paymobClient.getTransaction(
-                    provider.getSecretKey(), provider.getApiKey(), provider.getBaseUrl(), providerTxnId);
-        } catch (RuntimeException gatewayFailure) {
-            // Do NOT bubble this out as a 502. An admin holding a transaction id from Paymob's own
-            // dashboard needs to read what Paymob said — "not found", "unauthorised" — because that
-            // is the difference between a wrong id and a credential problem. An opaque gateway
-            // error tells them nothing and leaves a paid order unsettled.
-            log.error("[RECHECK] Paymob lookup failed for order {} / transaction {}",
-                    orderId, providerTxnId, gatewayFailure);
-            return new RecheckResult(false, tx.getStatus().name(),
-                    "Paymob would not answer for transaction " + providerTxnId + ": "
-                            + gatewayFailure.getMessage());
-        }
-
-        // A hand-entered id must be proven to belong to THIS payment before it can settle it.
-        // The money guard inside applyWebhookToTransaction already refuses a mismatched amount or
-        // currency; this additionally holds Paymob's own merchant_order_id to our transaction, so
-        // a typo cannot mark someone else's order paid.
-        if (tx.getPaymobTransactionId() == null) {
-            String claimedMoid = obj.has("order") && obj.get("order").hasNonNull("merchant_order_id")
-                    ? obj.get("order").get("merchant_order_id").asText()
-                    : null;
-            if (claimedMoid != null && tx.getMerchantOrderId() != null
-                    && !claimedMoid.equals(tx.getMerchantOrderId())) {
-                return new RecheckResult(false, tx.getStatus().name(),
-                        "That Paymob transaction belongs to a different order (" + claimedMoid
-                                + "). Nothing was changed.");
+            if (tx.getPaymobTransactionId() != null) {
+                JsonNode reply = paymobClient.getTransaction(provider.getSecretKey(), provider.getApiKey(),
+                        provider.getBaseUrl(), String.valueOf(tx.getPaymobTransactionId()));
+                // An instalment approval can settle as a separate capture under the same Paymob
+                // order. A pending answer for the id we hold is therefore not the last word.
+                if (!isSuccess(reply) && tx.getPaymobOrderId() != null) {
+                    JsonNode byOrder = paymobClient.inquireTransaction(provider.getApiKey(),
+                            provider.getBaseUrl(), tx.getPaymobOrderId(), null);
+                    if (isSuccess(byOrder)) {
+                        return new GatewayLookup(byOrder, null);
+                    }
+                }
+                return new GatewayLookup(reply, null);
             }
+            // By Paymob's order id when we have it — every attempt since intention creation stores it.
+            // Our reference is asked only when we do not: Paymob files the reference we send as
+            // merchant_order_id under a field it does not echo reliably, so asking by it on top of
+            // the order id found nothing and doubled every lookup.
+            JsonNode reply = paymobClient.inquireTransaction(provider.getApiKey(), provider.getBaseUrl(),
+                    tx.getPaymobOrderId(), tx.getMerchantOrderId());
+            if (reply == null) {
+                return new GatewayLookup(null, "Paymob has no transaction under Paymob order "
+                        + tx.getPaymobOrderId() + " or our reference " + tx.getMerchantOrderId()
+                        + ", which normally means the shopper did not finish paying. If the Paymob "
+                        + "dashboard shows a payment, enter its transaction id here.");
+            }
+            if (isSuccess(reply)) {
+                log.warn("[RECHECK] Found paid Paymob transaction {} for order {} (attempt {}, Paymob "
+                        + "order {}) without any callback having reached us", reply.path("id").asText(),
+                        orderId, tx.getId(), tx.getPaymobOrderId());
+            }
+            return new GatewayLookup(reply, null);
+        } catch (RuntimeException gatewayFailure) {
+            // Not "the customer did not pay": we could not find out. Saying so is what separates a
+            // credentials or outage problem from an abandoned checkout.
+            log.warn("[RECHECK] Could not look up order {} (attempt {}) at Paymob: {}",
+                    orderId, tx.getId(), gatewayFailure.getMessage());
+            return new GatewayLookup(null, "Paymob did not answer the lookup: "
+                    + gatewayFailure.getMessage(), true);
         }
+    }
 
+    /**
+     * Applies Paymob's answer about one attempt, after proving the answer belongs to it.
+     *
+     * <p>Locks and re-reads the attempt first. Both replicas run the sweep and a webhook can land
+     * at the same moment; whoever takes the row second finds it settled and publishes nothing, so
+     * an order is marked paid — and dispatched — once.
+     *
+     * @param mayFail whether Paymob's answer may mark the attempt FAILED (only for an admin's
+     *                typed transaction id); otherwise only paid and pending are written
+     */
+    private RecheckResult settleFromGateway(UUID orderId, PaymentTransaction tx, JsonNode reply,
+                                            boolean mayFail) {
+        String refusal = replyDoesNotBelong(tx, reply);
+        if (refusal != null) {
+            return new RecheckResult(false, tx.getStatus().name(), refusal);
+        }
+        if (isReversal(reply)) {
+            log.warn("[RECHECK] Order {}: Paymob reports transaction {} as refunded or voided; not "
+                    + "settling it", orderId, reply.path("id").asText());
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "Paymob shows this payment as refunded or voided. Nothing was changed.");
+        }
         Long numericTxnId;
         try {
-            numericTxnId = Long.valueOf(providerTxnId);
+            numericTxnId = Long.valueOf(reply.path("id").asText());
         } catch (NumberFormatException e) {
             return new RecheckResult(false, tx.getStatus().name(),
-                    "\"" + providerTxnId + "\" is not a Paymob transaction id.");
+                    "\"" + reply.path("id").asText() + "\" is not a Paymob transaction id.");
+        }
+        boolean success = isSuccess(reply);
+        boolean pending = reply.path("pending").asBoolean(false);
+        if (success && !webhookMoneyMatchesTransaction(tx, reply)) {
+            // Money was taken, just not the amount this order costs. Failing the order would hide a
+            // captured payment behind "not paid"; a human decides, whoever asked.
+            log.warn("[RECHECK] Order {}: Paymob transaction {} is paid but its amount or currency "
+                    + "does not match attempt {}; left for a human", orderId, numericTxnId, tx.getId());
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "Paymob shows a payment whose amount or currency does not match this order. "
+                            + "Nothing was changed.");
+        }
+        if (!success && !pending && !mayFail) {
+            return new RecheckResult(false, tx.getStatus().name(), "Paymob reports this attempt as not paid.");
+        }
+        if (!success && pending && tx.getStatus() == PaymentStatus.PROCESSING
+                && numericTxnId.equals(tx.getPaymobTransactionId())) {
+            // Nothing new: already recorded as pending under this id. No lock, no write.
+            return new RecheckResult(false, tx.getStatus().name(), "Paymob still reports this payment as pending.");
         }
 
-        applyWebhookToTransaction(tx, obj, numericTxnId);
+        entityManager.refresh(tx, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (tx.getStatus() != PaymentStatus.PENDING && tx.getStatus() != PaymentStatus.PROCESSING) {
+            // Settled by a webhook or the other replica while we were asking; they published.
+            return new RecheckResult(tx.getStatus() == PaymentStatus.SUCCESS, tx.getStatus().name(),
+                    tx.getStatus() == PaymentStatus.SUCCESS
+                            ? "Paymob confirms this payment. The order has been settled."
+                            : "This payment was settled as " + tx.getStatus() + " meanwhile.");
+        }
+        PaymentStatus before = tx.getStatus();
+        applyWebhookToTransaction(tx, reply, numericTxnId);
         transactionRepo.saveAndFlush(tx);
-        publishSettlementEvents(tx);
+        if (tx.getStatus() != before) {
+            publishSettlementEvents(tx);
+        }
 
-        log.warn("[RECHECK] Order {} payment re-checked against Paymob — transaction {} is now {}",
-                orderId, tx.getId(), tx.getStatus());
-
+        if (tx.getStatus() != before) {
+            log.warn("[RECHECK] Order {} payment re-checked against Paymob — attempt {} is now {}",
+                    orderId, tx.getId(), tx.getStatus());
+        }
         String message = switch (tx.getStatus()) {
             case SUCCESS -> "Paymob confirms this payment. The order has been settled.";
             case PROCESSING -> "Paymob still reports this payment as pending.";
@@ -993,8 +1078,136 @@ public class PaymentService {
         return new RecheckResult(tx.getStatus() == PaymentStatus.SUCCESS, tx.getStatus().name(), message);
     }
 
-    /** Outcome of an admin re-check: what the gateway said, in words an admin can act on. */
-    public record RecheckResult(boolean settled, String status, String message) {}
+    /**
+     * An admin's re-check with a Paymob transaction id read off the dashboard. Always honoured —
+     * even when a callback had already given us an id — and bound to whichever attempt it belongs
+     * to, by Paymob's order id or our reference.
+     */
+    private RecheckResult recheckWithTypedId(UUID orderId, List<PaymentTransaction> attempts, String typed) {
+        PaymentTransaction newest = attempts.get(0);
+        PaymentProvider provider = providerFor(newest);
+        JsonNode reply;
+        try {
+            reply = paymobClient.getTransaction(
+                    provider.getSecretKey(), provider.getApiKey(), provider.getBaseUrl(), typed);
+        } catch (RuntimeException gatewayFailure) {
+            // An admin holding an id from Paymob's own dashboard needs to read what Paymob said —
+            // "not found", "unauthorised" — to tell a wrong id from a credentials problem.
+            log.error("[RECHECK] Paymob lookup failed for order {} / transaction {}",
+                    orderId, typed, gatewayFailure);
+            return new RecheckResult(false, newest.getStatus().name(),
+                    "Paymob would not answer for transaction " + typed + ": " + gatewayFailure.getMessage());
+        }
+        // Fail closed: the typed transaction must name one of this order's attempts by Paymob's
+        // order id or our reference. The money guard alone would let another customer's payment of
+        // the same price settle this order.
+        PaymentTransaction target = attempts.stream()
+                .filter(t -> belongsByReference(t, reply))
+                .findFirst()
+                .orElse(null);
+        if (target == null) {
+            return new RecheckResult(false, newest.getStatus().name(),
+                    "Paymob transaction " + typed + " does not name any payment attempt of this order "
+                            + "(its Paymob order " + reply.path("order").path("id").asText("?")
+                            + "). Nothing was changed.");
+        }
+
+        boolean failure = !isSuccess(reply) && !reply.path("pending").asBoolean(false);
+        if (failure) {
+            // A declined try is not proof the attempt failed: Unified Checkout lets the customer
+            // retry under the same Paymob order, so a decline can sit beside an approval. Only a
+            // decline that IS the transaction we hold, or one with nothing better under the order,
+            // may fail it — otherwise pasting the wrong row off Paymob's order page fails an order
+            // whose instalment payment is going through.
+            boolean isOurs = target.getPaymobTransactionId() != null
+                    && typed.equals(String.valueOf(target.getPaymobTransactionId()));
+            if (!isOurs && target.getPaymobTransactionId() != null) {
+                return new RecheckResult(false, target.getStatus().name(),
+                        "Paymob transaction " + typed + " was declined, but this payment is recorded "
+                                + "under transaction " + target.getPaymobTransactionId()
+                                + ". Nothing was changed.");
+            }
+            if (!isOurs && target.getPaymobOrderId() != null) {
+                JsonNode better;
+                try {
+                    better = paymobClient.inquireTransaction(provider.getApiKey(), provider.getBaseUrl(),
+                            target.getPaymobOrderId(), null);
+                } catch (RuntimeException e) {
+                    return new RecheckResult(false, target.getStatus().name(),
+                            "Paymob transaction " + typed + " was declined, and Paymob could not be asked "
+                                    + "whether the order has another payment: " + e.getMessage()
+                                    + ". Nothing was changed.", true);
+                }
+                if (better != null && (isSuccess(better) || better.path("pending").asBoolean(false))
+                        && !typed.equals(better.path("id").asText())) {
+                    return settleFromGateway(orderId, target, better, false);
+                }
+            }
+        }
+        return settleFromGateway(orderId, target, reply, true);
+    }
+
+    /** Why this reply must not be applied to this attempt, or null when it may be. */
+    static String replyDoesNotBelong(PaymentTransaction tx, JsonNode reply) {
+        JsonNode order = reply.path("order");
+        String replyMoid = order.hasNonNull("merchant_order_id") ? order.get("merchant_order_id").asText() : null;
+        Long replyOrderId = order.hasNonNull("id") ? order.get("id").asLong() : null;
+        if (belongsByReference(tx, reply)) {
+            return null;
+        }
+        boolean moidConflict = replyMoid != null && tx.getMerchantOrderId() != null
+                && !replyMoid.equals(tx.getMerchantOrderId());
+        boolean orderConflict = replyOrderId != null && tx.getPaymobOrderId() != null
+                && !replyOrderId.equals(tx.getPaymobOrderId());
+        if (moidConflict || orderConflict) {
+            return "That Paymob transaction belongs to a different order ("
+                    + (replyMoid != null ? replyMoid : "Paymob order " + replyOrderId)
+                    + "). Nothing was changed.";
+        }
+        return null;
+    }
+
+    /** True when Paymob's reply names this attempt by its Paymob order id or our reference. */
+    static boolean belongsByReference(PaymentTransaction tx, JsonNode reply) {
+        JsonNode order = reply.path("order");
+        boolean byOrderId = order.hasNonNull("id") && tx.getPaymobOrderId() != null
+                && order.get("id").asLong() == tx.getPaymobOrderId();
+        boolean byReference = order.hasNonNull("merchant_order_id") && tx.getMerchantOrderId() != null
+                && order.get("merchant_order_id").asText().equals(tx.getMerchantOrderId());
+        return byOrderId || byReference;
+    }
+
+    private static boolean isSuccess(JsonNode reply) {
+        return reply != null && reply.path("success").asBoolean(false);
+    }
+
+    /** A refund or void, or a payment since refunded or voided: never grounds to mark an order paid. */
+    private static boolean isReversal(JsonNode reply) {
+        return reply.path("is_refund").asBoolean(false) || reply.path("is_void").asBoolean(false)
+                || reply.path("is_refunded").asBoolean(false) || reply.path("is_voided").asBoolean(false);
+    }
+
+    private PaymentProvider providerFor(PaymentTransaction tx) {
+        PaymentProvider provider = tx.getMethodConfig() != null
+                ? tx.getMethodConfig().getProvider()
+                : providerRepo.findFirstByIsActiveTrue().orElse(null);
+        if (provider == null) {
+            throw new IllegalStateException("No payment provider configured for this transaction");
+        }
+        return provider;
+    }
+
+    /**
+     * Outcome of a re-check: what the gateway said, in words an admin can act on.
+     *
+     * @param gatewayUnreachable true when Paymob could not be asked at all (refused credentials,
+     *                           outage) — as opposed to Paymob answering that nothing was paid
+     */
+    public record RecheckResult(boolean settled, String status, String message, boolean gatewayUnreachable) {
+        public RecheckResult(boolean settled, String status, String message) {
+            this(settled, status, message, false);
+        }
+    }
 
     /**
      * Publishes the events a settled (or failed) payment must trigger — the order's paid path,

@@ -355,7 +355,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         return request.getRemoteAddr();
     }
 
-    private RateLimitTier determineTier(String path) {
+    RateLimitTier determineTier(String path) {
         // Credential / OTP / password endpoints — strongest throttle (brute force,
         // credential stuffing, OTP guessing, token-setup abuse). Per-account limits are
         // additionally enforced in the service layer (LoginAttemptService / OTP attempts).
@@ -411,6 +411,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         // customer's chat budget on browsing and 429 them before they had asked anything.
         if (path.equals("/api/assistant/chat")) {
             return RateLimitTier.ASSISTANT;
+        }
+        // Paymob's server callback and the signed browser return that forwards it. In PUBLIC they
+        // shared one bucket with every shopper on the platform (forwarded headers are untrusted, so
+        // the key is the proxy's address), and a 429 there is a paid order that never learns it was
+        // paid, with no log line to show it. Throttled still — the webhook is unauthenticated and
+        // stores what it rejects — just never starved by browsing.
+        if (path.equals("/api/payments/webhook") || path.equals("/api/payments/confirm-redirect")) {
+            return RateLimitTier.PAYMENT_CALLBACK;
         }
         return RateLimitTier.PUBLIC;
     }
@@ -511,6 +519,16 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(12).refillGreedy(12, Duration.ofMinutes(1)).build())
+                        .build();
+            }
+        },
+
+        // 600 req/min — Paymob callbacks and signed payment returns, apart from browsing traffic.
+        PAYMENT_CALLBACK {
+
+            BucketConfiguration buildConfiguration() {
+                return BucketConfiguration.builder()
+                        .addLimit(Bandwidth.builder().capacity(600).refillGreedy(600, Duration.ofMinutes(1)).build())
                         .build();
             }
         },

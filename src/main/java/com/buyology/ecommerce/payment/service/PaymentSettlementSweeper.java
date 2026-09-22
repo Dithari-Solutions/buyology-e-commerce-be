@@ -82,6 +82,7 @@ public class PaymentSettlementSweeper {
         }
 
         int settled = 0;
+        int unreachable = 0;
         for (UUID orderId : orderIds) {
             try {
                 // Through the proxy on purpose: each order settles in its own transaction, so one
@@ -92,6 +93,15 @@ public class PaymentSettlementSweeper {
                     settled++;
                     log.warn("[SETTLEMENT-SWEEP] Recovered order {} — the gateway had settled it but "
                             + "no webhook ever applied that here", orderId);
+                } else if (result.gatewayUnreachable()) {
+                    // The failure that hid this for weeks: "we could not ask" used to read exactly
+                    // like "nobody paid". Loud, because every paid order behind it is stuck.
+                    unreachable++;
+                    log.warn("[SETTLEMENT-SWEEP] Could not check order {} with Paymob: {}",
+                            orderId, result.message());
+                } else {
+                    // Usually an abandoned checkout, re-asked every run for the lookback window.
+                    log.debug("[SETTLEMENT-SWEEP] Order {} not settled: {}", orderId, result.message());
                 }
             } catch (RuntimeException e) {
                 // A gateway hiccup on one order must not abandon the rest of the batch; the next
@@ -101,6 +111,6 @@ public class PaymentSettlementSweeper {
         }
 
         log.info("[SETTLEMENT-SWEEP] Checked {} unsettled order payment(s) against the gateway; "
-                + "recovered {}", orderIds.size(), settled);
+                + "recovered {}, could not reach Paymob for {}", orderIds.size(), settled, unreachable);
     }
 }

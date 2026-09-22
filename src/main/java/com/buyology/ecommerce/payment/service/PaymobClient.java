@@ -10,6 +10,8 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Instant;
+
 /**
  * Thin HTTP wrapper for the Paymob Intention API (v2).
  *
@@ -172,40 +174,93 @@ public class PaymobClient {
     }
 
     /**
-     * Ask Paymob about a payment using <em>our</em> reference for it, when we never learned theirs.
+     * Asks Paymob for the transaction under one of its orders — the lookup the settlement sweep
+     * uses when no callback ever told us Paymob's transaction id.
      *
-     * <p>{@link #getTransaction} needs a Paymob transaction id, which only ever reaches us in a
-     * webhook. When no webhook arrives at all — the failure that left a paid Tabby order sitting in
-     * PENDING_PAYMENT — there is no id to ask about, and the payment is invisible to every
-     * automatic recovery path. The merchant order id is the one handle we always hold, because we
-     * generated it ourselves when we created the intention.
+     * <p>Keyed on <strong>Paymob's own order id</strong> when we have it. We store it for every
+     * attempt (the intention's {@code intention_order_id}), and it is what Paymob's Transaction
+     * Inquiry documents: {@code {"order_id": ...}} with {@code Authorization: Bearer <token>}. The
+     * older lookup sent only our merchant reference, with the token in the body and no header —
+     * and a Tabby or Tamara payment that Paymob showed as paid came back as "no such transaction",
+     * which the sweep read as "the shopper never paid". Our merchant reference remains the fallback
+     * for an attempt with no Paymob order id. The token also stays in the body, so either auth
+     * style Paymob's regional API accepts is satisfied.
      *
-     * <p>Returns {@code null} rather than throwing when Paymob has nothing under that reference:
-     * for a sweep over many candidates, "this checkout was genuinely abandoned" is the ordinary
-     * case and must not read as a failure.
+     * @return Paymob's transaction object, or {@code null} when Paymob genuinely has none (404, an
+     *         empty reply, or no id) — for a sweep, an abandoned checkout is the ordinary case
+     * @throws PaymentGatewayException for anything else (refused credentials, 5xx, timeout), so a
+     *         credentials problem is never reported as "the customer did not pay"
      */
-    public JsonNode inquireByMerchantOrderId(String apiKey, String baseUrl, String merchantOrderId) {
-        if (apiKey == null || apiKey.isBlank() || merchantOrderId == null || merchantOrderId.isBlank()) {
+    public JsonNode inquireTransaction(String apiKey, String baseUrl, Long paymobOrderId,
+                                       String merchantOrderId) {
+        if (paymobOrderId == null && (merchantOrderId == null || merchantOrderId.isBlank())) {
             return null;
+        }
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "No Paymob API key is configured, so the payment cannot be looked up", null);
+        }
+        try {
+            return inquire(apiKey, baseUrl, paymobOrderId, merchantOrderId);
+        } catch (com.buyology.ecommerce.payment.exception.PaymentGatewayException e) {
+            if (!(e.getCause() instanceof org.springframework.web.client.HttpClientErrorException.Unauthorized
+                    || e.getCause() instanceof org.springframework.web.client.HttpClientErrorException.Forbidden)) {
+                throw e;
+            }
+            // A cached token Paymob no longer honours would otherwise fail every lookup until it
+            // aged out. Mint a fresh one and ask once more; a second refusal is real.
+            this.cachedToken = null;
+            return inquire(apiKey, baseUrl, paymobOrderId, merchantOrderId);
+        }
+    }
+
+    private JsonNode inquire(String apiKey, String baseUrl, Long paymobOrderId, String merchantOrderId) {
+        String token = authToken(apiKey, baseUrl);
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("auth_token", token);
+        if (paymobOrderId != null) {
+            body.put("order_id", paymobOrderId);
+        } else {
+            body.put("merchant_order_id", merchantOrderId);
+        }
+        try {
+            JsonNode result = post(baseUrl + "/api/ecommerce/orders/transaction_inquiry", body,
+                    "Bearer " + token, true);
+            return result != null && result.hasNonNull("id") ? result : null;
+        } catch (com.buyology.ecommerce.payment.exception.PaymentGatewayException e) {
+            if (e.getCause() instanceof org.springframework.web.client.HttpClientErrorException.NotFound) {
+                return null;   // Paymob has no transaction under that order: nothing to settle
+            }
+            throw e;
+        }
+    }
+
+    /** A short-lived Paymob auth token, minted from the API key and reused for 50 minutes. */
+    private String authToken(String apiKey, String baseUrl) {
+        CachedToken cached = this.cachedToken;
+        if (cached != null && cached.matches(apiKey, baseUrl) && Instant.now().isBefore(cached.expiresAt())) {
+            return cached.token();
         }
         ObjectNode authBody = objectMapper.createObjectNode();
         authBody.put("api_key", apiKey);
         JsonNode auth = post(baseUrl + "/api/auth/tokens", authBody, null);
-        String token = auth.hasNonNull("token") ? auth.get("token").asText() : null;
-        if (token == null || token.isBlank()) return null;
+        String token = auth != null && auth.hasNonNull("token") ? auth.get("token").asText() : null;
+        if (token == null || token.isBlank()) {
+            throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
+                    "Paymob did not issue an auth token for the configured API key", null);
+        }
+        // Paymob's tokens last an hour; renewing at 50 minutes keeps a sweep from racing expiry.
+        this.cachedToken = new CachedToken(Integer.toHexString(apiKey.hashCode()), baseUrl, token,
+                Instant.now().plus(java.time.Duration.ofMinutes(50)));
+        return token;
+    }
 
-        ObjectNode body = objectMapper.createObjectNode();
-        body.put("auth_token", token);
-        body.put("merchant_order_id", merchantOrderId);
-        try {
-            JsonNode result = post(baseUrl + "/api/ecommerce/orders/transaction_inquiry", body, null);
-            // An empty envelope, or one with no id, means Paymob has no such transaction — the
-            // shopper never got as far as paying. Not an error, just nothing to settle.
-            return result != null && result.hasNonNull("id") ? result : null;
-        } catch (RuntimeException notFound) {
-            log.debug("[PAYMOB] No transaction under merchant order id {}: {}",
-                    merchantOrderId, notFound.getMessage());
-            return null;
+    private volatile CachedToken cachedToken;
+
+    /** The key is held only as a hash, so a heap dump does not carry the API key twice. */
+    private record CachedToken(String keyHash, String baseUrl, String token, Instant expiresAt) {
+        boolean matches(String apiKey, String url) {
+            return keyHash.equals(Integer.toHexString(apiKey.hashCode())) && baseUrl.equals(url);
         }
     }
 
@@ -237,6 +292,15 @@ public class PaymobClient {
     }
 
     private JsonNode post(String url, ObjectNode body, String authHeader) {
+        return post(url, body, authHeader, false);
+    }
+
+    /**
+     * @param notFoundIsAnswer a 404 is an ordinary answer here ("no such transaction"), logged at
+     *                         DEBUG — the settlement sweep asks about every abandoned checkout for
+     *                         days, and logging each at ERROR would bury the failures that matter
+     */
+    private JsonNode post(String url, ObjectNode body, String authHeader, boolean notFoundIsAnswer) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -251,7 +315,11 @@ public class PaymobClient {
             // currency, malformed billing, etc.). The response body carries the real reason —
             // log it in full and propagate a trimmed version so it's diagnosable client-side.
             String responseBody = e.getResponseBodyAsString();
-            log.error("[PAYMOB] {} from {} — body={}", e.getStatusCode(), url, responseBody);
+            if (notFoundIsAnswer && e.getStatusCode().value() == 404) {
+                log.debug("[PAYMOB] 404 from {} — body={}", url, responseBody);
+            } else {
+                log.error("[PAYMOB] {} from {} — body={}", e.getStatusCode(), url, responseBody);
+            }
             throw new com.buyology.ecommerce.payment.exception.PaymentGatewayException(
                     "Payment provider rejected the request (" + e.getStatusCode() + "): "
                             + (responseBody == null || responseBody.isBlank() ? e.getMessage() : responseBody),
