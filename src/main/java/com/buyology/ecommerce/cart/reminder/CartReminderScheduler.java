@@ -43,9 +43,17 @@ public class CartReminderScheduler {
     public void sweep() {
         Instant hour = Instant.now().truncatedTo(ChronoUnit.HOURS);
         String task = "cart-reminder-" + hour.atZone(ZoneOffset.UTC).getHour();
-        if (!lock.claim(task, hour.atZone(ZoneOffset.UTC).toLocalDate())) {
-            return; // the other host has this hour
+        boolean claimed;
+        try {
+            claimed = lock.claim(task, hour.atZone(ZoneOffset.UTC).toLocalDate());
+        } catch (Exception losingTheRace) {
+            // The claim's own catch returns false, but a rolled-back REQUIRES_NEW transaction can
+            // still throw at its commit boundary. That is the lock working, not failing, so it is
+            // noted as a fact rather than as an hourly stack trace on whichever host loses.
+            log.debug("[CART-REMINDER] hour {} is claimed by the other host", task);
+            return;
         }
+        if (!claimed) return; // the other host has this hour
         try {
             service.sendDueReminders();
         } catch (Exception e) {

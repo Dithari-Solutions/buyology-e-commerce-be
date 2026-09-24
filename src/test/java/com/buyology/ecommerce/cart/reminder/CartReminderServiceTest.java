@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.cart.reminder;
 
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.customeremail.service.OptOutTokens;
 import com.buyology.ecommerce.notification.service.PushNotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class CartReminderServiceTest {
     private CartReminderRepository repository;
     private EmailService emailService;
     private PushNotificationService notifications;
+    private OptOutTokens optOutTokens;
 
     private static final UUID CART = UUID.randomUUID();
     private static final UUID USER = UUID.randomUUID();
@@ -37,6 +39,8 @@ class CartReminderServiceTest {
         repository = mock(CartReminderRepository.class);
         emailService = mock(EmailService.class);
         notifications = mock(PushNotificationService.class);
+        optOutTokens = mock(OptOutTokens.class);
+        when(optOutTokens.forUser(any())).thenReturn("opt-out-token");
     }
 
     private CartReminderService service() {
@@ -44,13 +48,14 @@ class CartReminderServiceTest {
     }
 
     private CartReminderService service(boolean enabled) {
-        return new CartReminderService(repository, emailService, notifications,
-                enabled, 4, 7, 100, "You left something in your cart", "https://buyology.online");
+        return new CartReminderService(repository, emailService, notifications, optOutTokens,
+                enabled, 4, 7, 100, "You left something in your cart",
+                "https://buyology.online", "https://api.buyology.online");
     }
 
     private static CartReminderRepository.Candidate candidate() {
         return new CartReminderRepository.Candidate(
-                CART, USER, "shopper@example.com", "Firdovsi", "AED", "opt-out-token");
+                CART, USER, "shopper@example.com", "Firdovsi", "AED");
     }
 
     private static CartReminderRepository.Line line(String title, int qty, String total) {
@@ -132,9 +137,11 @@ class CartReminderServiceTest {
         ArgumentCaptor<String> unsubscribe = ArgumentCaptor.forClass(String.class);
         verify(emailService).sendAbandonedCartEmail(any(), any(), any(), anyList(), any(),
                 url.capture(), unsubscribe.capture());
-        assertTrue(url.getValue().contains("/login?next=%2Fcart"), url.getValue());
-        assertTrue(unsubscribe.getValue().endsWith("/api/email/opt-out?token=opt-out-token"),
-                "every marketing email must carry a working opt-out: " + unsubscribe.getValue());
+        assertEquals("https://buyology.online/login?next=%2Fcart", url.getValue(),
+                "the button points at the STOREFRONT, not the API origin");
+        assertEquals("https://api.buyology.online/api/email/opt-out?token=opt-out-token",
+                unsubscribe.getValue(),
+                "every marketing email must carry a working opt-out");
     }
 
     @Test
@@ -170,7 +177,7 @@ class CartReminderServiceTest {
     void oneBrokenCartDoesNotEndTheRoundForTheCartsBehindIt() {
         UUID brokenCart = UUID.randomUUID();
         CartReminderRepository.Candidate broken = new CartReminderRepository.Candidate(
-                brokenCart, UUID.randomUUID(), "other@example.com", "Ali", "AED", "token-2");
+                brokenCart, UUID.randomUUID(), "other@example.com", "Ali", "AED");
         when(repository.findCandidates(any(), any(), anyInt())).thenReturn(List.of(broken, candidate()));
         when(repository.findLines(brokenCart)).thenThrow(new RuntimeException("bad row"));
         when(repository.findLines(CART)).thenReturn(List.of(line("Lenovo ThinkPad T490", 1, "899.00")));
@@ -182,9 +189,36 @@ class CartReminderServiceTest {
     }
 
     @Test
+    void noUnsubscribeTokenMeansNoEmailAtAll() {
+        // A footer reading "?token=null" sends the reader to "this link is not valid", and the next
+        // thing they reach for is the spam button. Not sending is the cheaper failure.
+        oneDueCart(line("Lenovo ThinkPad T490", 1, "899.00"));
+        when(optOutTokens.forUser(USER)).thenReturn(null);
+
+        assertEquals(0, service().sendDueReminders());
+        verifyNoInteractions(emailService);
+        verify(repository, never()).markReminded(any(), any());
+    }
+
+    @Test
+    void theTokenIsMintedPerCustomerRatherThanReadOffTheCart() {
+        oneDueCart(line("Lenovo ThinkPad T490", 1, "899.00"));
+        when(optOutTokens.forUser(USER)).thenReturn("freshly-minted");
+        when(emailService.sendAbandonedCartEmail(any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
+
+        service().sendDueReminders();
+
+        ArgumentCaptor<String> unsubscribe = ArgumentCaptor.forClass(String.class);
+        verify(optOutTokens).forUser(USER);
+        verify(emailService).sendAbandonedCartEmail(any(), any(), any(), anyList(), any(), any(),
+                unsubscribe.capture());
+        assertTrue(unsubscribe.getValue().endsWith("token=freshly-minted"), unsubscribe.getValue());
+    }
+
+    @Test
     void theSwitchOffSendsNothingAndAsksTheDatabaseNothing() {
         assertEquals(0, service(false).sendDueReminders());
-        verifyNoInteractions(repository, emailService, notifications);
+        verifyNoInteractions(repository, emailService, notifications, optOutTokens);
     }
 
     @Test

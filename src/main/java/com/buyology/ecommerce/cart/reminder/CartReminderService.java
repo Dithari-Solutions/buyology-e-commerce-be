@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.cart.reminder;
 
 import com.buyology.ecommerce.common.service.EmailService;
+import com.buyology.ecommerce.customeremail.service.OptOutTokens;
 import com.buyology.ecommerce.notification.service.PushNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,30 +36,40 @@ public class CartReminderService {
     private final CartReminderRepository repository;
     private final EmailService emailService;
     private final PushNotificationService notifications;
+    private final OptOutTokens optOutTokens;
     private final boolean enabled;
     private final Duration quietPeriod;
     private final Duration maxAge;
     private final int batchSize;
     private final String subject;
+    private final String webBaseUrl;
     private final String baseUrl;
 
     public CartReminderService(CartReminderRepository repository,
                                EmailService emailService,
                                PushNotificationService notifications,
+                               OptOutTokens optOutTokens,
                                @Value("${app.cart-reminder.enabled:true}") boolean enabled,
                                @Value("${app.cart-reminder.quiet-hours:4}") long quietHours,
                                @Value("${app.cart-reminder.max-age-days:7}") long maxAgeDays,
                                @Value("${app.cart-reminder.batch-size:100}") int batchSize,
                                @Value("${app.cart-reminder.subject:You left something in your cart}") String subject,
+                               // The STOREFRONT, not the API: app.web-base-url is the property
+                               // documented for links in outbound email, and the one every other
+                               // customer-facing email link uses. app.base-url is the API origin
+                               // and stays where it belongs, on the opt-out endpoint.
+                               @Value("${app.web-base-url:https://buyology.online}") String webBaseUrl,
                                @Value("${app.base-url:https://buyology.online}") String baseUrl) {
         this.repository = repository;
         this.emailService = emailService;
         this.notifications = notifications;
+        this.optOutTokens = optOutTokens;
         this.enabled = enabled;
         this.quietPeriod = Duration.ofHours(quietHours);
         this.maxAge = Duration.ofDays(maxAgeDays);
         this.batchSize = batchSize;
         this.subject = subject;
+        this.webBaseUrl = webBaseUrl;
         this.baseUrl = baseUrl;
     }
 
@@ -112,11 +123,22 @@ public class CartReminderService {
                     .map(l -> new EmailService.CartLine(l.title(), l.quantity(), money(currency, l.totalPrice())))
                     .toList();
 
+            // No unsubscribe link, no email. A footer reading "?token=null" sends the recipient to
+            // a page telling them the link is invalid, and the next thing they reach for is "mark
+            // as spam" — which costs the sending domain far more than one skipped reminder.
+            String token = optOutTokens.forUser(candidate.userId());
+            if (token == null || token.isBlank()) {
+                log.warn("[CART-REMINDER] cart {} skipped: no opt-out token could be issued",
+                        candidate.cartId());
+                return false;
+            }
+
             // Through sign-in, because the cart lives on the server and the browser that opens the
-            // email may not know who the reader is. A signed-in reader passes straight through;
-            // a signed-out one signs in and lands on the same page, instead of on an empty cart.
-            String cartUrl = baseUrl + "/login?next=%2Fcart";
-            String unsubscribe = baseUrl + "/api/email/opt-out?token=" + candidate.optOutToken();
+            // email may not know who the reader is. A signed-in reader is bounced straight on by
+            // the login page; a signed-out one signs in and lands on the same page, instead of on
+            // an empty cart.
+            String cartUrl = webBaseUrl + "/login?next=%2Fcart";
+            String unsubscribe = baseUrl + "/api/email/opt-out?token=" + token;
 
             boolean emailed = emailService.sendAbandonedCartEmail(
                     candidate.email(), subject, candidate.firstName(),

@@ -133,7 +133,10 @@ public class EmailService {
         try {
             String itemCount = lines.size() == 1 ? "1 item" : lines.size() + " items";
             String html = loadTemplate("static/abandoned-cart.html")
-                    .replace("{{FIRST_NAME}}", escapeHtml(safeName(firstName)))
+                    // Braces neutralised as well as escaped: a customer whose profile name is
+                    // literally "{{ITEM_ROWS}}" would otherwise have the cart table spliced into
+                    // the greeting by the substitution below.
+                    .replace("{{FIRST_NAME}}", noTokens(escapeHtml(safeName(firstName))))
                     .replace("{{ITEM_COUNT}}", itemCount)
                     .replace("{{CART_TOTAL}}", escapeHtml(cartTotal))
                     .replace("{{CART_URL}}", escapeHtml(cartUrl))
@@ -153,6 +156,11 @@ public class EmailService {
     /** One line of a cart, as the reminder prints it. */
     public record CartLine(String title, int quantity, String price) {}
 
+    /** Stops interpolated text from being read as a template token by a later substitution. */
+    private static String noTokens(String s) {
+        return s == null ? "" : s.replace("{{", "&#123;&#123;");
+    }
+
     private static String cartRowsHtml(List<CartLine> lines) {
         StringBuilder sb = new StringBuilder();
         for (CartLine line : lines) {
@@ -164,7 +172,8 @@ public class EmailService {
                       </td>
                       <td align="right" valign="top" style="border-top:1px solid #ececf5;padding:14px 0;color:#1f1b3a;font-size:15px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;" dir="ltr">%s</td>
                     </tr>
-                    """.formatted(escapeHtml(line.title()), line.quantity(), escapeHtml(line.price())));
+                    """.formatted(noTokens(escapeHtml(line.title())), line.quantity(),
+                            noTokens(escapeHtml(line.price()))));
         }
         return sb.toString();
     }
