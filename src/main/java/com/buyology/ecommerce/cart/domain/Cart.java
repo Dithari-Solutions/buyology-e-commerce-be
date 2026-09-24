@@ -43,6 +43,18 @@ public class Cart {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * When an abandoned-cart reminder was last sent for this cart, or null if never.
+     *
+     * <p>Read-only from JPA's side and stamped by a direct UPDATE in the reminder repository,
+     * because {@code @PreUpdate} below moves {@code updatedAt} on any save: stamping this through
+     * the entity would make the cart look freshly touched, push it past the quiet window, and leave
+     * {@code reminderSentAt < updatedAt} — which is precisely the condition that re-arms a
+     * reminder. The cart would then be reminded about on every sweep, forever.
+     */
+    @Column(name = "reminder_sent_at", insertable = false, updatable = false)
+    private Instant reminderSentAt;
+
     public Cart() {
     }
 
@@ -86,4 +98,5 @@ public class Cart {
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Instant getReminderSentAt() { return reminderSentAt; }
 }

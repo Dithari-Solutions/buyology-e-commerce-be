@@ -112,6 +112,64 @@ public class EmailService {
     }
 
     /**
+     * Reminds a customer about a cart they filled and left, and reports whether it went.
+     *
+     * <p>Synchronous and returning a boolean, like the campaign send below and unlike the
+     * fire-and-forget notifications above. The caller stamps the cart as reminded, and that stamp
+     * is what stops the next sweep writing again — so it must record what happened, not what was
+     * attempted. A void method here would mark a cart as reminded after a failed send and the
+     * customer would never hear from us.
+     *
+     * <p>Marketing mail by any honest reading, so the caller must have resolved the recipient
+     * through {@code MarketingAudience} and must pass a working unsubscribe link.
+     */
+    public boolean sendAbandonedCartEmail(String toEmail,
+                                          String subject,
+                                          String firstName,
+                                          List<CartLine> lines,
+                                          String cartTotal,
+                                          String cartUrl,
+                                          String unsubscribeUrl) {
+        try {
+            String itemCount = lines.size() == 1 ? "1 item" : lines.size() + " items";
+            String html = loadTemplate("static/abandoned-cart.html")
+                    .replace("{{FIRST_NAME}}", escapeHtml(safeName(firstName)))
+                    .replace("{{ITEM_COUNT}}", itemCount)
+                    .replace("{{CART_TOTAL}}", escapeHtml(cartTotal))
+                    .replace("{{CART_URL}}", escapeHtml(cartUrl))
+                    .replace("{{UNSUBSCRIBE_URL}}", escapeHtml(unsubscribeUrl))
+                    // Last, like every other generated block in this class: a product title
+                    // containing the literal text of another token must not be rewritten by a
+                    // later replace.
+                    .replace("{{ITEM_ROWS}}", cartRowsHtml(lines));
+            send(toEmail, subject, html);
+            return true;
+        } catch (Exception e) {
+            log.warn("Could not send cart reminder to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    /** One line of a cart, as the reminder prints it. */
+    public record CartLine(String title, int quantity, String price) {}
+
+    private static String cartRowsHtml(List<CartLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (CartLine line : lines) {
+            sb.append("""
+                    <tr>
+                      <td style="border-top:1px solid #ececf5;padding:14px 12px 14px 0;color:#1f1b3a;font-size:15px;line-height:1.5;font-family:Arial,sans-serif;">
+                        %s
+                        <span style="display:block;margin-top:4px;color:#8a85a6;font-size:13px;">Qty %d</span>
+                      </td>
+                      <td align="right" valign="top" style="border-top:1px solid #ececf5;padding:14px 0;color:#1f1b3a;font-size:15px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;" dir="ltr">%s</td>
+                    </tr>
+                    """.formatted(escapeHtml(line.title()), line.quantity(), escapeHtml(line.price())));
+        }
+        return sb.toString();
+    }
+
+    /**
      * Sends one campaign email and reports whether the provider accepted it.
      *
      * <p>Deliberately NOT {@code @Async} and deliberately not swallowing the failure, unlike its

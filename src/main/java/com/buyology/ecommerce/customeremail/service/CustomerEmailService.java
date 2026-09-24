@@ -47,29 +47,13 @@ public class CustomerEmailService {
     private static final Logger log = LoggerFactory.getLogger(CustomerEmailService.class);
 
     /**
-     * Who may be mailed, expressed once so the preview and the send can never disagree.
+     * Who may be mailed. The rules themselves live in {@link MarketingAudience} so that the
+     * abandoned-cart reminder — marketing mail by any honest reading — cannot drift from them.
      *
-     * <p>Every clause is a person who must not receive marketing mail: a suspended or deleted
-     * account, a guest checkout that was never a registered customer, someone who used our own
-     * opt-out link, and someone who unsubscribed from the newsletter with the same address. The
-     * last one is the join nothing else in the codebase makes.
-     *
-     * <p>Ordered by id so paging is deterministic — the existing broadcast pages an unordered
-     * query, which can skip and repeat rows across pages.
+     * <p>Ordered by id where it is used, so paging is deterministic: the existing broadcast pages
+     * an unordered query, which can skip and repeat rows across pages.
      */
-    private static final String ELIGIBLE = """
-            SELECT u.id AS user_id, LOWER(c.email) AS email
-            FROM "users" u
-            JOIN "auth_credentials" c ON c.user_id = u.id
-            LEFT JOIN newsletter_subscribers ns ON LOWER(ns.email) = LOWER(c.email)
-            WHERE u.user_type = 'CUSTOMER'
-              AND u.status = 'ACTIVE'
-              AND u.deleted_at IS NULL
-              AND COALESCE(u.is_guest, FALSE) = FALSE
-              AND u.email_opt_out_at IS NULL
-              AND c.email IS NOT NULL AND c.email <> ''
-              AND (ns.id IS NULL OR ns.is_active = TRUE)
-            """;
+    private static final String ELIGIBLE = MarketingAudience.ELIGIBLE;
 
     private final JdbcTemplate jdbc;
     private final CustomerEmailCampaignRepository campaignRepo;

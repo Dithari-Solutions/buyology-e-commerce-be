@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<title>Your cart is still saved</title>
+<style>
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  img { -ms-interpolation-mode:bicubic; border:0; outline:none; text-decoration:none; }
+  @media only screen and (max-width:620px) {
+    .wrap { padding:16px 0 !important; }
+    .card { width:100% !important; border-radius:0 !important; }
+    .body { padding:28px 22px !important; }
+    .head { padding:30px 22px 26px !important; }
+    .foot { padding:24px 22px !important; }
+    .trust td { display:block !important; width:100% !important; padding:7px 0 !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#f0eef6;font-family:Arial,Helvetica,sans-serif;">
+
+<!-- Preheader: the grey line the inbox shows next to the subject. Hidden in the email itself. -->
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;height:0;width:0;">
+  {{ITEM_COUNT}} in your cart — {{CART_TOTAL}} total. Checkout takes about a minute.
+</div>
+
+<table class="wrap" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0eef6;padding:40px 0;">
+  <tr>
+    <td align="center" style="padding:0 16px;">
+      <table class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;max-width:600px;width:100%;">
+
+        <!-- Header -->
+        <tr>
+          <td class="head" align="center" style="background-color:#402f75;padding:34px 40px 28px;">
+            <img src="https://buyology.online/buyology-online-logo-dark-mode.png" alt="BUYOLOGY" width="168" height="37" style="display:block;margin:0 auto;border:0;width:168px;height:auto;max-width:168px;" />
+            <p style="margin:14px 0 0;color:rgba(255,255,255,0.72);font-size:12px;letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;">Your cart</p>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td class="body" style="padding:38px 40px 30px;">
+            <h1 style="margin:0 0 14px;color:#1f1b3a;font-size:26px;font-weight:800;font-family:Arial,sans-serif;line-height:1.3;">You left something behind</h1>
+            <p style="margin:0 0 26px;color:#4a4a4a;font-size:15px;line-height:1.7;font-family:Arial,sans-serif;">
+              Hi {{FIRST_NAME}}, your cart is still saved and ready to order. Here's what's in it:
+            </p>
+
+            <!-- Items -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+              <tr>
+                <td style="padding:0 0 12px;color:#402f75;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.6px;font-family:Arial,sans-serif;">In your cart</td>
+                <td align="right" style="padding:0 0 12px;color:#8a85a6;font-size:12px;font-family:Arial,sans-serif;">{{ITEM_COUNT}}</td>
+              </tr>
+
+{{ITEM_ROWS}}
+
+              <tr>
+                <td style="border-top:2px solid #402f75;padding:14px 0 0;color:#402f75;font-size:15px;font-weight:bold;font-family:Arial,sans-serif;">Total</td>
+                <td align="right" style="border-top:2px solid #402f75;padding:14px 0 0;color:#402f75;font-size:19px;font-weight:bold;white-space:nowrap;font-family:Arial,sans-serif;" dir="ltr">{{CART_TOTAL}}</td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding:6px 0 0;color:#9b96b8;font-size:11px;line-height:1.5;font-family:Arial,sans-serif;">
+                  VAT included. Delivery is calculated at checkout.
+                </td>
+              </tr>
+            </table>
+
+            <!-- CTA -->
+            <table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:30px auto 0;">
+              <tr>
+                <td align="center" bgcolor="#ffbe12" style="border-radius:30px;">
+                  <a href="{{CART_URL}}" target="_blank" rel="noopener" style="display:inline-block;padding:15px 42px;color:#1a1a1a;font-size:15px;font-weight:800;text-decoration:none;font-family:Arial,sans-serif;border-radius:30px;">Complete my order</a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:16px 0 0;text-align:center;color:#6f6a8a;font-size:13px;line-height:1.6;font-family:Arial,sans-serif;">
+              Checkout takes about a minute — pay by card, or in 4 with Tabby or Tamara.
+            </p>
+            <p style="margin:8px 0 0;text-align:center;color:#9b96b8;font-size:12px;line-height:1.6;font-family:Arial,sans-serif;">
+              We don't reserve items in a cart, so prices and stock can change.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Reassurance -->
+        <tr>
+          <td style="padding:0 40px 34px;">
+            <table class="trust" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f7f6fc;border-radius:12px;">
+              <tr>
+                <td width="50%" valign="top" style="padding:16px 18px 8px;color:#4a4a4a;font-size:13px;line-height:1.5;font-family:Arial,sans-serif;">
+                  <strong style="color:#1f1b3a;">Secure payment</strong><br />Encrypted checkout
+                </td>
+                <td width="50%" valign="top" style="padding:16px 18px 8px;color:#4a4a4a;font-size:13px;line-height:1.5;font-family:Arial,sans-serif;">
+                  <strong style="color:#1f1b3a;">14-day returns</strong><br />Hassle-free refunds
+                </td>
+              </tr>
+              <tr>
+                <td width="50%" valign="top" style="padding:0 18px 16px;color:#4a4a4a;font-size:13px;line-height:1.5;font-family:Arial,sans-serif;">
+                  <strong style="color:#1f1b3a;">Free delivery</strong><br />On orders over AED 100
+                </td>
+                <td width="50%" valign="top" style="padding:0 18px 16px;color:#4a4a4a;font-size:13px;line-height:1.5;font-family:Arial,sans-serif;">
+                  <strong style="color:#1f1b3a;">Pay in 4</strong><br />With Tabby or Tamara
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td class="foot" align="center" style="background-color:#faf9fd;padding:26px 40px;border-top:1px solid #efecf8;">
+            <p style="margin:0 0 8px;color:#9b96b8;font-size:12px;font-family:Arial,sans-serif;letter-spacing:2px;font-weight:700;">BUYOLOGY</p>
+            <p style="margin:0 0 6px;color:#b3afc7;font-size:12px;line-height:1.6;font-family:Arial,sans-serif;">
+              You're receiving this because you left items in your cart at buyology.online.
+            </p>
+            <p style="margin:0;color:#b3afc7;font-size:12px;line-height:1.6;font-family:Arial,sans-serif;">
+              Questions? <a href="mailto:support@buyology.online" style="color:#402f75;text-decoration:underline;">support@buyology.online</a>
+              &nbsp;&middot;&nbsp;
+              <a href="{{UNSUBSCRIBE_URL}}" target="_blank" rel="noopener" style="color:#402f75;text-decoration:underline;">Unsubscribe</a>
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
