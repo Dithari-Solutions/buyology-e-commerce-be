@@ -55,7 +55,7 @@ public class AdminSupplierService {
     private final EmailService emailService;
     private final ContaboObjectService contaboObjectService;
 
-    @Value("${app.dashboard-base-url:https://admin-dev.dithari.com}")
+    @Value("${app.dashboard-base-url:https://dashboard.buyology.online}")
     private String dashboardBaseUrl;
 
     public AdminSupplierService(

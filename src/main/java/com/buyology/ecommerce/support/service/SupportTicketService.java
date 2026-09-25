@@ -72,7 +72,7 @@ public class SupportTicketService {
     @Value("${app.admin-email:firdovsirz@gmail.com}")
     private String supportTeamEmail;
 
-    @Value("${app.dashboard-base-url:https://admin.buyology.online}")
+    @Value("${app.dashboard-base-url:https://dashboard.buyology.online}")
     private String dashboardBaseUrl;
 
     public SupportTicketService(SupportTicketRepository ticketRepo,

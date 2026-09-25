@@ -27,18 +27,18 @@ class SecurityConfigCorsTest {
 
     @Test
     void storefrontIsAllowedEvenWhenTheEnvironmentForgetsIt() {
-        List<String> allowed = SecurityConfig.resolveAllowedOrigins("https://admin.buyology.online");
+        List<String> allowed = SecurityConfig.resolveAllowedOrigins("https://dashboard.buyology.online");
 
         assertTrue(allowed.contains(SHOP),
                 "the storefront must not depend on per-server configuration");
-        assertTrue(allowed.contains("https://admin.buyology.online"),
+        assertTrue(allowed.contains("https://dashboard.buyology.online"),
                 "configured origins are kept, not replaced");
     }
 
     @Test
     void doesNotDuplicateAnOriginThatIsAlsoConfigured() {
         List<String> allowed = SecurityConfig.resolveAllowedOrigins(
-                "https://admin.buyology.online," + SHOP);
+                "https://dashboard.buyology.online," + SHOP);
 
         assertEquals(1, allowed.stream().filter(SHOP::equals).count());
         assertEquals(1 + SecurityConfig.BUILT_IN_ALLOWED_ORIGINS.size(), allowed.size(),
@@ -68,7 +68,7 @@ class SecurityConfigCorsTest {
 
     @Test
     void everyBuiltInOriginIsPresentInTheResult() {
-        List<String> allowed = SecurityConfig.resolveAllowedOrigins("https://admin.buyology.online");
+        List<String> allowed = SecurityConfig.resolveAllowedOrigins("https://dashboard.buyology.online");
 
         assertTrue(allowed.containsAll(SecurityConfig.BUILT_IN_ALLOWED_ORIGINS),
                 "adding to BUILT_IN_ALLOWED_ORIGINS must take effect without touching this method");
