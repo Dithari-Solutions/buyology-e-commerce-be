@@ -218,9 +218,36 @@ public class Order {
     @Column(name = "dropoff_proof_taken_at")
     private Instant dropoffProofTakenAt;
 
-    /** Free-form cancellation reason (set by admin or customer on CANCELLED). */
+    /**
+     * Free-form cancellation reason (set by admin or customer on CANCELLED).
+     *
+     * <p>See {@link #setCancellationReason} for why the setter, not the callers, enforces the length.
+     */
     @Column(name = "cancellation_reason", length = 1000)
     private String cancellationReason;
+
+    /** The column's own width — the setter's ceiling, kept beside the annotation that declares it. */
+    private static final int CANCELLATION_REASON_MAX = 1000;
+
+    /**
+     * The questionnaire a cancelling customer answered, as serialized JSON. Null for every
+     * cancellation that did not come from that flow — admin cancellations, and clients that have not
+     * shipped it.
+     *
+     * <p>Not a replacement for {@link #cancellationReason} and not redundant with it. That field has
+     * two authors (an admin types into it freely, the customer flow writes assembled prose into it)
+     * and is shown back to the customer, because its value becomes the CANCELLED tracking event's
+     * note that both apps render in the order timeline. So it has to stay a readable sentence, which
+     * means it can be read but not counted: grouping cancellations by it returns one row per order.
+     * This field holds the same answers as answers, which is what "why do people cancel" needs.
+     *
+     * <p>Held as a String over a jsonb column, following {@code QuiqupTestEvent}: the backend stores
+     * and forwards this document, it does not reach into it. {@code CancellationFeedbackCodec} is the
+     * only thing that writes or parses it, and nothing may put a client's bytes here unchecked.
+     */
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "cancellation_feedback", columnDefinition = "jsonb")
+    private String cancellationFeedback;
 
     // ── How this order is paid for ────────────────────────────────────────────
 
@@ -609,7 +636,41 @@ public class Order {
     public void setDropoffProofTakenAt(Instant dropoffProofTakenAt) { this.dropoffProofTakenAt = dropoffProofTakenAt; }
 
     public String getCancellationReason() { return cancellationReason; }
-    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    /**
+     * Truncates to the column's width rather than letting Postgres refuse the write.
+     *
+     * <p>The clipping matters far more than it looks. This value used to be whatever an admin typed
+     * or a short system sentence, so nothing ever approached 1000 characters. It is now also prose
+     * ASSEMBLED by the storefront and the app from a cancellation questionnaire — a reason, a
+     * follow-up answer and free text the customer wrote — so its length is composed rather than
+     * typed, and a long one is reachable.
+     *
+     * <p>What an over-long value costs, precisely: the flush inside applyCustomerCancellation raises
+     * Postgres 22001, which is caught by the handler that has already cancelled the courier job. That
+     * leaves the courier stopped, the order still live, the stock withheld, a superadmin paged and a
+     * 500 for the customer — the worst state this flow can reach, over some extra characters in a
+     * note. Losing the tail of a sentence is not comparable.
+     *
+     * <p>Enforced here rather than at the three call sites so a fourth cannot miss it, and so the
+     * ceiling sits next to the {@code length = 1000} that defines it.
+     */
+    public void setCancellationReason(String cancellationReason) {
+        if (cancellationReason == null || cancellationReason.length() <= CANCELLATION_REASON_MAX) {
+            this.cancellationReason = cancellationReason;
+            return;
+        }
+        // Backing off a character when the cut lands between a surrogate pair. An emoji is two chars
+        // in Java, and half of one is not a character at all — it cannot be encoded to the UTF-8 the
+        // driver sends, so a naive substring turns a too-long reason into an unwritable one and
+        // reaches the same failure this method exists to prevent.
+        int end = CANCELLATION_REASON_MAX;
+        if (Character.isHighSurrogate(cancellationReason.charAt(end - 1))) end--;
+        this.cancellationReason = cancellationReason.substring(0, end);
+    }
+
+    public String getCancellationFeedback() { return cancellationFeedback; }
+    public void setCancellationFeedback(String cancellationFeedback) { this.cancellationFeedback = cancellationFeedback; }
 
     /** Never null: rows predating V53 are read as {@link OrderPaymentMethod#ONLINE}, which is what they were. */
     public OrderPaymentMethod getPaymentMethod() {

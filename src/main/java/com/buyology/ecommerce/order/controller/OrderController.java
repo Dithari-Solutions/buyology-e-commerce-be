@@ -1,6 +1,8 @@
 package com.buyology.ecommerce.order.controller;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.buyology.ecommerce.order.dto.BuyNowOrderRequest;
 import com.buyology.ecommerce.order.dto.CreateOrderRequest;
 import com.buyology.ecommerce.order.dto.OrderResponse;
@@ -204,10 +206,42 @@ public class OrderController {
             @PathVariable UUID orderId,
             @RequestBody(required = false) CancelOrderRequest request) {
         String reason = request != null ? request.reason() : null;
+        JsonNode feedback = request != null ? request.feedback() : null;
         return ApiResponse.success(
-                orderService.customerCancelOrder(orderId, userId, reason),
+                orderService.customerCancelOrder(orderId, userId, reason, feedback),
                 "Order cancelled successfully");
     }
 
-    public record CancelOrderRequest(String reason) {}
+    /**
+     * Body of a customer cancellation. Both components are optional and an absent body is still a
+     * valid cancellation, as it always was.
+     *
+     * <p>{@code reason} is unchanged: readable English prose, capped at 1000 chars, which becomes the
+     * order's cancellation reason and the note on its CANCELLED tracking event — so it is shown back
+     * to the customer and read by admins.
+     *
+     * <p>{@code feedback} is the same cancellation reason as structured answers, for counting rather
+     * than reading. It is absent for an admin cancellation and for any client that has not shipped the
+     * questionnaire yet, and absent must behave exactly as before.
+     *
+     * <p>It is taken as a raw {@link JsonNode} rather than bound to a record, which is the one
+     * deliberate piece of laxness on this endpoint. Binding it to a type made Jackson the first gate,
+     * and Jackson's answer to a shape it dislikes is to fail the whole request: {@code
+     * "submittedAt":"29/09/2026"} or {@code "answers":"none"} raised a binding error before the
+     * controller ran, Spring returned HTTP 400, and the shopper could not cancel their order at all.
+     * Strictness here buys nothing — {@code CancellationFeedbackCodec} does not trust a single value
+     * in this object regardless, and rebuilds the stored document from cleaned and capped ones — so
+     * the only thing type-checking could add is a new way for the analytics to take the cancellation
+     * down with it. The codec treats an unusable node exactly as it treats an unusable value: it
+     * stores nothing and the cancellation proceeds.
+     *
+     * <p>Unknown keys are ignored at this level too. The app-wide {@code ObjectMapper} keeps Jackson's
+     * default {@code FAIL_ON_UNKNOWN_PROPERTIES}, so a client posting one stray key here — the id it
+     * already put in the path, a client version, a telemetry field — got an HTTP 400 and could not
+     * cancel the order. There is no key on this body whose silent ignoring can lose anything: both
+     * real components are optional, and an empty body has always been a valid cancellation. Refusing
+     * the request cannot be the cheaper mistake.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CancelOrderRequest(String reason, JsonNode feedback) {}
 }

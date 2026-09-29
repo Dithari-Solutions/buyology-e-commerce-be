@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.quiqup.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.buyology.ecommerce.order.service.OrderService;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Propagation;
@@ -50,7 +51,7 @@ class QuiqupCancelTransactionBoundaryTest {
     @Test
     void theCustomerEntryPointHoldsNoTransactionEither() {
         Method m = method(OrderService.class, "customerCancelOrder",
-                UUID.class, UUID.class, String.class);
+                UUID.class, UUID.class, String.class, JsonNode.class);
         assertNull(m.getAnnotation(Transactional.class),
                 "customerCancelOrder pre-flights the courier over HTTP; the transactional half is "
                         + "applyCustomerCancellation, reached through the proxy");
@@ -59,7 +60,8 @@ class QuiqupCancelTransactionBoundaryTest {
     @Test
     void theTransactionalHalfIsProxyReachable() {
         Method m = method(OrderService.class, "applyCustomerCancellation",
-                UUID.class, UUID.class, String.class, QuiqupCancelService.CancelResult.class);
+                UUID.class, UUID.class, String.class, JsonNode.class,
+                QuiqupCancelService.CancelResult.class);
         assertNotNull(m.getAnnotation(Transactional.class),
                 "applyCustomerCancellation is the half that writes; it must be transactional");
         assertTrue(java.lang.reflect.Modifier.isPublic(m.getModifiers()),

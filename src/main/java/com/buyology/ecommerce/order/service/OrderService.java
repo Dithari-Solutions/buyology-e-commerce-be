@@ -1841,8 +1841,14 @@ public class OrderService {
      *
      * <p>Ordering is the whole point. Cancel-first-ask-later is the bug this replaces: the refund
      * went out while the courier kept driving, and the customer kept the goods and the money.
+     *
+     * @param reason   readable English prose shown back to the customer on their order timeline
+     * @param feedback the same cancellation as structured answers, for counting rather than reading;
+     *                 null for an admin cancellation or a client that has not shipped the
+     *                 questionnaire, and null behaves exactly as this method did before it existed
      */
-    public OrderResponse customerCancelOrder(UUID orderId, UUID userId, String reason) {
+    public OrderResponse customerCancelOrder(UUID orderId, UUID userId, String reason,
+                                             JsonNode feedback) {
         Order order = orderRepo.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
@@ -1879,7 +1885,7 @@ public class OrderService {
         }
 
         try {
-            return selfProvider.getObject().applyCustomerCancellation(orderId, userId, reason, courier);
+            return selfProvider.getObject().applyCustomerCancellation(orderId, userId, reason, feedback, courier);
         } catch (RuntimeException e) {
             if (dispatched && courier.refundAllowed()) {
                 // The courier is stopped but the order could not be cancelled (a concurrent admin
@@ -1903,6 +1909,7 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse applyCustomerCancellation(UUID orderId, UUID userId, String reason,
+                                                   JsonNode feedback,
                                                    com.buyology.ecommerce.quiqup.service.QuiqupCancelService.CancelResult preflight) {
         Order order = orderRepo.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
@@ -1916,6 +1923,12 @@ public class OrderService {
         validateTransition(order, OrderStatus.CANCELLED);
 
         order.setCancellationReason(reason);
+        // The structured half of the same answer. The codec cleans, caps and stamps it, and returns
+        // null for anything it cannot use — including a serialization failure — so nothing about the
+        // questionnaire can fail a cancellation the customer has already been told is happening.
+        // The tracking note below is deliberately still built from `reason` alone: it is rendered to
+        // the customer, and this document is for the dashboard.
+        order.setCancellationFeedback(CancellationFeedbackCodec.toStoredJson(feedback));
         transitionTo(order, OrderStatus.CANCELLED);
         appendTrackingEvent(order, OrderStatus.CANCELLED,
                 reason != null ? reason : "Cancelled by customer",
@@ -3304,6 +3317,10 @@ public class OrderService {
         res.setDeliveredAt(o.getDeliveredAt());
         res.setCancelledAt(o.getCancelledAt());
         res.setCancellationReason(o.getCancellationReason());
+        // Parsed into an object here so no client has to JSON.parse a field of a parsed response.
+        // Unreadable stored JSON comes back null rather than throwing — an order stays viewable
+        // whatever is in this column.
+        res.setCancellationFeedback(CancellationFeedbackCodec.fromStoredJson(o.getCancellationFeedback()));
         res.setCreatedAt(o.getCreatedAt());
         res.setUpdatedAt(o.getUpdatedAt());
 

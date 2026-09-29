@@ -99,6 +99,17 @@ public class OrderResponse {
     private Instant deliveredAt;
     private Instant cancelledAt;
     private String cancellationReason;
+
+    /**
+     * The questionnaire the customer answered while cancelling, as a structured object — never a
+     * JSON string. The dashboard renders it straight from the response; nothing downstream should
+     * have to JSON.parse a field of a parsed response to read it.
+     *
+     * <p>Null whenever no questionnaire was answered (an admin cancellation, an order cancelled
+     * before the flow existed, a client that has not shipped it) and also when the stored document
+     * cannot be read, so a reader has exactly one case to handle.
+     */
+    private CancellationFeedback cancellationFeedback;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -268,6 +279,9 @@ public class OrderResponse {
 
     public String getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    public CancellationFeedback getCancellationFeedback() { return cancellationFeedback; }
+    public void setCancellationFeedback(CancellationFeedback cancellationFeedback) { this.cancellationFeedback = cancellationFeedback; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
