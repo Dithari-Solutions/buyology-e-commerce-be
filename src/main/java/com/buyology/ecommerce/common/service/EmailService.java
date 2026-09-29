@@ -1222,12 +1222,20 @@ public class EmailService {
     /** A single line on the order-confirmation email. */
     public record OrderEmailItem(String name, int quantity, BigDecimal unitPrice, BigDecimal lineTotal) {}
 
+    /**
+     * @param cashOnDelivery whether the customer still owes this money at the door. It changes what the
+     *                       email SAYS, which matters more than it sounds: the previous wording opened
+     *                       with "Your payment was successful", and sending that to somebody who has
+     *                       paid nothing yet tells them the order is settled and invites them to turn a
+     *                       courier away empty-handed.
+     */
     @Async
     public void sendOrderConfirmationEmail(
             String toEmail, String recipientName, String orderNumber, String orderDate,
             List<OrderEmailItem> items, String currency,
             BigDecimal subtotal, BigDecimal shipping, BigDecimal discount, BigDecimal total,
-            String deliveryAddress, String estimatedDelivery, int deviceCount, String orderUrl) {
+            String deliveryAddress, String estimatedDelivery, int deviceCount, String orderUrl,
+            boolean cashOnDelivery) {
         try {
             final int co2PerDevice = 300; // good-faith estimate: kg CO2e avoided per refurbished device vs new
             long co2Total = (long) co2PerDevice * Math.max(deviceCount, 1);
@@ -1239,6 +1247,27 @@ public class EmailService {
                     : "";
             String shippingDisplay = (shipping == null || shipping.signum() == 0)
                     ? "FREE" : money(currency, shipping);
+
+            // What the opening sentence claims, and a formal notice when money is still owed. Kept as
+            // two separate substitutions so a prepaid order renders exactly as it did before.
+            String paymentLine = cashOnDelivery
+                    ? "Your order <strong>" + nullToEmpty(orderNumber) + "</strong> is confirmed. "
+                      + "Payment of <strong>" + money(currency, total) + "</strong> is due on delivery."
+                    : "Your payment was successful and your order <strong>" + nullToEmpty(orderNumber)
+                      + "</strong> is confirmed.";
+            String paymentNotice = cashOnDelivery
+                    ? "<tr><td style=\"padding:16px 32px 0;\">"
+                      + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
+                      + "style=\"border-collapse:collapse;background:#FFF8E1;border:1px solid #FBBB14;"
+                      + "border-radius:8px;\"><tr><td style=\"padding:14px 16px;\">"
+                      + "<p style=\"margin:0 0 4px;color:#402F75;font-size:14px;font-weight:bold;\">"
+                      + "Cash on delivery</p>"
+                      + "<p style=\"margin:0;color:#444;font-size:14px;line-height:1.6;\">"
+                      + "This order has not been paid for yet. Please have <strong>"
+                      + money(currency, total) + "</strong> ready in cash when your order arrives. "
+                      + "Our courier will collect the payment at the door and issue your receipt."
+                      + "</p></td></tr></table></td></tr>"
+                    : "";
 
             String html = loadTemplate("static/order-confirmation.html")
                     .replace("{{RECIPIENT_NAME}}", safeName(recipientName))
@@ -1253,7 +1282,9 @@ public class EmailService {
                     .replace("{{ESTIMATED_DELIVERY}}", nullToEmpty(estimatedDelivery))
                     .replace("{{CO2_TOTAL}}", String.valueOf(co2Total))
                     .replace("{{CO2_PER_DEVICE}}", String.valueOf(co2PerDevice))
-                    .replace("{{ORDER_URL}}", nullToEmpty(orderUrl));
+                    .replace("{{ORDER_URL}}", nullToEmpty(orderUrl))
+                    .replace("{{PAYMENT_LINE}}", paymentLine)
+                    .replace("{{PAYMENT_NOTICE}}", paymentNotice);
             send(toEmail, "Your Buyology order " + nullToEmpty(orderNumber) + " is confirmed", html);
             log.info("Order confirmation email sent to {}", toEmail);
         } catch (Exception e) {

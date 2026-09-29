@@ -2197,18 +2197,29 @@ public class OrderService {
         return null;
     }
 
-    /** Best-effort order-confirmation email (with climate/SDG content) once an order is PAID. */
+    /**
+     * Best-effort order-confirmation email (with climate/SDG content) plus its in-app twin, sent once an
+     * order is confirmed — either because payment settled or because a cash order was accepted.
+     */
     private void sendOrderConfirmationEmailFor(Order order) {
-        // The confirmation email has an in-app twin so the storefront bell also shows the moment
-        // an order is paid — both call sites of this method are the settled-payment paths.
+        // The confirmation email has an in-app twin so the storefront bell shows the moment an order is
+        // confirmed. A CASH order gets different words, and that distinction is the point: this used to
+        // say "Payment confirmed — is paid" to every customer, so somebody who had paid nothing was told
+        // their order was settled. A customer who believes that turns the courier away at the door.
+        boolean cash = order.isCashOnDelivery() && !order.isMoneyCollected();
         if (order.getUserId() != null) {
+            String reference = "BUY-" + order.getId().toString().substring(0, 8).toUpperCase();
+            String title = cash ? "Order confirmed" : "Payment confirmed";
+            String body = cash
+                    ? "Order " + reference + " is confirmed. Please have "
+                      + formatMoney(order.getTotalAmount(), order.getCurrency())
+                      + " ready to pay when it is delivered."
+                    : "Order " + reference + " is paid — we're getting it ready.";
             try {
-                pushService.sendToUser(order.getUserId(), "Payment confirmed",
-                        "Order BUY-" + order.getId().toString().substring(0, 8).toUpperCase()
-                                + " is paid — we're getting it ready.", "ORDER_STATUS",
+                pushService.sendToUser(order.getUserId(), title, body, "ORDER_STATUS",
                         java.util.Map.of("orderId", order.getId().toString(), "type", "ORDER_STATUS"));
             } catch (Exception e) {
-                log.warn("[ORDER] paid notification failed for {}: {}", order.getId(), e.getMessage());
+                log.warn("[ORDER] confirmation notification failed for {}: {}", order.getId(), e.getMessage());
             }
         }
         try {
@@ -2242,7 +2253,8 @@ public class OrderService {
             emailService.sendOrderConfirmationEmail(
                     email, order.getRecipientFirstName(), displayNo, orderDate, lines, order.getCurrency(),
                     order.getSubtotal(), order.getShippingFee(), order.getDiscount(), order.getTotalAmount(),
-                    buildAddressBlock(order), order.getEstimatedDeliveryTime(), deviceCount, orderUrl);
+                    buildAddressBlock(order), order.getEstimatedDeliveryTime(), deviceCount, orderUrl,
+                    cash);
         } catch (Exception e) {
             log.warn("[ORDER] order-confirmation email failed for {}: {}", order.getId(), e.getMessage());
         }
@@ -2409,6 +2421,21 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("[ORDER] order-status email failed for {}: {}", order.getId(), e.getMessage());
         }
+    }
+
+    /**
+     * An amount as a customer should read it: "AED 249.00".
+     *
+     * <p>Two scales exist for the same number. {@code BigDecimal.toString()} of a total that came back
+     * from Postgres as {@code 249.0000} prints those trailing zeros, and one that arithmetic produced as
+     * {@code 249} prints no minor units at all — neither is what somebody counting out cash at the door
+     * needs to see. Fixing the scale here means the notification and the e-mail quote the same figure.
+     */
+    private static String formatMoney(BigDecimal amount, String currency) {
+        BigDecimal a = (amount == null ? BigDecimal.ZERO : amount)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        String code = (currency == null || currency.isBlank()) ? "AED" : currency.trim();
+        return code + " " + a.toPlainString();
     }
 
     /** One-line-per-row HTML delivery address built from the order's address snapshot. */
@@ -2711,19 +2738,29 @@ public class OrderService {
         try {
             java.util.Map<String, String> data = java.util.Map.of(
                     "orderId", order.getId().toString(), "type", "NEW_ORDER");
+            // Whoever packs a cash order needs to know the money has not arrived, because collecting it
+            // is part of fulfilling it. A neutral "you have a new order" reads as prepaid, which is what
+            // every other order is. Suppliers and superadmins keep their own wording — a superadmin does
+            // not fulfil anything — so only the cash clause is shared.
+            boolean cash = order.isCashOnDelivery() && !order.isMoneyCollected();
+            String cashClause = cash
+                    ? " Cash on delivery: collect "
+                      + formatMoney(order.getTotalAmount(), order.getCurrency()) + " from the customer."
+                    : "";
+            String supplierBody = "You have a new order to fulfil." + cashClause;
+            String adminBody = "A new order has been placed." + cashClause;
             order.getItems().stream()
                     .map(OrderItem::getSupplierId)
                     .filter(java.util.Objects::nonNull)
                     .distinct()
                     .forEach(supplierId -> supplierRepository.findById(supplierId).ifPresent(sup -> {
                         if (sup.getUserId() != null) {
-                            pushService.sendToUser(sup.getUserId(), "New order received",
-                                    "You have a new order to fulfil.", "NEW_ORDER", data);
+                            pushService.sendToUser(sup.getUserId(), "New order received", supplierBody,
+                                    "NEW_ORDER", data);
                         }
                     }));
             userRoleRepository.findUserIdsByRoleName("SUPERADMIN").forEach(uid ->
-                    pushService.sendToUser(uid, "New order placed",
-                            "A new order has been placed.", "NEW_ORDER", data));
+                    pushService.sendToUser(uid, "New order placed", adminBody, "NEW_ORDER", data));
         } catch (Exception e) {
             log.warn("[ORDER] Failed to send new-order notifications for {}: {}", order.getId(), e.getMessage());
         }
