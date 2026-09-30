@@ -119,6 +119,22 @@ public class GlobalExceptionHandler {
         return ApiResponse.failure(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    /**
+     * A basket that got dearer while the customer was looking at it.
+     *
+     * <p>409 with wording written for a shopper, and INFO not ERROR: a sale ending between the cart
+     * being rendered and Pay being pressed is the feature working, not a fault. The amounts go to the
+     * log; the customer is sent back to a basket that re-prices itself on read and will show them the
+     * new figures. A basket that got CHEAPER never arrives here — it is charged at the lower price.
+     */
+    @ExceptionHandler(com.buyology.ecommerce.cart.domain.CartPriceChangedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCartPriceChanged(
+            com.buyology.ecommerce.cart.domain.CartPriceChangedException ex) {
+        log.info("[PRICE] Refused a checkout that would have charged more than the basket showed: {}",
+                ex.describeForLog());
+        return ApiResponse.failure(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         log.error("Illegal state: {}", ex.getMessage(), ex);

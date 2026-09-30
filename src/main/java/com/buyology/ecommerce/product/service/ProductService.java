@@ -59,6 +59,8 @@ import com.buyology.ecommerce.store.repository.StoreLocationRepository;
 import com.buyology.ecommerce.store.repository.StoreProductRepository;
 import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 import com.buyology.ecommerce.product.search.service.ProductSearchService;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -186,7 +188,7 @@ public class ProductService {
 
     /**
      * Creates a new product with all associated data in a single atomic transaction:
-     * translations (AZ, EN, AR), spec groups/options (with additionalPrice for upgrades),
+     * translations (AZ, EN, AR), spec groups/options (descriptive only — there is no per-option price),
      * colors (each with their own media), remaining media, variants, and accessories.
      *
      * @param request    the product creation request
@@ -869,6 +871,101 @@ public class ProductService {
         return ApiResponse.success(responses, "Products fetched successfully");
     }
 
+    /**
+     * The flash-sale rail: products whose store discount is LIVE and has an end in the future.
+     *
+     * <p>Note what this is NOT: {@code products.is_super_deal} is a manual editorial flag driving
+     * the separate "Super Deals" rail and has no prices and no dates. This rail is derived entirely
+     * from the discount windows on store_products, so an item leaves it the moment its sale ends,
+     * with nothing to switch off by hand.
+     *
+     * <p>Ordered by the soonest end — a countdown is the point of the thing — and ordered AND PAGED in
+     * the DATABASE. It used to select every matching product id in the shop and slice the page out in
+     * Java, so a home screen asking for twelve items paid for a GROUP BY over the whole discounted
+     * catalogue on the most-hit endpoint there is. The ids come back already sorted; products are
+     * re-sorted into that order after loading because findAllById does not preserve it.
+     *
+     * <p>Then filtered by {@link #onlyOnFlashSale}, because "on sale in some store" and "the price on
+     * this card is discounted" are different questions and the rail may only show the second. A page
+     * can therefore come back shorter than {@code size}.
+     */
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getFlashSaleProducts(
+            String lang, String countryCode, String currency, Double lat, Double lng, int page, int size) {
+        // ONE instant for the whole rail — the query that decides WHICH products are on sale and the
+        // pricing that decides what each card SAYS must be judged against the same moment. Read twice,
+        // a sale ending in between put a product in the rail and then priced it at full price.
+        Instant now = Instant.now();
+        int pageSize = Math.min(100, Math.max(1, size));
+        Pageable pageable = PageRequest.of(Math.max(0, page), pageSize);
+        List<Object[]> rows = (countryCode != null && !countryCode.isBlank())
+                ? storeProductRepository.findB2cFlashSaleProductIdsByCountryCode(
+                        countryCode.toUpperCase(), now, pageable)
+                : storeProductRepository.findB2cFlashSaleProductIds(now, pageable);
+
+        List<UUID> pageIds = rows.stream().map(row -> (UUID) row[0]).toList();
+        if (pageIds.isEmpty()) {
+            return ApiResponse.success(List.of(), "Flash sale products fetched successfully");
+        }
+
+        Map<UUID, Product> byId = productRepository.findAllById(pageIds).stream()
+                .collect(Collectors.toMap(Product::getId, p -> p, (a, b) -> a));
+        List<Product> products = pageIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
+
+        List<ProductResponse> responses = toResponseBatch(products, lang, false);
+        // Prices (and with them onFlashSale / flashSaleEndsAt) resolve through exactly the same path
+        // as every other list, so the rail cannot quote a price the product page disagrees with.
+        applyBatchCountryPricing(responses, products, countryCode, currency, lat, lng, true, now);
+        return ApiResponse.success(onlyOnFlashSale(responses, now), "Flash sale products fetched successfully");
+    }
+
+    /**
+     * Keeps only the products whose RESOLVED price is on a live flash sale.
+     *
+     * <p>The query behind the rail asks "is this product on sale in ANY consumer-visible store", and
+     * that is a different question from the one the card answers. The price on the card comes from ONE
+     * store option — the express one, else the cheapest the query found — and with no market selected
+     * it comes from the globally cheapest store instead. Either can easily be a store that is not on
+     * the sale, and then the rail lists a full-price product with no struck-through price, no badge
+     * and no countdown, which is the feature visibly not working. With no country at all that was the
+     * usual case, not the edge one.
+     *
+     * <p>So the rail is filtered by what the response actually says: {@code onFlashSale} is set by
+     * applyPrimaryOption from the very option the price came from. A page may therefore come back
+     * shorter than {@code size} — deliberately. A short honest rail is worth more than a full one
+     * that quotes prices the shop is not discounting.
+     *
+     * <p>The flag alone was not enough, and three kinds of full-price card were still getting through
+     * it. Each is now checked against the RESPONSE ITSELF rather than trusted from the flag, because
+     * the flag is set several fields and one currency conversion earlier:
+     *
+     * <ol>
+     *   <li><b>No price at all.</b> {@code onFlashSale} is set inside the discount branch while
+     *       {@code storePrice} is set outside it, so a conversion that yields null (no FX rate for the
+     *       requested display currency) left a badge and a countdown over a blank price.</li>
+     *   <li><b>No saving in the currency the customer sees.</b> The discount test ran on the store's
+     *       own figures; the card shows converted ones. Two prices a cent apart round to the same
+     *       number at many rates, and the result is a strike-through and a countdown over an identical
+     *       price — a full-price card wearing a sale badge. Requiring
+     *       {@code originalPrice > storePrice} in the display currency is the honest test, and
+     *       buildStoreOption now applies it at source too; this is the backstop for the two global
+     *       fallback paths.</li>
+     *   <li><b>A countdown that has already run out.</b> The rail query and the pricing pass each read
+     *       their own clock, so a sale ending between the two produced an entry whose
+     *       {@code flashSaleEndsAt} was in the past — a countdown starting at zero. The single
+     *       {@code now} threaded from the caller closes that at source; this keeps it closed if a
+     *       future caller forgets.</li>
+     * </ol>
+     */
+    static List<ProductResponse> onlyOnFlashSale(List<ProductResponse> responses, Instant now) {
+        return responses.stream()
+                .filter(r -> Boolean.TRUE.equals(r.getOnFlashSale()))
+                .filter(r -> r.getStorePrice() != null)
+                .filter(r -> r.getOriginalPrice() != null
+                        && r.getOriginalPrice().compareTo(r.getStorePrice()) > 0)
+                .filter(r -> r.getFlashSaleEndsAt() != null && !r.getFlashSaleEndsAt().isBefore(now))
+                .toList();
+    }
+
     // ======================================================================
     // B2B browse (PUBLIC) — channel = B2B. Same DTO shape as the consumer
     // catalog, but sourced from b2bEnabled store products in B2B-enabled
@@ -981,6 +1078,7 @@ public class ProductService {
             r.setFreeDelivery(null);
             r.setDeliveryFee(null);
             r.setStoreProductId(storeProductIdsByProduct.get(r.getId()));
+            // variants[] carries no price — see VariantDto — so there is nothing buyable to clear there.
         }
         applyRatingsBatch(responses, products);
     }
@@ -1650,8 +1748,20 @@ public class ProductService {
      * (code + name translations) — the latter will find-or-create the global spec group.
      * Each spec option can be referenced by globalOptionId (existing) or defined inline
      * (value translations + optional unit) — the latter always creates a new global spec option.
-     * additionalPrice = 0 means the spec is included in the base product price.
-     * additionalPrice > 0 means it is an upgrade option that costs extra.
+     * Spec options are DESCRIPTIVE only and carry no price of their own — ProductSpecOption has
+     * value/unit/colorCode and nothing else. An "additionalPrice" was documented for years and both
+     * clients implemented DisplayedPrice = BasePrice + additionalPrice against it; the field has never
+     * existed, so the term was always +0.
+     *
+     * <p>Nor is a VARIANT the answer today, which is what this comment used to claim: a variant
+     * identifies which SKU is shipped and caps its stock, and {@code variants[].storePrice} does not
+     * exist either — VariantDto carries no price, and {@code store_product_variants.store_price} is
+     * never consulted for money. There is exactly ONE price per listing, the store product's, and every
+     * surface in the shop quotes it (see {@code CartLinePricing} for why a variantId must not decide a
+     * price). So a spec option that genuinely costs more money cannot be priced as one today: it needs
+     * its own product/listing until per-variant pricing is built, which is a backend change plus both
+     * clients. Saying otherwise here is worse than saying nothing — it is what both clients built
+     * against.
      */
     private void saveSpecs(
             Product product,
@@ -2083,16 +2193,21 @@ public class ProductService {
     private void applyCountryPricing(ProductResponse response, UUID productId,
                                      String countryCode, String displayCurrency,
                                      Double lat, Double lng) {
+        // ONE instant for the whole response. Discounts now expire (V60), and Instant.now() read
+        // per option would let two stores of the same product be judged against different clocks —
+        // one showing a sale price the other has just stopped showing.
+        Instant now = Instant.now();
+
         if (countryCode == null || countryCode.isBlank()) {
             // No country code provided - try to find global cheapest price
-            setGlobalPrice(response, productId, displayCurrency);
+            setGlobalPrice(response, productId, displayCurrency, now);
             return;
         }
 
         String code = countryCode.toUpperCase();
         Country country = countryRepository.findByCode(code).orElse(null);
         if (country == null) {
-            setGlobalPrice(response, productId, displayCurrency);
+            setGlobalPrice(response, productId, displayCurrency, now);
             return;
         }
 
@@ -2115,27 +2230,57 @@ public class ProductService {
                 UUID sid = (UUID) row[0];
                 Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
                 options.add(buildStoreOption(sid, (BigDecimal) row[1], row[2], (BigDecimal) row[3],
-                        storeCurrency, target, express));
+                        (Instant) row[4], (Instant) row[5], now, storeCurrency, target, express));
             }
             response.setStoreOptions(options);
 
             // Primary store: first express store, or cheapest if none are express
-            ProductResponse.StoreOptionDto primary = options.stream()
-                    .filter(o -> Boolean.TRUE.equals(o.getExpressDelivery()))
-                    .findFirst()
-                    .orElse(options.get(0));
-            response.setStoreId(primary.getStoreId());
-            response.setStorePrice(primary.getStorePrice());
-            response.setOriginalPrice(primary.getOriginalPrice());
-            response.setCurrency(target);
-            response.setExpressDelivery(primary.getExpressDelivery());
+            int primaryIndex = 0;
+            for (int i = 0; i < options.size(); i++) {
+                if (Boolean.TRUE.equals(options.get(i).getExpressDelivery())) {
+                    primaryIndex = i;
+                    break;
+                }
+            }
+            applyPrimaryOption(response, options.get(primaryIndex), target);
         } else {
             // Not available in this specific country - fall back to global price for display
-            setGlobalPrice(response, productId, displayCurrency);
+            setGlobalPrice(response, productId, displayCurrency, now);
         }
     }
 
-    private void setGlobalPrice(ProductResponse response, UUID productId, String displayCurrency) {
+    // Store options keep the ORDER THE QUERY GAVE THEM — raw storePrice ASC — and the primary option
+    // is still the first express store, else the first of that list. Re-ordering them by the
+    // discounted price was tried here and reverted: response.storeId is the store the client sends
+    // back as the one to fulfil from, so sorting this list silently moves every discounted product's
+    // order to a different store, which is a fulfilment change nobody asked for and nothing else in
+    // the checkout path expects. A discounted store therefore stays where the query put it; that it
+    // may be listed below a dearer one is pre-existing and cosmetic, and fixing it needs a decision
+    // about fulfilment, not a comparator.
+
+    /** Copies the chosen store option onto the product response, flash-sale fields included. */
+    private void applyPrimaryOption(ProductResponse response, ProductResponse.StoreOptionDto primary,
+                                    String currency) {
+        response.setStoreId(primary.getStoreId());
+        response.setStorePrice(primary.getStorePrice());
+        response.setOriginalPrice(primary.getOriginalPrice());
+        response.setCurrency(currency);
+        response.setExpressDelivery(primary.getExpressDelivery());
+        // The rail and the countdown read these. Taken from the SAME option the price came from, so
+        // a product can never advertise a countdown belonging to a store it is not priced from.
+        response.setOnFlashSale(primary.getFlashSaleEndsAt() != null ? Boolean.TRUE : null);
+        response.setFlashSaleEndsAt(primary.getFlashSaleEndsAt());
+        // A sale still to come carries no countdown and no onFlashSale — it is not running — but the
+        // instant travels with the pre-sale price so the caches know when that price stops being true.
+        response.setFlashSaleStartsAt(primary.getFlashSaleStartsAt());
+    }
+
+    /**
+     * The no-country / not-sold-in-country fallback — what an anonymous first-time visitor with no
+     * market selected is shown. Priced through the same {@link #buildStoreOption} as the country
+     * path, so the two cannot drift apart.
+     */
+    private void setGlobalPrice(ProductResponse response, UUID productId, String displayCurrency, Instant now) {
         List<Object[]> globalPrice = storeProductRepository.findCheapestB2cStoreGlobally(productId);
         if (!globalPrice.isEmpty()) {
             Object[] row = globalPrice.get(0);
@@ -2143,11 +2288,21 @@ public class ProductService {
             String storeCurrency = (String) row[1];
             String target = (displayCurrency != null && !displayCurrency.isBlank()) ? displayCurrency.toUpperCase() : storeCurrency;
 
-            BigDecimal effective = StoreProduct.effectivePrice(rawPrice, (Product.DiscountType) row[2], (BigDecimal) row[3]);
-            response.setStorePrice(currencyExchangeService.convert(effective, storeCurrency, target));
-            if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
-                response.setOriginalPrice(currencyExchangeService.convert(rawPrice, storeCurrency, target));
+            Instant startsAt = (Instant) row[4];
+            Instant endsAt = (Instant) row[5];
+
+            ProductResponse.StoreOptionDto option = buildStoreOption(
+                    null, rawPrice, row[2], (BigDecimal) row[3], startsAt, endsAt, now,
+                    storeCurrency, target, null);
+            response.setStorePrice(option.getStorePrice());
+            if (option.getOriginalPrice() != null) {
+                response.setOriginalPrice(option.getOriginalPrice());
+                if (option.getFlashSaleEndsAt() != null) {
+                    response.setOnFlashSale(Boolean.TRUE);
+                    response.setFlashSaleEndsAt(option.getFlashSaleEndsAt());
+                }
             }
+            response.setFlashSaleStartsAt(option.getFlashSaleStartsAt());
             response.setCurrency(target);
         }
     }
@@ -2156,17 +2311,60 @@ public class ProductService {
      * Builds a store option with discount applied: storePrice = effective (discounted)
      * price converted to the display currency, originalPrice = pre-discount price (only
      * when an actual discount lowers the price). Single place the read-path discount math lives.
+     *
+     * <p>Since V60 a discount also has a WINDOW, so the two date columns and the request's single
+     * {@code now} are required parameters rather than something a caller may forget: outside the
+     * window there is no discount, no struck-through price and no countdown, and the shopper pays
+     * {@code storePrice} — which is exactly what the cart and checkout will charge them.
+     *
+     * <p><b>The price always comes from the PARENT listing row, never from a variant.</b> An earlier
+     * attempt quoted the cheapest active variant here so that a card would match a variant-priced
+     * cart line, and it made things worse rather than better: the web storefront sends no variantId
+     * (it posts {storeId, productId, quantity}), so CartService priced its lines from the parent and
+     * this method advertised 900 for a listing the basket charged 1000 for — a divergence in the
+     * direction that costs the customer money, on the busier of the two clients, where there had been
+     * none. There is exactly ONE number a customer is shown for a product and it is this one; the
+     * cart, the checkout, Buy Now and the abandoned-cart email all price through
+     * {@code StoreProduct.effectivePrice} on the same row, so they cannot disagree with it. See
+     * {@code CartLinePricing} for why a variantId identifies a line without pricing it.
+     *
+     * <p>{@code flashSaleEndsAt} is set only for a LIVE discount that has an end. A permanent
+     * markdown gets its struck-through price and no countdown, because there is nothing to count
+     * down to. Both the countdown and the struck-through price are decided on the CONVERTED pair,
+     * not the store-currency one: two figures a cent apart can round to the same number in the
+     * display currency, and a strike-through plus a countdown over an identical price is a
+     * full-price card wearing a sale badge — which is exactly what the rail must not show.
      */
     private ProductResponse.StoreOptionDto buildStoreOption(
             UUID storeId, BigDecimal rawPrice, Object discountType, BigDecimal discountValue,
+            Instant discountStartsAt, Instant discountEndsAt, Instant now,
             String fromCurrency, String toCurrency, Boolean express) {
         Product.DiscountType dType = (Product.DiscountType) discountType;
-        BigDecimal effective = StoreProduct.effectivePrice(rawPrice, dType, discountValue);
+        BigDecimal effective = StoreProduct.effectivePrice(
+                rawPrice, dType, discountValue, discountStartsAt, discountEndsAt, now);
+
         BigDecimal convEffective = currencyExchangeService.convert(effective, fromCurrency, toCurrency);
+        BigDecimal convList = currencyExchangeService.convert(rawPrice, fromCurrency, toCurrency);
         ProductResponse.StoreOptionDto opt =
                 new ProductResponse.StoreOptionDto(storeId, convEffective, toCurrency, express);
-        if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
-            opt.setOriginalPrice(currencyExchangeService.convert(rawPrice, fromCurrency, toCurrency));
+        if (convEffective != null && convList != null && convEffective.compareTo(convList) < 0) {
+            opt.setOriginalPrice(convList);
+            if (discountEndsAt != null) {
+                opt.setFlashSaleEndsAt(discountEndsAt);
+            }
+        } else if (discountStartsAt != null && now.isBefore(discountStartsAt)
+                && dType != null && discountValue != null) {
+            // A sale that has NOT started yet. The price above is the pre-sale one and is correct right
+            // now — and stops being correct the moment the window opens, which is why the instant is
+            // stamped on the option.
+            //
+            // It is what lets CatalogueCacheFilter bound this body: without it, a response serialised a
+            // minute before a sale begins carries no sale boundary at all, so it was cached for the full
+            // minute and licensed to the browser for six more — the sale silently failing to start on
+            // the cards while the basket already charged it. Deliberately not conditional on the
+            // scheduled discount actually lowering the price: a spurious bound only shortens a cache
+            // life, while a missing one shows the wrong price.
+            opt.setFlashSaleStartsAt(discountStartsAt);
         }
         return opt;
     }
@@ -2189,6 +2387,21 @@ public class ProductService {
     private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
                                           String countryCode, String displayCurrency,
                                           Double lat, Double lng, boolean includeExtras) {
+        // One instant for the whole batch — see applyCountryPricing. A 60-product list resolved
+        // against 60 different clocks could show two identical products on different sides of the
+        // same expiry.
+        applyBatchCountryPricing(responses, products, countryCode, displayCurrency, lat, lng,
+                includeExtras, Instant.now());
+    }
+
+    /**
+     * @param now the caller's instant. The flash-sale rail passes its OWN, the one its query selected
+     *            products with: reading the clock again here let a sale end between deciding a product
+     *            was on the rail and deciding what its card said, so the rail listed it at full price.
+     */
+    private void applyBatchCountryPricing(List<ProductResponse> responses, List<Product> products,
+                                          String countryCode, String displayCurrency,
+                                          Double lat, Double lng, boolean includeExtras, Instant now) {
         if (products.isEmpty()) return;
 
         List<UUID> allProductIds = products.stream().map(Product::getId).toList();
@@ -2245,19 +2458,19 @@ public class ProductService {
                     UUID sid = (UUID) row[1];
                     Boolean express = expressStoreIds != null ? expressStoreIds.contains(sid) : null;
                     options.add(buildStoreOption(sid, (BigDecimal) row[2], row[3], (BigDecimal) row[4],
+                            (Instant) row[5], (Instant) row[6], now,
                             countryStoreCurrency, targetCurrency, express));
                 }
                 resp.setStoreOptions(options);
 
-                ProductResponse.StoreOptionDto primary = options.stream()
-                        .filter(o -> Boolean.TRUE.equals(o.getExpressDelivery()))
-                        .findFirst()
-                        .orElse(options.get(0));
-                resp.setStoreId(primary.getStoreId());
-                resp.setStorePrice(primary.getStorePrice());
-                resp.setOriginalPrice(primary.getOriginalPrice());
-                resp.setCurrency(targetCurrency);
-                resp.setExpressDelivery(primary.getExpressDelivery());
+                int primaryIndex = 0;
+                for (int o = 0; o < options.size(); o++) {
+                    if (Boolean.TRUE.equals(options.get(o).getExpressDelivery())) {
+                        primaryIndex = o;
+                        break;
+                    }
+                }
+                applyPrimaryOption(resp, options.get(primaryIndex), targetCurrency);
             } else {
                 // Fallback to global price
                 Object[] gPrice = globalPrices.get(pid);
@@ -2265,12 +2478,25 @@ public class ProductService {
                     BigDecimal rawPrice = (BigDecimal) gPrice[1];
                     String gCurrency = (String) gPrice[2];
                     String finalTarget = targetCurrency != null ? targetCurrency : gCurrency;
-                    BigDecimal effective = StoreProduct.effectivePrice(
-                            rawPrice, (Product.DiscountType) gPrice[3], (BigDecimal) gPrice[4]);
-                    resp.setStorePrice(currencyExchangeService.convert(effective, gCurrency, finalTarget));
-                    if (effective != null && rawPrice != null && effective.compareTo(rawPrice) < 0) {
-                        resp.setOriginalPrice(currencyExchangeService.convert(rawPrice, gCurrency, finalTarget));
+                    Instant gStartsAt = (Instant) gPrice[5];
+                    Instant gEndsAt = (Instant) gPrice[6];
+
+                    // Through buildStoreOption rather than a third inline copy of the same arithmetic:
+                    // the parenthesised fallback used to re-implement the discount test, and now that
+                    // the test also has to know about the window and the converted currency, a third
+                    // copy is a third thing to forget.
+                    ProductResponse.StoreOptionDto option = buildStoreOption(
+                            null, rawPrice, gPrice[3], (BigDecimal) gPrice[4], gStartsAt, gEndsAt, now,
+                            gCurrency, finalTarget, null);
+                    resp.setStorePrice(option.getStorePrice());
+                    if (option.getOriginalPrice() != null) {
+                        resp.setOriginalPrice(option.getOriginalPrice());
+                        if (option.getFlashSaleEndsAt() != null) {
+                            resp.setOnFlashSale(Boolean.TRUE);
+                            resp.setFlashSaleEndsAt(option.getFlashSaleEndsAt());
+                        }
                     }
+                    resp.setFlashSaleStartsAt(option.getFlashSaleStartsAt());
                     resp.setCurrency(finalTarget);
                 }
             }

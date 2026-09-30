@@ -253,8 +253,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
       "options": [
         {
           "localKey": "ram-16gb",
-          "globalOptionId": "uuid-of-global-16gb-ram-option",
-          "additionalPrice": 0
+          "globalOptionId": "uuid-of-global-16gb-ram-option"
         }
       ]
     },
@@ -263,13 +262,11 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
       "options": [
         {
           "localKey": "storage-512",
-          "globalOptionId": "uuid-of-global-512gb-option",
-          "additionalPrice": 0
+          "globalOptionId": "uuid-of-global-512gb-option"
         },
         {
           "localKey": "storage-1tb",
-          "globalOptionId": "uuid-of-global-1tb-option",
-          "additionalPrice": 150.00
+          "globalOptionId": "uuid-of-global-1tb-option"
         }
       ]
     },
@@ -283,8 +280,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
           "localKey": "cpu-i7",
           "valueAz": "Intel Core i7-1255U",
           "valueEn": "Intel Core i7-1255U",
-          "valueAr": "Intel Core i7-1255U",
-          "additionalPrice": 0
+          "valueAr": "Intel Core i7-1255U"
         }
       ]
     },
@@ -298,8 +294,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
           "localKey": "os-win11",
           "valueAz": "Win11 Home",
           "valueEn": "Win11 Home",
-          "valueAr": "Win11 Home",
-          "additionalPrice": 0
+          "valueAr": "Win11 Home"
         }
       ]
     },
@@ -314,8 +309,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
           "valueAz": "15.6",
           "valueEn": "15.6",
           "valueAr": "15.6",
-          "unit": "INCH",
-          "additionalPrice": 0
+          "unit": "INCH"
         }
       ]
     },
@@ -329,8 +323,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
           "localKey": "touch-no",
           "valueAz": "No",
           "valueEn": "No",
-          "valueAr": "No",
-          "additionalPrice": 0
+          "valueAr": "No"
         }
       ]
     },
@@ -344,8 +337,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
           "localKey": "kb-en",
           "valueAz": "EN",
           "valueEn": "EN",
-          "valueAr": "EN",
-          "additionalPrice": 0
+          "valueAr": "EN"
         }
       ]
     }
@@ -392,13 +384,27 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
 
 ### Spec option resolution — two modes
 
-**Mode A: Pick from library** — send only `localKey`, `globalOptionId`, and `additionalPrice`. The backend copies `valueAz/En/Ar` and `unit` automatically.
+> **`additionalPrice` does not exist, and never did.** This document used to carry it in every spec
+> option sample (including a non-zero `"additionalPrice": 150.00`) and both clients implemented
+> `DisplayedPrice = BasePrice + additionalPrice` against it. There has never been such a column or such
+> a field: `ProductSpecOption` stores `value`, `unit` and `colorCode`, and the spec option in every
+> response carries no price. The term always evaluated to `+0`, which is why the price never moved when
+> a shopper changed a spec. Send it and it is ignored; read it and it is absent. **Delete any code that
+> reads or sends it.**
+>
+> Spec options are **descriptive**. There is exactly ONE price for a product — the listing's
+> `storePrice` (with `originalPrice` as the struck-through figure) — and picking a different spec does
+> not change it. An option that genuinely has to cost more money cannot be priced as a spec option
+> today, and not as a variant either: `variants[]` carries no price, and a store variant's own
+> `storePrice` is never billed. Until per-variant pricing exists, such an option needs its own product.
+
+
+**Mode A: Pick from library** — send only `localKey` and `globalOptionId`. The backend copies `valueAz/En/Ar` and `unit` automatically.
 
 ```json
 {
   "localKey": "ram-16gb",
-  "globalOptionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "additionalPrice": 0
+  "globalOptionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 }
 ```
 
@@ -409,8 +415,7 @@ The `XXXXXX` part is a random 6-digit number guaranteed to be unique across all 
   "localKey": "cpu-i7",
   "valueAz": "Intel Core i7-1255U",
   "valueEn": "Intel Core i7-1255U",
-  "valueAr": "Intel Core i7-1255U",
-  "additionalPrice": 0
+  "valueAr": "Intel Core i7-1255U"
 }
 ```
 
@@ -460,7 +465,7 @@ All product endpoints return this shape. Fields marked **admin-only** are omitte
       "code": "ram",
       "name": "RAM",
       "options": [
-        { "id": "uuid", "value": "16GB", "unit": "GB", "additionalPrice": 0 }
+        { "id": "uuid", "value": "16GB", "unit": "GB" }
       ]
     }
   ],
@@ -794,20 +799,19 @@ Send:
   On confirm:
     • Store globalOptionId internally
     • Display valueEn (read-only)
-    • Only localKey and additionalPrice remain editable
+    • Only localKey remains editable
 ```
 
-Send: `{ localKey, globalOptionId, additionalPrice }`
+Send: `{ localKey, globalOptionId }`
 
 **Option Mode B: Manual entry**
 ```
 localKey (required)
 valueAz / valueEn / valueAr (required)
 unit dropdown (optional)
-additionalPrice (default 0)
 ```
 
-Send: `{ localKey, valueAz, valueEn, valueAr, unit?, additionalPrice }`
+Send: `{ localKey, valueAz, valueEn, valueAr, unit? }`
 
 > The backend creates a new global spec option in the resolved group and links it to the product. It will appear in `GET /api/admin/specs` after creation.
 

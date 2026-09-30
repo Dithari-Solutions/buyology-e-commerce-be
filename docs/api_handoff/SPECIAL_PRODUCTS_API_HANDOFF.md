@@ -88,14 +88,16 @@ Both endpoints return the standard `ProductResponse` envelope. The fields releva
     {
       "id": "uuid",
       "value": "string",
-      "unit": "string | null",
-      "additionalPrice": 0.00
+      "unit": "string | null"
     }
   ]
 }
 ```
 
-> `additionalPrice` is `0` for the base spec tier. Values `> 0` indicate an upgrade option that adds to the base product price.
+> A spec option is **descriptive** and carries no price. This sample used to show an `additionalPrice`
+> and say that values `> 0` add to the base product price; no such field is serialised and no such
+> column exists, so that instruction only ever added zero. The product-level `storePrice` is the one and
+> only price, and it does not move when the shopper picks a different spec.
 
 ### ColorOptionDto
 
@@ -289,8 +291,13 @@ GET /api/product/{productId}?lang=EN
 
 If a product has `variants`, each variant maps to a combination of spec options via `specOptionIds`. To resolve which configuration a variant represents:
 
-1. Build a lookup map: `specOptionId → { groupCode, value, additionalPrice }`
-2. For each variant, join its `specOptionIds` against the map to display the configuration label and total price modifier.
+1. Build a lookup map: `specOptionId → { groupCode, value }`
+2. For each variant, join its `specOptionIds` against the map to display the configuration **label**.
+
+There is **no price modifier**. `additionalPrice` does not exist on a spec option, and `variants[]`
+carries no price — the product-level `storePrice` is the one and only price, and it does not change when
+the shopper picks a different variant. Send `variants[].id` as `variantId` on add-to-cart to choose the
+SKU; the backend charges the listing's price either way.
 
 ### Colors
 

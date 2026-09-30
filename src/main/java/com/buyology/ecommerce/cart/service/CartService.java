@@ -39,6 +39,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -273,9 +274,19 @@ public class CartService {
                     "Current cart country: " + cart.getCountryCode() + ", item country: " + itemCountryCode);
         }
 
-        // Determine base price. Apply the store-level discount to the product price so
-        // the cart charges (and later checks out at) the discounted price — not the raw
-        // price. Variants carry their own price and have no discount in the data model.
+        // Determine base price. Apply the store-level discount so the cart charges (and later checks
+        // out at) the discounted price — not the raw one.
+        //
+        // BOTH branches price identically, from the PARENT store listing. A variantId picks the SKU
+        // and the stock ceiling; it does not pick a price. store_product_variants.store_price is not
+        // quoted by any card, rail, search result or product page, so charging from it would make the
+        // basket disagree with the only figure the shopper was ever shown — and the web storefront
+        // sends no variantId at all, so the two clients would disagree with each other. See
+        // CartLinePricing.
+        //
+        // ONE instant for both branches. Read per branch, an add-to-cart could be priced against a
+        // different clock from the response that renders it.
+        Instant now = Instant.now();
         BigDecimal unitPrice;
         BigDecimal originalUnitPrice = null; // pre-discount price, only set when discounted
         // How many units this line can actually have. Null means the product does not track
@@ -290,13 +301,22 @@ public class CartService {
                         variant.getId(), request.getStoreId(), authCredentialId, request.getProductId());
                 return ApiResponse.failure(HttpStatus.NOT_FOUND, "Variant is not available in the selected store");
             }
-            unitPrice = storeVariant.getStorePrice();
+            // The variant row is resolved for its STOCK and to prove the SKU is sellable here, not for
+            // its price.
+            CartLinePricing.Priced priced = CartLinePricing.price(storeProduct, now);
+            unitPrice = priced.unitPrice();
+            originalUnitPrice = priced.originalUnitPrice();
             availableUnits = storeVariant.getStock();
         } else {
-            unitPrice = storeProduct.effectivePrice();
-            if (storeProduct.hasDiscount()) {
-                originalUnitPrice = storeProduct.getStorePrice();
-            }
+            // The price as of THIS instant, and it is a snapshot, not a promise. Since V60 a discount
+            // has a validity window, so the sale that priced this line can end while the line sits in
+            // the basket: buildCartResponse re-prices every line against the live window on every
+            // read, and createOrder re-prices again and refuses one that got dearer since. See
+            // CartLinePricing for why that is the only arrangement in which the price shown and the
+            // price charged provably agree.
+            CartLinePricing.Priced priced = CartLinePricing.price(storeProduct, now);
+            unitPrice = priced.unitPrice();
+            originalUnitPrice = priced.originalUnitPrice();
             // Product-level stock only caps the line when the switch is on, exactly as in
             // OrderService.createOrder — the two must agree, or the cart refuses something
             // checkout would have allowed, or worse allows something checkout will refuse.
@@ -737,7 +757,7 @@ public class CartService {
      * Returns an empty set when coordinates are not provided.
      */
     // Quick (30-minute) delivery is timezone-checked in the platform's business zone.
-    private static final java.time.ZoneId BUSINESS_ZONE = java.time.ZoneId.of("Asia/Dubai");
+    private static final java.time.ZoneId BUSINESS_ZONE = com.buyology.ecommerce.common.utils.BusinessZone.ID;
 
     private Set<UUID> resolveNearbyStoreIds(Double lat, Double lng) {
         if (lat == null || lng == null) return Collections.emptySet();
@@ -782,7 +802,15 @@ public class CartService {
     private static final String POLICY_BASE_CURRENCY = "AED";
 
     private CartResponse buildCartResponse(Cart cart, Set<UUID> nearbyStoreIds) {
+        // Re-price BEFORE anything reads cart.getTotalPrice(): the delivery threshold, the VAT
+        // extraction and the free-shipping answer are all computed from the subtotal below, so a
+        // correction applied afterwards would leave the basket quoting a fee for a total it no
+        // longer has.
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
+        Map<UUID, BigDecimal> repriced = repriceCartItems(cart, items);
+
         CartResponse response = new CartResponse();
+        response.setPriceChanged(!repriced.isEmpty());
         response.setId(cart.getId());
         response.setAuthCredentialId(cart.getAuthCredential().getId());
         response.setStatus(cart.getStatus().name());
@@ -844,10 +872,10 @@ public class CartService {
             // FX unavailable — leave policy fields null; clients should treat that as "unknown".
         }
 
-        List<CartItem> items = cartItemRepository.findByCartId(cart.getId());
         List<CartItemResponse> itemResponses = new ArrayList<>();
         for (CartItem item : items) {
-            itemResponses.add(buildCartItemResponse(item, nearbyStoreIds, cart.getCountryCode()));
+            itemResponses.add(buildCartItemResponse(item, nearbyStoreIds, cart.getCountryCode(),
+                    repriced.get(item.getId())));
         }
         response.setItems(itemResponses);
 
@@ -890,9 +918,87 @@ public class CartService {
         return response;
     }
 
+    /**
+     * Brings every line's price back in line with its store listing, and reports what moved.
+     *
+     * <p>Runs on every cart read. Before V60 a line's price was written once and never looked at
+     * again — which was harmless while discounts were permanent, and is a mispricing the moment they
+     * expire. See {@link CartLinePricing} for the full rule and why both directions are corrected.
+     *
+     * <p>Variant lines are re-priced too, and were the one kind that was not — they used to be
+     * skipped on the grounds that they were priced from the variant row. They no longer are: a
+     * variant line is priced from the same parent listing as every other line, so there is nothing
+     * left to exempt it from.
+     *
+     * @return the PREVIOUS unit price of every line whose CHARGED price moved, keyed by cart item id.
+     *         Empty when nothing changed, which is the overwhelmingly common case and costs ONE query
+     *         for the whole basket. A line whose struck-through "was" figure moved on its own is
+     *         re-stamped but left out: nothing the customer pays has changed, so there is no price
+     *         change to announce and no total to recompute.
+     */
+    private Map<UUID, BigDecimal> repriceCartItems(Cart cart, List<CartItem> items) {
+        // One instant for the whole cart. Read per line, two lines of one basket could be judged
+        // against different clocks and straddle the second a sale ends.
+        Instant now = Instant.now();
+
+        // ONE query for the whole basket, whatever its size. Asking per line put N queries on the
+        // hottest customer endpoint in the shop, on the read that happens before anything can be
+        // displayed.
+        CartLinePricing.Basket basket = CartLinePricing.liveListings(storeProductRepository, items);
+
+        Map<UUID, BigDecimal> moved = new HashMap<>();
+        for (CartItem item : items) {
+            // Listing gone or switched off: leave the stamped price alone. That is a
+            // stock/availability problem, and the order path refuses it with a message about
+            // availability — re-pricing it to nothing here would only turn it into a confusing 409
+            // about money.
+            CartLinePricing.Priced live = basket.priceFor(item, now);
+            if (live == null) continue;
+            boolean unitMoved = CartLinePricing.moved(item.getUnitPrice(), live.unitPrice());
+            // EITHER figure, not just the charged one. A line stamped at 800 with "was 1000" whose
+            // listing has its storePrice lowered to 850 still charges 800 — so the old gate skipped
+            // it and the basket went on advertising a 200 saving while the product page showed 50.
+            // Both figures are shown to the customer, so both have to be true.
+            boolean originalMoved =
+                    CartLinePricing.originalMoved(item.getOriginalUnitPrice(), live.originalUnitPrice());
+            if (!unitMoved && !originalMoved) continue;
+
+            BigDecimal previous = item.getUnitPrice();
+            BigDecimal previousOriginal = item.getOriginalUnitPrice();
+            item.setUnitPrice(live.unitPrice());
+            item.setTotalPrice(live.unitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            // Re-stamped, not left behind: a line added during a sale kept its struck-through "was"
+            // price forever once the sale ended, advertising a saving nobody was getting.
+            item.setOriginalUnitPrice(live.originalUnitPrice());
+            cartItemRepository.save(item);
+
+            if (unitMoved) {
+                // Only a moved CHARGED price is a price change to the customer, and only it needs the
+                // cart total recomputed. Telling a shopper "this item's price has changed" because a
+                // strike-through was corrected would be a false alarm about their own money.
+                moved.put(item.getId(), previous);
+                log.info("[CART] re-priced line {} {} -> {} (discount window moved) [cartId={}]",
+                        item.getId(), previous, live.unitPrice(), cart.getId());
+            } else {
+                log.info("[CART] re-stamped the \"was\" price on line {} {} -> {} (list price moved; the "
+                                + "charged price is unchanged at {}) [cartId={}]",
+                        item.getId(), previousOriginal, live.originalUnitPrice(), item.getUnitPrice(),
+                        cart.getId());
+            }
+        }
+        if (!moved.isEmpty()) {
+            recalculateCartTotal(cart);
+        }
+        return moved;
+    }
+
     private CartItemResponse buildCartItemResponse(CartItem item, Set<UUID> nearbyStoreIds,
-                                                  String countryCode) {
+                                                  String countryCode, BigDecimal previousUnitPrice) {
         CartItemResponse response = new CartItemResponse();
+        if (previousUnitPrice != null) {
+            response.setPriceChanged(true);
+            response.setPreviousUnitPrice(previousUnitPrice);
+        }
         response.setId(item.getId());
         response.setProductId(item.getProduct().getId());
         response.setProductSku(item.getProduct().getSku());

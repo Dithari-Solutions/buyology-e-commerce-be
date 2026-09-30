@@ -2,6 +2,8 @@ package com.buyology.ecommerce.order.service;
 
 import com.buyology.ecommerce.cart.domain.Cart;
 import com.buyology.ecommerce.cart.domain.CartItem;
+import com.buyology.ecommerce.cart.domain.CartPriceChangedException;
+import com.buyology.ecommerce.cart.service.CartLinePricing;
 import com.buyology.ecommerce.product.domain.InsufficientStockException;
 import com.buyology.ecommerce.product.domain.Product;
 import com.buyology.ecommerce.product.repository.ProductTranslationRepository;
@@ -258,12 +260,59 @@ public class OrderService {
     // =========================================================================
 
     /**
+     * Whether the customer's money has already been taken by the time this checkout runs.
+     *
+     * <p>It decides ONE thing — what re-pricing is allowed to do when the basket's live prices no
+     * longer match the ones the customer was quoted — and it decides it in opposite directions,
+     * because the two situations are not the same situation:
+     *
+     * <ul>
+     *   <li>{@link #BEFORE_CAPTURE} — nothing has been charged yet, so a basket that got DEARER is
+     *       refused and the customer re-confirms. Refusing costs them a reload; carrying on would
+     *       charge them more than the screen said.</li>
+     *   <li>{@link #AFTER_CAPTURE} — the money is taken and the decision is made, so the quoted total
+     *       is authoritative. Re-pricing may not refuse (the throw would roll back the transaction and
+     *       leave a captured payment with no order at all), may not rewrite the total in either
+     *       direction, and may not decide anything. A difference is an anomaly for a human, recorded
+     *       by the caller that knows about the payment.</li>
+     * </ul>
+     *
+     * <p>Both halves were learnt the hard way: the refusal, written for the order-first flow, escaped
+     * into the cart-first payment listener, where it destroyed exactly the orders it was written to
+     * protect — customer charged, gateway confirmation shown, no order, nothing shipped, and no record
+     * that anything had happened.
+     */
+    enum CapturePhase {
+        /** No money taken yet: a price rise refuses the checkout. */
+        BEFORE_CAPTURE,
+        /** Money already captured against the quoted total: record a difference, never act on it. */
+        AFTER_CAPTURE
+    }
+
+    /**
      * Creates an order from a CHECKED_OUT cart.
      * The order starts in PENDING_PAYMENT; it transitions to PAID automatically
      * when the payment webhook fires a PaymentSucceededEvent.
      */
     @Transactional
     public OrderResponse createOrder(UUID userId, UUID authCredentialId, CreateOrderRequest req) {
+        return createOrder(userId, authCredentialId, req, CapturePhase.BEFORE_CAPTURE);
+    }
+
+    /**
+     * The same checkout, told whether the money is already in.
+     *
+     * <p>Only the cart-first payment listener passes {@link CapturePhase#AFTER_CAPTURE}: there the
+     * gateway settles first and the order is built from the cart afterwards. Everything else — the
+     * controller, Buy Now — is pre-capture and keeps the refusal.
+     *
+     * <p>{@code @Transactional} on this overload as well as on the one above, and not only because a
+     * guard test insists: the listener reaches it by plain self-invocation, so this annotation is what
+     * documents that every write below belongs to one transaction.
+     */
+    @Transactional
+    public OrderResponse createOrder(UUID userId, UUID authCredentialId, CreateOrderRequest req,
+                                     CapturePhase phase) {
         // Block ordering for accounts pending deletion — they must recover their account first.
         accountStatusValidator.requireActiveAccount(userId);
 
@@ -309,6 +358,32 @@ public class OrderService {
         if (cartItems.isEmpty()) {
             throw new IllegalStateException("Cannot create an order: no items are selected for checkout");
         }
+
+        // The price the basket is SHOWING has to be the price we charge — and this has to happen HERE,
+        // before anything else in this method looks at a price.
+        //
+        // Every line's unit price was frozen when it was added to the cart and, until V60, nothing
+        // ever re-read it: the order loop copies cartItem.getUnitPrice() verbatim and the subtotal is
+        // cart.getTotalPrice(), the sum of those same frozen figures. Safe only while a discount could
+        // not change on its own. Now one can expire, so the basket is re-priced against the live
+        // windows and a checkout that got DEARER is refused instead of silently billed.
+        //
+        // Above the reuse decision, not below it, and that placement IS the fix. Everything after this
+        // point reads the basket's prices: resolveFulfilment puts cart.getTotalPrice() through the
+        // free-delivery threshold, and CheckoutIdentity compares prior.getSubtotal() and each line's
+        // unitPrice against the cart's. Run afterwards, the guard was unreachable on the one path that
+        // needed it most — a second createOrder for a cart whose sale has since ended matched a prior
+        // PENDING_PAYMENT order on the STAMPED figures, was handed back at the old sale price, and
+        // returned before any re-pricing happened. The correctness of the price then depended on the
+        // client having reloaded the basket first, which is exactly the assumption CartLinePricing
+        // exists to remove. It cuts the mirror case too: a sale that starts after the order was cut no
+        // longer leaves the customer reusable at the old, higher price while every card shows the new
+        // one — the cart re-prices down, the identity check no longer matches, and the stale order is
+        // superseded.
+        //
+        // AFTER_CAPTURE it does none of that and returns, because all three of those actions are
+        // wrong once the money is taken — see CapturePhase.
+        repriceForCheckout(cart, cartItems, phase);
 
         // The order is constrained to the user's market: their explicitly selected country,
         // or (if unset) the country the cart was browsed/priced in.
@@ -398,7 +473,8 @@ public class OrderService {
 
         transitionTo(order, OrderStatus.PENDING_PAYMENT);
 
-        // Pricing
+        // Pricing. The subtotal is the cart's own total, which repriceForCheckout has already brought
+        // in line with the live discount windows — see the call above resolveFulfilment.
         BigDecimal subtotal = cart.getTotalPrice();
         BigDecimal discount = BigDecimal.ZERO;
         UUID appliedPromoId = null;
@@ -633,6 +709,12 @@ public class OrderService {
             item.setVariantSku(cartItem.getVariant() != null ? cartItem.getVariant().getSku() : null);
             item.setQuantity(cartItem.getQuantity());
             item.setUnitPrice(cartItem.getUnitPrice());
+            // The pre-discount figure the basket struck through, copied onto the order for the same
+            // reason every other number here is: it is the evidence of WHICH advertised price was
+            // honoured. Without it the order, the receipt and the order response can show what was
+            // charged but not what the customer was told they were saving, and a consumer-protection
+            // question about a sale price has no answer in the record.
+            item.setOriginalUnitPrice(cartItem.getOriginalUnitPrice());
             item.setTotalPrice(cartItem.getTotalPrice());
             item.setSupplierId(cartItem.getProduct().getSupplierId());
             order.getItems().add(item);
@@ -844,6 +926,128 @@ public class OrderService {
     }
 
     /**
+     * Brings the selected lines up to their live prices and, BEFORE the money is captured, refuses a
+     * basket that got DEARER.
+     *
+     * <p>The direction matters more than the movement. A customer who is now paying LESS must not be
+     * stopped to be told so: the 409 is a status no released storefront or app handles, so refusing a
+     * price drop turns good news into a customer who cannot check out — strictly worse than the
+     * overcharge the refusal exists to prevent. So a drop (or a level total) is applied and charged,
+     * and only a rise is handed back. {@link CheckoutRepricing} holds that decision.
+     *
+     * <p>Variant lines are re-priced here too, and were the one kind that could never move — they used
+     * to be skipped because they were priced from the variant row instead of the listing. Every line
+     * is now priced from its parent listing (see {@link com.buyology.ecommerce.cart.service.CartLinePricing}
+     * for why a variantId must not decide a price), so there is nothing left to exempt. A line whose
+     * LISTING has vanished or been switched off is still skipped, and is refused by the stock guards
+     * below, which resolve the listing again and fail: that is an availability problem and must not be
+     * answered with a 409 about money.
+     *
+     * <p>Writing the corrected prices back to the CART, not just to the order, is deliberate: the
+     * cart's own total is what the subtotal, the free-delivery threshold and the reuse check all read
+     * a few lines later, and leaving them to work from the stale figures is how the three end up
+     * disagreeing inside one response.
+     *
+     * <p><b>{@link CapturePhase#AFTER_CAPTURE} it does nothing at all, and returns.</b> Not a
+     * shortcut — every one of the three things it does above is wrong once the money is taken:
+     *
+     * <ul>
+     *   <li>The <b>refusal</b> is a RuntimeException thrown inside the payment listener's own
+     *       transaction. It rolled that transaction back and left a captured payment with no order and
+     *       no anomaly: the customer charged, holding a gateway confirmation, with nothing on its way
+     *       and nobody alerted. A guard written to stop a customer being overcharged became, here, the
+     *       thing that took their money and gave them nothing.</li>
+     *   <li>Rewriting the lines and the cart total <b>DOWN</b> made the order record less than was
+     *       captured, and {@code isPaidAmountSufficient} only asks whether the payment COVERS the
+     *       total — so the overpayment passed, the order went PAID, and the difference was kept with
+     *       no record of it anywhere.</li>
+     *   <li>Rewriting the total at all also moves {@code cart.totalPrice}, which
+     *       {@link CheckoutIdentity} compares against a prior PENDING_PAYMENT order's subtotal: the
+     *       order-first order standing on this cart stops matching, is superseded, and is rebuilt at
+     *       the new price.</li>
+     * </ul>
+     *
+     * <p>So after capture the quoted total stands, and the difference is recorded instead — by
+     * {@code onPaymentSucceeded}, which is the only caller that knows there is a payment to attach it
+     * to. See {@link com.buyology.ecommerce.payment.enums.PaymentAnomalyKind#PRICE_CHANGED_AFTER_CAPTURE}.
+     *
+     * @see com.buyology.ecommerce.cart.service.CartLinePricing
+     */
+    private void repriceForCheckout(Cart cart, List<CartItem> cartItems, CapturePhase phase) {
+        if (phase == CapturePhase.AFTER_CAPTURE) {
+            // Nothing to do, and nothing that MAY be done: the quoted total is authoritative once the
+            // money is in. onPaymentSucceeded measures the same difference and records it as an
+            // anomaly — the javadoc above says what each write below would break if it ran here.
+            return;
+        }
+
+        // One instant for the whole order, so two lines cannot be judged against different clocks.
+        Instant now = Instant.now();
+        CheckoutRepricing.Outcome outcome = quotedVersusLive(cartItems, now);
+        if (!outcome.anythingMoved()) {
+            return;
+        }
+
+        if (outcome.dearer()) {
+            CheckoutRepricing.Line worst = outcome.largestRise();
+            throw new CartPriceChangedException(
+                    worst != null ? worst.cartItemId() : null,
+                    worst != null ? worst.productSku() : null,
+                    outcome.stampedTotal(), outcome.liveTotal());
+        }
+
+        Map<UUID, CartItem> byId = new java.util.HashMap<>();
+        for (CartItem item : cartItems) {
+            byId.put(item.getId(), item);
+        }
+        for (CheckoutRepricing.Line moved : outcome.moved()) {
+            CartItem item = byId.get(moved.cartItemId());
+            item.setUnitPrice(moved.live());
+            item.setOriginalUnitPrice(moved.liveOriginal());
+            item.setTotalPrice(moved.live().multiply(BigDecimal.valueOf(item.getQuantity())));
+            cartItemRepo.save(item);
+        }
+        // cart.totalPrice is BY DEFINITION the selected subtotal (CartService.recalculateCartTotal),
+        // and cartItems IS the selected set — so this is that same sum, recomputed from the lines
+        // this method just corrected.
+        BigDecimal selectedSubtotal = cartItems.stream()
+                .map(CartItem::getTotalPrice)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        cart.setTotalPrice(selectedSubtotal);
+        cartRepo.save(cart);
+
+        log.info("[ORDER] createOrder: re-stamped {} basket line(s) for cart {} — {} -> {}; nothing rose, "
+                        + "so the checkout is charged at the live figures rather than refused",
+                outcome.moved().size(), cart.getId(), outcome.stampedTotal(), outcome.liveTotal());
+    }
+
+    /**
+     * What the basket was quoted at, and what the same lines price at right now.
+     *
+     * <p>Read-only on purpose, and shared by both callers for exactly that reason: the pre-capture
+     * path acts on this (correct the lines, or refuse), the post-capture path may only record it. One
+     * measurement, two policies — so the difference an anomaly reports can never be a different
+     * difference from the one a checkout would have refused over.
+     *
+     * <p>Costs ONE query for the whole basket, on the checkout path as on the cart path.
+     *
+     * @param now one instant for the whole basket, so two lines cannot straddle the second a sale ends
+     */
+    private CheckoutRepricing.Outcome quotedVersusLive(List<CartItem> cartItems, Instant now) {
+        CartLinePricing.Basket basket = CartLinePricing.liveListings(storeProductRepo, cartItems);
+        List<CheckoutRepricing.Line> lines = new ArrayList<>(cartItems.size());
+        for (CartItem item : cartItems) {
+            CartLinePricing.Priced live = basket.priceFor(item, now);
+            lines.add(new CheckoutRepricing.Line(item.getId(),
+                    item.getProduct() != null ? item.getProduct().getSku() : null,
+                    item.getQuantity(), item.getUnitPrice(), item.getOriginalUnitPrice(),
+                    live == null ? null : live.unitPrice(),
+                    live == null ? null : live.originalUnitPrice()));
+        }
+        return CheckoutRepricing.decide(lines);
+    }
+
+    /**
      * Creates a "Buy Now" order for a SINGLE product without disturbing the user's
      * persistent cart. We build a throwaway, single-item cart (separate from the
      * active cart), mark it CHECKED_OUT, and run it through the exact same {@link
@@ -887,8 +1091,14 @@ public class OrderService {
         // Resolve the discounted store price in the store's native currency (same as
         // CartService.addItem). No variant: matches the product-detail Buy Now flow,
         // and createOrder only decrements stock for variant items.
-        BigDecimal unitPrice = storeProduct.effectivePrice();
-        BigDecimal originalUnitPrice = storeProduct.hasDiscount() ? storeProduct.getStorePrice() : null;
+        // One instant, not two: the price and the "was" figure are two separate questions about the
+        // same discount, so a sale expiring between them would charge the full price and still strike
+        // through a "was" figure above it. Buy Now prices at the moment of ordering and is already
+        // coherent — what it charges is what the sale says right now, with no basket to go stale.
+        Instant pricedAt = Instant.now();
+        CartLinePricing.Priced priced = CartLinePricing.price(storeProduct, pricedAt);
+        BigDecimal unitPrice = priced.unitPrice();
+        BigDecimal originalUnitPrice = priced.originalUnitPrice();
 
         AuthCredentials credential = authCredentialRepository.findById(authCredentialId)
                 .orElseThrow(() -> new IllegalArgumentException("Auth credential not found"));
@@ -1132,16 +1342,29 @@ public class OrderService {
                 req.setShippingFee(shippingFee);
             }
 
+            // What the customer was quoted, against what the same basket prices at NOW — measured
+            // BEFORE the order is built, because building it is what stops the cart being the record
+            // of the quote.
+            //
+            // The gap this lives in is real and not small: the gateway captured the money, and this
+            // AFTER_COMMIT listener runs seconds to minutes later (webhooks retry). A discount can
+            // expire or start inside it, or an admin can edit a price. Whichever way it moved, the
+            // quoted total is what the order is built from — createOrder is called AFTER_CAPTURE, so
+            // re-pricing neither refuses nor rewrites it — and the difference is recorded below as an
+            // anomaly for a human to settle. Nothing here may be allowed to decide anything: the money
+            // is taken and the only reversible thing left is the customer's order.
+            CheckoutRepricing.Outcome divergence = quotedVersusLive(cartItems, Instant.now());
+
             // The money is already captured at this point — this flow settles first and builds the
-            // order from the cart afterwards — so a stock refusal must NOT be allowed to propagate.
-            // Throwing here rolls this transaction back and leaves a captured payment with no order
-            // and no record that anything went wrong: the customer is charged, sees a confirmation,
-            // and nothing ships. Recorded as an anomaly instead, in the same queue and with the same
-            // reasoning as the underpayment branch below. STOCK_UNAVAILABLE auto-refunds, because no
-            // order exists and the money unambiguously bought nothing.
+            // order from the cart afterwards — so NOTHING escaping order creation may be allowed to
+            // propagate unrecorded. Throwing here rolls this transaction back and leaves a captured
+            // payment with no order and no record that anything went wrong: the customer is charged,
+            // sees a confirmation, and nothing ships. Recorded as an anomaly instead, in the same queue
+            // and with the same reasoning as the underpayment branch below. STOCK_UNAVAILABLE
+            // auto-refunds, because no order exists and the money unambiguously bought nothing.
             OrderResponse orderResponse;
             try {
-                orderResponse = createOrder(userId, authCredentialId, req);
+                orderResponse = createOrder(userId, authCredentialId, req, CapturePhase.AFTER_CAPTURE);
             } catch (InsufficientStockException e) {
                 log.error("[ORDER] Cart-first order for tx {} cannot be created — the units are gone ({}). "
                                 + "The payment is already captured; recording it for refund.",
@@ -1164,6 +1387,31 @@ public class OrderService {
                 // Rethrowing rolls all of that back. The anomaly survives because it is written on its
                 // own connection (PaymentAnomalyService.insert is REQUIRES_NEW, for exactly this
                 // reason), so the refund still happens and the event infrastructure logs the throw.
+                throw e;
+            } catch (RuntimeException e) {
+                // The backstop, and the reason it is a catch-all rather than a list of types: the
+                // invariant is about the MONEY, not about which exception carries the news. A captured
+                // payment must never end with no order and no record, so anything at all escaping
+                // createOrder leaves evidence on its way out.
+                //
+                // A CartPriceChangedException is what came through here unhandled — thrown by
+                // re-pricing inside this very transaction, rolling it back, and leaving the customer
+                // charged for an order that was never written and never alerted on. Re-pricing no
+                // longer refuses after capture (see CapturePhase), so that particular throw is gone;
+                // the branch stays because the next one will not announce itself either.
+                //
+                // Rethrown for the same reason the stock branch is: a partial take must roll back.
+                // ORDER_CREATION_FAILED deliberately does NOT auto-refund — the cause is unknown by
+                // definition and a webhook retry may build the order a minute later, so an automatic
+                // refund here would race that retry.
+                log.error("[ORDER] Cart-first order for tx {} could not be created: {}. The payment is "
+                                + "already captured; recording it for review.",
+                        tx.getId(), e.toString());
+                paymentAnomalyService.recordAndAlert(
+                        com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.ORDER_CREATION_FAILED,
+                        tx, null, null,
+                        "cart-first: payment settled but building the order threw — "
+                                + e.getClass().getSimpleName() + ": " + e.getMessage(), "LISTENER");
                 throw e;
             }
 
@@ -1204,6 +1452,45 @@ public class OrderService {
                     sendOrderConfirmationEmailFor(order);
                     // Hand off to downstream integrations (ERPNext sales order + invoice).
                     eventPublisher.publishEvent(new OrderPaidEvent(order.getId()));
+                }
+
+                // The price moved under a payment that had already been taken. The order stands at the
+                // quoted total — that is settled above and is not in question here — but somebody has
+                // to be told, because the difference is money and it falls both ways:
+                //
+                //   * a sale STARTED in the gap: the customer paid more than the shop is now asking,
+                //     and may be owed the difference. Before this was recorded, the code rewrote the
+                //     order down to the sale price instead and kept the overpayment silently — no log,
+                //     no anomaly, nothing a customer could ever be shown.
+                //   * a sale ENDED in the gap: the shop honoured a price it no longer advertises, which
+                //     is the right answer and still worth knowing about.
+                //
+                // Recorded AFTER the order exists, so the record names it; and after the underpayment
+                // branch, because a payment that does not cover its order is the more urgent finding
+                // and only one anomaly per transaction is ever recorded. If that guard swallows this
+                // one, the ERROR log and the order's own tracking line below still carry it.
+                //
+                // On the TOTALS, not on anythingMoved(), and only here: a line can now "move" because
+                // its struck-through was-figure changed while the charged price did not, and a
+                // display correction is not a payment anomaly. What needs a human is a difference in
+                // what the basket costs.
+                if (divergence.stampedTotal().compareTo(divergence.liveTotal()) != 0) {
+                    String detail = "cart-first: the basket priced " + divergence.stampedTotal()
+                            + " when the payment was captured and " + divergence.liveTotal()
+                            + " when the order was built (" + divergence.moved().size()
+                            + " line(s) moved, " + divergence.risen().size() + " of them up). The order "
+                            + "stands at the quoted total; the difference needs a decision.";
+                    log.error("[ORDER] Price moved during the payment window for cart-first order {} "
+                            + "(tx {}): {}", order.getId(), tx.getId(), detail);
+                    paymentAnomalyService.recordAndAlert(
+                            com.buyology.ecommerce.payment.enums.PaymentAnomalyKind.PRICE_CHANGED_AFTER_CAPTURE,
+                            tx, order.getId(), order.getStatus(), detail, "LISTENER");
+                    appendTrackingEvent(order, order.getStatus(),
+                            "Prices moved between payment and order creation (" + divergence.stampedTotal()
+                                    + " -> " + divergence.liveTotal() + "); charged at the quoted total "
+                                    + "and flagged for payment review",
+                            null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
+                    orderRepo.save(order);
                 }
             }
 
@@ -2258,7 +2545,7 @@ public class OrderService {
 
             String orderDate = order.getCreatedAt() != null
                     ? java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy")
-                        .withZone(java.time.ZoneId.of("Asia/Dubai")).format(order.getCreatedAt())
+                        .withZone(com.buyology.ecommerce.common.utils.BusinessZone.ID).format(order.getCreatedAt())
                     : "";
             String displayNo = "#" + order.getId().toString().substring(0, 8).toUpperCase();
             String orderUrl = STOREFRONT_URL + "/en/orders/" + order.getId();
@@ -3403,6 +3690,7 @@ public class OrderService {
         res.setVariantSku(i.getVariantSku());
         res.setQuantity(i.getQuantity());
         res.setUnitPrice(i.getUnitPrice());
+        res.setOriginalUnitPrice(i.getOriginalUnitPrice());
         res.setTotalPrice(i.getTotalPrice());
         res.setCreatedAt(i.getCreatedAt());
         return res;

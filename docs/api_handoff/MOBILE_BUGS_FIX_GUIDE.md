@@ -42,8 +42,33 @@ This document provides the backend details, API endpoints, and field names requi
 - **Data Field**: Use `storePrice` for the price and `title` for the name.
 
 ### Flash Sale
-- **Data Source**: Currently, Flash Sales use the `isSuperDeal=true` flag.
-- **API**: `GET /api/product/search?isSuperDeal=true&lang=EN`.
+- **API**: `GET /api/product/flash-sale?lang=EN&countryCode=UAE&currency=AED` (also takes `lat`/`lng`, `page`, `size`).
+- **Data Source**: real discount windows on the store listing, soonest-ending first. Only products whose
+  price *for the requested market* is discounted right now are returned, so a page can come back shorter
+  than `size` — page on "fewer than asked for means the end", not on an exact count. **`isSuperDeal` is no
+  longer the flash sale** — that flag is the separate, manually curated *Super Deals* rail above and has
+  no price and no dates. Point the Flash Sale rail at this endpoint or the app keeps rendering the old
+  editorial list under the wrong name.
+- **Data Fields**: `storePrice` is the sale price (already discounted, already in the display currency),
+  `originalPrice` is the struck-through "was" price, `flashSaleEndsAt` is the countdown target (ISO-8601
+  instant, UTC) and `onFlashSale` is true. These three appear on every product response, not just this
+  endpoint, so a product card anywhere in the app can show a sale badge. A sale that has not STARTED yet
+  sends `flashSaleStartsAt` instead, alongside the pre-sale price and with no `onFlashSale`: the product
+  is not on sale yet, and the field says when it will be. Never expect both dates on one product.
+- **Expiry**: nothing has to be switched off. A product leaves the rail, loses `onFlashSale` and goes
+  back to its full price by itself the moment its window closes — so a countdown that reaches zero and a
+  product that vanishes on refresh are both correct behaviour, not a bug.
+- **Caching**: this endpoint is deliberately NOT cached, so the countdown you read is current. Other
+  catalogue endpoints are cached for up to 60s — but never PAST a sale boundary: any cached body that
+  quotes a sale (or a sale about to start) expires at that instant, on the server and in the browser's
+  own cache, so a card cannot go on showing a price the cart will not charge. Inside those 60 seconds a
+  badge can still lag an admin's manual price edit, which has no date for anything to expire at.
+- **Checkout**: prices are re-checked when the order is placed, and the direction decides what happens.
+  If the basket got **cheaper** (a sale started), the order is simply placed at the lower price — no error.
+  If it got **dearer** (a sale ended), placing the order returns **409** with a message written for the
+  customer: show it, reload the cart, and let them confirm the new price rather than retrying the old one.
+  An unchanged total never errors. Either way the cart response carries `priceChanged: true` on the lines
+  that moved, with `previousUnitPrice`, so the basket screen can say what changed.
 
 ### Popular For You
 - **Requirement**: Only 4 products.
@@ -55,8 +80,32 @@ This document provides the backend details, API endpoints, and field names requi
 
 ### Price & Spec Selection
 - **Issue**: Price not updating when changing spec.
-- **Field**: `specs[].options[].additionalPrice`.
-- **Logic**: `DisplayedPrice = BasePrice + additionalPrice`. 
+- **`additionalPrice` DOES NOT EXIST. Delete any code that reads it.** This guide previously
+  documented `specs[].options[].additionalPrice` and the formula `DisplayedPrice = BasePrice +
+  additionalPrice`. There has never been such a column or such a field: `ProductSpecOption` carries
+  `value`, `unit` and `colorCode`, and `SpecOptionDto` carries no price. Both clients implemented the
+  formula and the term has always evaluated to `+0`, so the price never moved when a spec changed —
+  which is the bug reported above. Spec options are **descriptive**; a spec that costs more money is
+  modelled as a **variant**.
+- **The real contract — one product, one price.** There is exactly **one** number to show for a
+  product, and it is the product-level **`storePrice`** (with `originalPrice` as the struck-through
+  "was" figure and `currency` as the code). It is resolved from the store listing, discount and window
+  already applied. It does **not** change when the shopper picks a different spec or variant, and there
+  is nothing to add to it.
+  - `variants[]` carries `id`, `sku` and `specOptionIds` only — **no price and no stock.** A variant is
+    an identity, not a price: it says which SKU will be shipped. Selecting one changes the SKU, not the
+    figure on screen.
+  - This is also exactly what the cart charges. Every line — with a variant or without — is priced from
+    the same store listing, so the card, the PDP, the basket, the order and the abandoned-cart email
+    all quote one number. Sending `variantId` on add-to-cart is still correct and still required for a
+    variant product: it decides which SKU is reserved and which stock is decremented. It does not
+    change the price.
+  - **Do not display a per-variant price, and do not compute one.** A card or rail that adds
+    `variants[0]` is fine — the price it showed is the price that will be charged.
+  - If a variant genuinely needs to cost a different amount, that is a **backend + both clients**
+    change and is not shipped. Say so rather than inventing a figure client-side; an invented one is
+    how the app ends up advertising a number the basket does not charge, which is the bug this section
+    exists to close.
 - **Missing Name**: The spec group name is in `specs[].name`. The option name is in `specs[].options[].value`.
 
 ### Related Products (Mock Data)
@@ -112,6 +161,7 @@ This document provides the backend details, API endpoints, and field names requi
 | Currency | `currency` (e.g., "AZN") |
 | Spec Group Name | `specs[].name` |
 | Spec Option Value | `specs[].options[].value` |
-| Additional Price | `specs[].options[].additionalPrice` |
+| Price (the only one) | `storePrice` (discounted; `originalPrice` is the "was" figure) |
+| Selected variant | `variants[].id` — send as `variantId`; it does **not** change the price |
 | Notification Title | `title` |
 | Notification Body | `body` |

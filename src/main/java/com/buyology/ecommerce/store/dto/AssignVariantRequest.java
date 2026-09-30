@@ -17,7 +17,7 @@ public class AssignVariantRequest {
 
     @NotNull(message = "storePrice is required")
     @DecimalMin(value = "0.00", message = "storePrice must be non-negative")
-    @Schema(description = "Variant price in the store's local currency", example = "47000.00")
+    @Schema(description = "Variant price in the store's local currency. RECORDED, not billed: a cart line is priced from the listing's storePrice (discount and window included) whether or not it carries a variantId, because that listing price is the only figure any card, rail, search result or product page quotes. A variantId decides which SKU is shipped and which stock is decremented.", example = "47000.00")
     private BigDecimal storePrice;
 
     @NotNull(message = "stock is required")

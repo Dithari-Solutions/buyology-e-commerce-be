@@ -19,6 +19,19 @@ public interface StoreProductVariantRepository extends JpaRepository<StoreProduc
     List<StoreProductVariant> findByStoreProduct_Id(UUID storeProductId);
 
     /**
+     * Every variant row for a batch of store listings, in one query.
+     *
+     * <p>The single-id version above, called in a loop, is what made the store-product and
+     * flash-sale listings N+1: one query per row purely to fill in the variants column.
+     *
+     * <p>Deliberately unfiltered on {@code isActive}: this feeds the ADMIN listing, which has to show
+     * a variant that has been switched off. No customer-facing pricing query reads variant rows at
+     * all — a cart line is priced from its parent listing (see {@code CartLinePricing}) — so there is
+     * no active-only counterpart to keep in step with this one.
+     */
+    List<StoreProductVariant> findByStoreProduct_IdIn(List<UUID> storeProductIds);
+
+    /**
      * Atomically decrements stock for the store-listing of the given (store, product, variant),
      * guarding against overselling: the row is only updated when {@code stock >= qty}.
      * Returns the number of rows affected — 1 on success, 0 if insufficient stock or no match.

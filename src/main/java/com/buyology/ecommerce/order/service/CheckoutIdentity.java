@@ -38,6 +38,12 @@ final class CheckoutIdentity {
      * True only when the prior order matches the current checkout on every price- and
      * fulfilment-deciding input. The double-tap this idempotency exists for passes trivially —
      * nothing changed. Any real change fails one clause, and the caller supersedes.
+     *
+     * <p>The subtotal clause is only safe because re-pricing leaves {@code cart.totalPrice} alone once
+     * the money is captured (see {@code OrderService.CapturePhase}). While it did not, a sale starting
+     * during the payment window moved the cart's total, the order standing on that cart stopped matching
+     * on this very line, and it was superseded and rebuilt at the lower price — under a payment that had
+     * already taken the higher one.
      */
     static boolean isSameCheckout(Order prior, Cart cart, List<CartItem> cartItems,
                                   CreateOrderRequest req, OrderService.FulfilmentPlan plan,

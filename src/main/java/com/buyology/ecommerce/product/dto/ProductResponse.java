@@ -70,6 +70,36 @@ public class ProductResponse {
     private BigDecimal originalPrice;
 
     /**
+     * True when the primary store option's discount is LIVE and has an end date — the flash sale.
+     * Null (and omitted) otherwise, including for a permanent markdown: that one is discounted but
+     * it is not running out, so a rail and a countdown would promise an urgency that does not exist.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean onFlashSale;
+
+    /**
+     * When the flash sale on the primary store option ends — the countdown value. Null when the
+     * product is not on one. Read straight off the store listing's discount window, so it stops
+     * being sent the instant the sale stops applying; there is no flag to go stale.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Instant flashSaleEndsAt;
+
+    /**
+     * When a SCHEDULED sale on the primary store option begins — set only while the discount is still
+     * in the future, and never together with {@code flashSaleEndsAt}. The price quoted next to it is
+     * the pre-sale one.
+     *
+     * <p>It is here for the caches, first: {@code CatalogueCacheFilter} bounds both its own entry and
+     * the browser's {@code max-age} by the soonest sale boundary a body quotes, and a body serialised
+     * before a sale starts carried no boundary at all — so cards went on showing the pre-sale price for
+     * minutes after the sale had started while the basket charged the sale price. A client may of
+     * course also use it to say when a sale opens; nothing is required to.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Instant flashSaleStartsAt;
+
+    /**
      * ISO 4217 currency code the storePrice is expressed in (e.g. "AZN", "AED").
      * Null when storePrice is null.
      */
@@ -165,6 +195,15 @@ public class ProductResponse {
         /** Pre-discount price (struck-through). Null when this option has no discount. */
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private BigDecimal originalPrice;
+        /** When this store's flash sale ends. Null for no discount and for a permanent markdown. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Instant flashSaleEndsAt;
+        /**
+         * When this store's SCHEDULED sale starts — set only while it is still in the future, in which
+         * case the price beside it is the pre-sale one. Never set together with flashSaleEndsAt.
+         */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Instant flashSaleStartsAt;
         private String currency;
         private Boolean expressDelivery;
 
@@ -183,6 +222,10 @@ public class ProductResponse {
         public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
         public BigDecimal getOriginalPrice() { return originalPrice; }
         public void setOriginalPrice(BigDecimal originalPrice) { this.originalPrice = originalPrice; }
+        public Instant getFlashSaleEndsAt() { return flashSaleEndsAt; }
+        public void setFlashSaleEndsAt(Instant flashSaleEndsAt) { this.flashSaleEndsAt = flashSaleEndsAt; }
+        public Instant getFlashSaleStartsAt() { return flashSaleStartsAt; }
+        public void setFlashSaleStartsAt(Instant flashSaleStartsAt) { this.flashSaleStartsAt = flashSaleStartsAt; }
         public String getCurrency() { return currency; }
         public void setCurrency(String currency) { this.currency = currency; }
         public Boolean getExpressDelivery() { return expressDelivery; }
@@ -307,7 +350,15 @@ public class ProductResponse {
         public void setMedia(List<MediaDto> media) { this.media = media; }
     }
 
-    @Schema(description = "Product variant definition — price and stock are set per-store by store admins")
+    /**
+     * A variant is an identity, not a price. The one figure this API quotes for a product is the
+     * product-level {@code storePrice}, resolved from the store listing, and that is what the cart
+     * charges for every line of it — variant-bearing or not. Per-variant prices were briefly sent
+     * here and are gone: the web storefront does not send a variantId when it adds to the basket, so
+     * quoting a variant price meant advertising one number and charging another. Quoting and
+     * charging a real per-variant price is a deferred project across the backend and both clients.
+     */
+    @Schema(description = "Product variant definition — the product-level storePrice applies to every variant")
     public static class VariantDto {
 
         private UUID id;
@@ -382,6 +433,12 @@ public class ProductResponse {
     public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
     public BigDecimal getOriginalPrice() { return originalPrice; }
     public void setOriginalPrice(BigDecimal originalPrice) { this.originalPrice = originalPrice; }
+    public Boolean getOnFlashSale() { return onFlashSale; }
+    public void setOnFlashSale(Boolean onFlashSale) { this.onFlashSale = onFlashSale; }
+    public Instant getFlashSaleEndsAt() { return flashSaleEndsAt; }
+    public void setFlashSaleEndsAt(Instant flashSaleEndsAt) { this.flashSaleEndsAt = flashSaleEndsAt; }
+    public Instant getFlashSaleStartsAt() { return flashSaleStartsAt; }
+    public void setFlashSaleStartsAt(Instant flashSaleStartsAt) { this.flashSaleStartsAt = flashSaleStartsAt; }
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
     public Boolean getAvailableInSelectedCountry() { return availableInSelectedCountry; }

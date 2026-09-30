@@ -66,7 +66,7 @@ Links a global product to the store. Sets the store price and optionally assigns
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `variantId` | UUID | **Yes** | UUID of the global `ProductVariant` |
-| `storePrice` | decimal | **Yes** | Variant price in the store's local currency |
+| `storePrice` | decimal | **Yes** | Variant price in the store's local currency. **Recorded, not billed** — see [section 10](#10-discount-logic) |
 | `stock` | integer | **Yes** | Available stock quantity in this store |
 | `isActive` | boolean | No | Default `true` |
 
@@ -238,7 +238,7 @@ Adds a single variant to an existing store product assignment. Use this when var
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `variantId` | UUID | **Yes** | UUID of the global `ProductVariant` — must belong to the assigned product |
-| `storePrice` | decimal | **Yes** | Variant price in the store's local currency |
+| `storePrice` | decimal | **Yes** | Variant price in the store's local currency. **Recorded, not billed** — see [section 10](#10-discount-logic) |
 | `stock` | integer | **Yes** | Available stock quantity in this store |
 | `isActive` | boolean | No | Default `true` |
 
@@ -296,7 +296,7 @@ Update the price, stock, or active status of an assigned variant. All fields are
 
 | Field | Type | Notes |
 |---|---|---|
-| `storePrice` | decimal | New variant price |
+| `storePrice` | decimal | New variant price. **Recorded, not billed** — see [section 10](#10-discount-logic) |
 | `stock` | integer | New stock quantity |
 | `isActive` | boolean | Activate or deactivate this variant |
 
@@ -369,6 +369,7 @@ Deactivates the variant in this store. The global variant definition is unaffect
       "variantId": "variant-uuid",
       "variantSku": "HP-15-V1-512",
       "storePrice": 45000.00,
+      "effectivePrice": 40500.00,
       "stock": 12,
       "isActive": true,
       "updatedAt": "2026-03-22T10:00:00Z"
@@ -389,19 +390,44 @@ Deactivates the variant in this store. The global variant definition is unaffect
 | `discountType` | `"FIXED"`, `"PERCENTAGE"`, or `null` |
 | `variants[].id` | ID of the store variant assignment — use as `storeVariantId` in PATCH/DELETE URLs |
 | `variants[].variantId` | ID of the global variant |
+| `variants[].storePrice` | The per-variant price **as recorded by the admin**. Nothing bills it — see [section 10](#10-discount-logic) |
+| `variants[].effectivePrice` | The **parent listing's** effective price — what a line of this variant is actually charged. It is therefore the same for every variant of the listing |
 | `variants[].stock` | Live stock count in this store only |
 
 ---
 
 ## 10. Discount Logic
 
-The backend computes `effectivePrice` automatically. You never need to calculate it on the frontend.
+The backend computes `effectivePrice` automatically. You never need to calculate it on the frontend —
+and for the two cases below you **cannot**, so read `effectivePrice` off the response rather than
+recomputing it.
 
 | `discountType` | `discountValue` | How `effectivePrice` is computed |
 |---|---|---|
 | `null` | `null` | `effectivePrice = storePrice` |
-| `PERCENTAGE` | e.g. `10` | `effectivePrice = storePrice × (1 − 10/100)` |
+| `PERCENTAGE` | e.g. `10` | `effectivePrice = storePrice × (1 − 10/100)`, rounded to 2 dp |
 | `FIXED` | e.g. `38000` | `effectivePrice = discountValue` (i.e. the fixed sale price) |
+
+**A discount only applies inside its window.** A discount also carries `discountStartsAt` /
+`discountEndsAt`. Outside that window there is no discount at all: `effectivePrice = storePrice`, with
+no struck-through price. So a **scheduled** sale (start in the future) returns
+`effectivePrice == storePrice` while `discountType` and `discountValue` are both set — that is not a
+bug, and a client-side formula that ignores the dates will preview a discount the shop is not giving.
+A `null` start means "already started" and a `null` end means "never ends".
+
+**A discounted price is floored at `0.01`.** A `PERCENTAGE` of exactly `100` is accepted, and the
+arithmetic gives `0.00`; the backend returns **`0.01`** instead, because a zero-price line walks past
+the free-delivery threshold and the VAT extraction and produces a free order. Only a *discounted* price
+is floored — an undiscounted `storePrice` of `0` still answers `0`.
+
+**Per-variant prices are recorded, not billed.** The price a customer is shown and charged is the
+**listing's** (`storePrice` / `effectivePrice` at the top level of the response), for a line with a
+`variantId` and a line without. That listing price is the only figure any card, rail, search result or
+product page quotes, so it is the only one that can be charged without the shop advertising one number
+and billing another. A `variantId` decides which **SKU** ships and whose **stock** is decremented.
+`variants[].storePrice` is kept for bookkeeping and `variants[].effectivePrice` echoes the parent's.
+Charging different amounts per variant is a **backend + both clients** change and is not shipped — do
+not build an admin flow that promises it.
 
 ### Validation rules enforced by the backend
 
@@ -457,7 +483,11 @@ The store admin flow:
 └─────────────────────────────────────────────────────┘
 ```
 
-Show a live preview of `effectivePrice` as the admin types, using the client-side formula from [section 10](#10-discount-logic).
+Show a live preview of `effectivePrice` as the admin types, using the formula from
+[section 10](#10-discount-logic) — but treat it as a *preview only* and re-read `effectivePrice` from
+the save response. The client-side formula cannot reproduce the backend in two cases documented there:
+a sale whose window has not opened yet (backend returns `storePrice`) and a 100% discount (backend
+returns `0.01`, not `0.00`).
 
 ---
 

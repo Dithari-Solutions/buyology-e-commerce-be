@@ -1,9 +1,12 @@
 package com.buyology.ecommerce.cart.reminder;
 
 import com.buyology.ecommerce.customeremail.service.MarketingAudience;
+import com.buyology.ecommerce.product.domain.Product;
+import com.buyology.ecommerce.store.domain.StoreProduct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -103,9 +106,19 @@ public class CartReminderRepository {
     private static final String LINES = """
             SELECT ci.quantity                                   AS quantity,
                    ci.total_price                                AS total_price,
+                   sp.store_price                                AS sp_store_price,
+                   sp.discount_type                              AS sp_discount_type,
+                   sp.discount_value                             AS sp_discount_value,
+                   sp.discount_starts_at                         AS sp_discount_starts_at,
+                   sp.discount_ends_at                           AS sp_discount_ends_at,
                    COALESCE(en.title, any_t.title, p.sku, '')    AS title
             FROM cart_items ci
             JOIN products p ON p.id = ci.product_id
+            LEFT JOIN store_products sp
+                   ON sp.store_id = ci.store_id
+                  AND sp.product_id = ci.product_id
+                  AND sp.is_active = TRUE
+                  AND sp.deleted_at IS NULL
             LEFT JOIN product_translations en
                    ON en.product_id = p.id AND UPPER(en.language) = 'EN'
             LEFT JOIN LATERAL (
@@ -138,14 +151,55 @@ public class CartReminderRepository {
                 Timestamp.from(quietSince), Timestamp.from(notOlderThan), limit);
     }
 
-    /** The selected lines of one cart. */
+    /**
+     * The selected lines of one cart, priced as of NOW rather than as of add-to-cart.
+     *
+     * <p>The stamped {@code total_price} is not trustworthy for an email. A cart line freezes its
+     * price when it is added and is only corrected when the basket is next RENDERED — and a cart
+     * nobody has opened for a day is exactly the kind this sweep writes to. Since V60 a discount can
+     * expire, so the stamped figure can be a sale price for a sale that has finished, and an email is
+     * a written promise in a way a cached page is not.
+     *
+     * <p>The discount columns and the window come out of the join and the arithmetic is done by
+     * {@code StoreProduct.effectivePrice(...)} — the same function the cart, the checkout and every
+     * product card price through. Deliberately not recomputed in SQL: a second implementation of the
+     * discount math is exactly how an email ends up quoting a number no other surface agrees with.
+     *
+     * <p>Variant lines go through exactly the same arithmetic, because a variant line is priced from
+     * its parent listing like every other line — see {@code CartLinePricing} for why a variantId does
+     * not decide a price. So the email quotes the number the cart shows and the checkout charges,
+     * without needing to know whether a line has a variant at all.
+     */
     public List<Line> findLines(UUID cartId) {
+        Instant now = Instant.now();
         return jdbc.query(LINES,
-                (rs, i) -> new Line(
-                        rs.getString("title"),
-                        rs.getInt("quantity"),
-                        rs.getBigDecimal("total_price")),
+                (rs, i) -> {
+                    int quantity = rs.getInt("quantity");
+                    BigDecimal total = rs.getBigDecimal("total_price");
+                    BigDecimal storePrice = rs.getBigDecimal("sp_store_price");
+
+                    // No live listing (a delisted or deactivated assignment) leaves the stamped figure
+                    // alone, exactly as before — an availability problem is not a pricing one.
+                    if (storePrice != null) {
+                        String discountType = rs.getString("sp_discount_type");
+                        Product.DiscountType type =
+                                discountType == null ? null : Product.DiscountType.valueOf(discountType);
+                        BigDecimal discountValue = rs.getBigDecimal("sp_discount_value");
+                        Instant startsAt = instantOrNull(rs.getTimestamp("sp_discount_starts_at"));
+                        Instant endsAt = instantOrNull(rs.getTimestamp("sp_discount_ends_at"));
+                        BigDecimal live = StoreProduct.effectivePrice(
+                                storePrice, type, discountValue, startsAt, endsAt, now);
+                        if (live != null) {
+                            total = live.multiply(BigDecimal.valueOf(quantity));
+                        }
+                    }
+                    return new Line(rs.getString("title"), quantity, total);
+                },
                 cartId);
+    }
+
+    private static Instant instantOrNull(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
     }
 
     /**
@@ -162,6 +216,6 @@ public class CartReminderRepository {
     public record Candidate(UUID cartId, UUID userId, String email, String firstName,
                             String currency) {}
 
-    /** One selected line of a cart, as the email prints it. */
-    public record Line(String title, int quantity, java.math.BigDecimal totalPrice) {}
+    /** One selected line of a cart, as the email prints it — priced as of the sweep. */
+    public record Line(String title, int quantity, BigDecimal totalPrice) {}
 }
