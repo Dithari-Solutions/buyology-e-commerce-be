@@ -1,5 +1,6 @@
 package com.buyology.ecommerce.analytics.service;
 
+import com.buyology.ecommerce.common.utils.BusinessZone;
 import com.buyology.ecommerce.analytics.domain.SiteVisit;
 import com.buyology.ecommerce.analytics.dto.TrackVisitRequest;
 import com.buyology.ecommerce.analytics.dto.VisitorMetricsResponse;
@@ -44,8 +45,8 @@ public class VisitorAnalyticsService {
 
     private static final Logger log = LoggerFactory.getLogger(VisitorAnalyticsService.class);
 
-    /** The day the rest of the dashboard reports on (matches CartService.BUSINESS_ZONE). */
-    static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Dubai");
+    /** The day the rest of the dashboard reports on — the platform-wide business zone. */
+    static final ZoneId BUSINESS_ZONE = BusinessZone.ID;
 
     /** Ids are opaque to us; this only keeps the column clean and un-injectable. */
     private static final Pattern ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]{8,64}");

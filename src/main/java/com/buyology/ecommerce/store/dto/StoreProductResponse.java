@@ -19,6 +19,26 @@ public class StoreProductResponse {
     private BigDecimal effectivePrice;
     private String discountType;
     private BigDecimal discountValue;
+    private Instant discountStartsAt;
+    private Instant discountEndsAt;
+
+    /**
+     * Whether the discount above is applying RIGHT NOW. Required, not derivable by the caller:
+     * discountType/discountValue are set for a sale that has not started yet and for one that has
+     * already finished, and the dashboard's "25% OFF" badge is built from discountValue — so without
+     * this flag a scheduled sale renders as live and an ended one keeps its badge while
+     * effectivePrice has quietly reverted to storePrice.
+     */
+    private Boolean discountActive;
+
+    /** NONE | SCHEDULED | LIVE | ENDED — what the admin screen should actually say. */
+    private String discountStatus;
+
+    /** True when the discount is live AND has an end date: a flash sale, not a permanent markdown. */
+    private Boolean onFlashSale;
+
+    /** The countdown value for a live flash sale; null otherwise. */
+    private Instant flashSaleEndsAt;
     private Boolean isActive;
     private Boolean b2cEnabled;
     private Boolean b2bEnabled;
@@ -34,6 +54,14 @@ public class StoreProductResponse {
         private UUID variantId;
         private String variantSku;
         private BigDecimal storePrice;
+        /**
+         * What a line of this variant actually sells for now — the PARENT listing's effective price,
+         * discount and window included. Deliberately not derived from {@code storePrice} above: a
+         * variantId identifies a SKU and caps its stock, it does not decide a price, so the per-variant
+         * figure is recorded but never billed. Shown next to it so that is visible on the admin screen
+         * rather than surprising.
+         */
+        private BigDecimal effectivePrice;
         private Integer stock;
         private Boolean isActive;
         private Instant updatedAt;
@@ -46,6 +74,8 @@ public class StoreProductResponse {
         public void setVariantSku(String variantSku) { this.variantSku = variantSku; }
         public BigDecimal getStorePrice() { return storePrice; }
         public void setStorePrice(BigDecimal storePrice) { this.storePrice = storePrice; }
+        public BigDecimal getEffectivePrice() { return effectivePrice; }
+        public void setEffectivePrice(BigDecimal effectivePrice) { this.effectivePrice = effectivePrice; }
         public Integer getStock() { return stock; }
         public void setStock(Integer stock) { this.stock = stock; }
         public Boolean getIsActive() { return isActive; }
@@ -74,6 +104,18 @@ public class StoreProductResponse {
     public void setDiscountType(String discountType) { this.discountType = discountType; }
     public BigDecimal getDiscountValue() { return discountValue; }
     public void setDiscountValue(BigDecimal discountValue) { this.discountValue = discountValue; }
+    public Instant getDiscountStartsAt() { return discountStartsAt; }
+    public void setDiscountStartsAt(Instant discountStartsAt) { this.discountStartsAt = discountStartsAt; }
+    public Instant getDiscountEndsAt() { return discountEndsAt; }
+    public void setDiscountEndsAt(Instant discountEndsAt) { this.discountEndsAt = discountEndsAt; }
+    public Boolean getDiscountActive() { return discountActive; }
+    public void setDiscountActive(Boolean discountActive) { this.discountActive = discountActive; }
+    public String getDiscountStatus() { return discountStatus; }
+    public void setDiscountStatus(String discountStatus) { this.discountStatus = discountStatus; }
+    public Boolean getOnFlashSale() { return onFlashSale; }
+    public void setOnFlashSale(Boolean onFlashSale) { this.onFlashSale = onFlashSale; }
+    public Instant getFlashSaleEndsAt() { return flashSaleEndsAt; }
+    public void setFlashSaleEndsAt(Instant flashSaleEndsAt) { this.flashSaleEndsAt = flashSaleEndsAt; }
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public Boolean getB2cEnabled() { return b2cEnabled; }

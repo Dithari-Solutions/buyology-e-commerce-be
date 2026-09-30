@@ -21,6 +21,19 @@ public class CartItemResponse {
     /** Pre-discount unit/total price for strike-through display. Null when not discounted. */
     private BigDecimal originalUnitPrice;
     private BigDecimal originalTotalPrice;
+
+    /**
+     * True when this line's unit price was corrected on this read because the store listing's
+     * discount window moved — a flash sale that started, or more usually one that ended.
+     *
+     * <p>Here so the client can SAY it. The alternative is a number that quietly changes between two
+     * page loads, which reads as a bug at best and a bait-and-switch at worst.
+     */
+    private boolean priceChanged;
+
+    /** The unit price this line carried before it was corrected. Null unless priceChanged. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal previousUnitPrice;
     /** True when the item's store is within the 30-minute delivery radius of the user's location. */
     private boolean quickDelivery;
 
@@ -119,6 +132,10 @@ public class CartItemResponse {
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
+    public boolean isPriceChanged() { return priceChanged; }
+    public void setPriceChanged(boolean priceChanged) { this.priceChanged = priceChanged; }
+    public BigDecimal getPreviousUnitPrice() { return previousUnitPrice; }
+    public void setPreviousUnitPrice(BigDecimal previousUnitPrice) { this.previousUnitPrice = previousUnitPrice; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

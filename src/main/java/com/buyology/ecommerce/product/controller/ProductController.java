@@ -74,6 +74,33 @@ public class ProductController {
         return productService.getAllProductsPublic(lang, countryCode, currency, lat, lng, page, size, sort);
     }
 
+    @Operation(summary = "Flash sale — products whose store discount is live and ends soon",
+            description = "Products with an ACTIVE store discount that has an end date in the future, "
+                    + "soonest-ending first. Each response carries onFlashSale and flashSaleEndsAt "
+                    + "(the countdown). Distinct from the isSuperDeal editorial flag, which has no dates: "
+                    + "an item leaves this rail by itself the moment its sale ends. Only products whose "
+                    + "RESOLVED price for the requested market is discounted right now are returned — a "
+                    + "product on sale in a store this market is not priced from is left out — so a page may "
+                    + "come back shorter than size. Not cached, so a countdown is never read from a stale "
+                    + "response.")
+    @GetMapping("/flash-sale")
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getFlashSaleProducts(
+            @RequestParam String lang,
+            @Parameter(description = "ISO 3166-1 alpha-3 country code (e.g. UAE, AZE)")
+            @RequestParam(required = false) String countryCode,
+            @Parameter(description = "ISO 4217 display currency (e.g. AZN, AED). Defaults to country's currency.")
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Customer latitude for express delivery badge")
+            @RequestParam(required = false) Double lat,
+            @Parameter(description = "Customer longitude for express delivery badge")
+            @RequestParam(required = false) Double lng,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max products per response)")
+            @RequestParam(defaultValue = "60") int size) {
+        return productService.getFlashSaleProducts(lang, countryCode, currency, lat, lng, page, size);
+    }
+
     @Operation(summary = "Get active product by ID with all related details")
     @GetMapping("/{productId}")
     public ResponseEntity<ApiResponse<ProductResponse>> getProductById(

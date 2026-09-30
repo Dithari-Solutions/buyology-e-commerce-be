@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 public class UpdateStoreVariantRequest {
 
     @DecimalMin(value = "0.00", message = "storePrice must be non-negative")
-    @Schema(description = "New variant price in the store's local currency")
+    @Schema(description = "New variant price in the store's local currency. RECORDED, not billed: a cart line is priced from the listing's storePrice (discount and window included) whether or not it carries a variantId, because that listing price is the only figure any card, rail, search result or product page quotes. A variantId decides which SKU is shipped and which stock is decremented.")
     private BigDecimal storePrice;
 
     @Min(value = 0, message = "stock must be non-negative")

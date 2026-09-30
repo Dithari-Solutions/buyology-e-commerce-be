@@ -85,7 +85,19 @@ public class ProductSpecification {
                 predicates.add(cb.isTrue(root.get("isLimitedStock")));
             }
 
-            // Price range — EXISTS subquery on store_products (price lives there, not on product)
+            // Price range — EXISTS subquery on store_products (price lives there, not on product).
+            //
+            // PRE-DISCOUNT, and therefore NOT the price any surface shows: it compares the bounds
+            // against raw storePrice and knows nothing about discount_type/discount_value or the V60
+            // window, so a 2000 AED product flash-sold at 999 would be excluded from "under 1000" —
+            // the sale item missing from exactly the bracket its sale price falls into.
+            //
+            // It is unreachable today, and deliberately so: both callers (ProductService.searchProducts
+            // and searchB2bProducts) null the bounds before building the spec and filter on the
+            // RESOLVED display price afterwards, which is what the cards show. Kept only for the
+            // DRAFT/ACTIVE shape above and for a caller that genuinely wants list-price bounds.
+            // Anyone who sends bounds through here again must add the discount and window math first,
+            // or move the filtering back out to applyPriceRange.
             if (filter.getMinPrice() != null || filter.getMaxPrice() != null) {
                 Subquery<Integer> priceSub = query.subquery(Integer.class);
                 Root<StoreProduct> spRoot = priceSub.from(StoreProduct.class);

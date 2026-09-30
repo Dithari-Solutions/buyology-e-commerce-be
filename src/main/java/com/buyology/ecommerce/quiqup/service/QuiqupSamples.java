@@ -144,7 +144,7 @@ public class QuiqupSamples {
      * order dates, and still distinct if the button is clicked twice in the same second.
      */
     private static String uniqueSuffix() {
-        String stamp = LocalDateTime.now(ZoneId.of("Asia/Dubai"))
+        String stamp = LocalDateTime.now(com.buyology.ecommerce.common.utils.BusinessZone.ID)
                 .format(DateTimeFormatter.ofPattern("yyMMdd-HHmmss"));
         String random = Integer.toHexString(ThreadLocalRandom.current().nextInt(0x1000, 0x10000));
         return stamp + "-" + random;

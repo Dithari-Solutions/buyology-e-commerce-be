@@ -189,12 +189,19 @@ Transitions the cart status to `CHECKED_OUT`. A new empty cart will be created a
 {
   "specOptionId": "uuid",
   "groupCode": "ram",           // e.g. "ram", "storage", "processor", "screen_size"
+  "groupName": "RAM",           // the group's display name in the requested language
   "value": "16",
   "unit": "GB",                 // null if not applicable
-  "additionalPrice": "20.00",   // extra charge on top of the base product price
   "colorCode": "#FF5733"        // null if not a colour option
 }
 ```
+
+> **There is no `additionalPrice`, here or anywhere.** This sample used to carry one, with a non-zero
+> value and the comment "extra charge on top of the base product price". No such field has ever been
+> serialised and no such column has ever existed: a spec selection records WHICH option the line carries,
+> never a price. A line costs `unitPrice x quantity` and nothing is added to it — `totalPrice` on the
+> line is the whole story. Any client adding a spec's price to the line price is adding zero, and will
+> disagree with the server the day it stops.
 
 ---
 

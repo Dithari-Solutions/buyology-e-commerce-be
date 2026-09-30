@@ -55,6 +55,18 @@ public class OrderItem {
     @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;
 
+    /**
+     * The pre-discount price the basket struck through, or NULL when the line was not discounted.
+     *
+     * <p>Nullable and never computed: null means "no discount was advertised on this line", which is
+     * a different fact from "the discount was zero". Stamped for the same reason the SKU and the unit
+     * price are — so the record shows WHICH advertised price was honoured, not merely what was
+     * charged. An order placed off a sale price otherwise leaves no evidence anywhere that the sale
+     * existed, and a UAE consumer-protection question about it has no answer.
+     */
+    @Column(name = "original_unit_price", precision = 12, scale = 2)
+    private BigDecimal originalUnitPrice;
+
     @Column(name = "total_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalPrice;
 
@@ -97,6 +109,9 @@ public class OrderItem {
 
     public Integer getQuantity() { return quantity; }
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
+
+    public BigDecimal getOriginalUnitPrice() { return originalUnitPrice; }
+    public void setOriginalUnitPrice(BigDecimal originalUnitPrice) { this.originalUnitPrice = originalUnitPrice; }
 
     public BigDecimal getUnitPrice() { return unitPrice; }
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }

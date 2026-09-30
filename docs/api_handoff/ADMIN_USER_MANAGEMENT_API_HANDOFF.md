@@ -217,7 +217,6 @@ GET /api/admin/users/:authCredentialId
             "groupCode": "color",
             "value": "Black",
             "unit": null,
-            "additionalPrice": 0,
             "colorCode": "#000000"
           }
         ],

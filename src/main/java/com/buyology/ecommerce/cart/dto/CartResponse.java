@@ -14,6 +14,12 @@ public class CartResponse {
     private String countryCode;
     private String currency;
     private List<CartItemResponse> items;
+
+    /**
+     * True when at least one line's price was corrected on this read — a flash sale that started or,
+     * more usually, ended. The client shows one banner from this and the detail per line.
+     */
+    private boolean priceChanged;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -76,6 +82,8 @@ public class CartResponse {
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
 
+    public boolean isPriceChanged() { return priceChanged; }
+    public void setPriceChanged(boolean priceChanged) { this.priceChanged = priceChanged; }
     public List<CartItemResponse> getItems() { return items; }
     public void setItems(List<CartItemResponse> items) { this.items = items; }
 

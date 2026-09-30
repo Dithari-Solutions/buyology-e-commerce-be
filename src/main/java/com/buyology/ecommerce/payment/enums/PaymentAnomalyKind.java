@@ -45,6 +45,42 @@ public enum PaymentAnomalyKind {
     STOCK_UNAVAILABLE,
 
     /**
+     * The basket's live prices moved between the money being captured and the order being built.
+     *
+     * <p>Only reachable on the cart-first flow, where the gateway captures the quoted total and the
+     * order is assembled from the cart seconds to minutes later (webhooks retry). A sale can start or
+     * end inside that gap.
+     *
+     * <p>The order IS created, at the total the customer was quoted and charged — after capture the
+     * quote is authoritative, so re-pricing may not rewrite it in either direction. See
+     * {@code CheckoutRepricing} and {@code OrderService.repriceForCheckout}. What is left is a
+     * difference somebody has to decide about, and it goes in both directions: a sale that STARTED in
+     * the gap means the customer paid more than the shop is now asking and may be owed the
+     * difference; a sale that ENDED means the shop honoured a price it no longer advertises.
+     *
+     * <p>NOT auto-refunded, for the same reason {@link #UNDERPAID} is not: an order exists and
+     * something shipped or will ship, so refunding part of a settled payment is a decision, not a
+     * default. Recording it is what makes that decision possible at all — before this existed the
+     * difference was silently kept.
+     */
+    PRICE_CHANGED_AFTER_CAPTURE,
+
+    /**
+     * The payment settled but building the order threw, for a reason with no kind of its own.
+     *
+     * <p>The backstop on the cart-first flow: the money is captured before the order exists, so ANY
+     * escape from order creation would otherwise leave a captured payment with no order and no record
+     * that anything went wrong — the exact silence this whole enum exists to end. The throw still
+     * rolls the order's own writes back (see the catch in {@code OrderService.onPaymentSucceeded});
+     * this record survives it, because the insert runs on its own connection.
+     *
+     * <p>NOT auto-refunded, and that is the difference from {@link #STOCK_UNAVAILABLE}: the cause is
+     * by definition unknown here, and a webhook retry may well build the order successfully a minute
+     * later. Refunding automatically would race that retry and refund a paid order.
+     */
+    ORDER_CREATION_FAILED,
+
+    /**
      * Anything else — the branch where we explicitly do not know what happened, which is exactly
      * where automation must not move money.
      */

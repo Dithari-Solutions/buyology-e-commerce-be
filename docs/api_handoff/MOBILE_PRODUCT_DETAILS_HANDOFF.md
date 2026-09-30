@@ -30,7 +30,7 @@ Use this endpoint to fetch the primary product data.
     *   The `specs` array contains grouped specifications (e.g., Memory, Storage).
     *   **Selection Logic**: Users pick one option from every spec group.
     *   **Variant ID**: Match the selected `specOptionIds` with the `variants[]` array to find the correct `variantId`.
-    *   **Price**: The `storePrice` returned in the response represents the price of the current/default variant. Changing specs should trigger a UI update based on variant price (managed in store layer).
+    *   **Price**: The `storePrice` returned in the response is the **product's only price** (with `originalPrice` as the struck-through "was" figure), resolved from the store listing with the discount and its window already applied. Changing specs does **not** change it, and `variants[]` carries no price and no stock — do not show or compute a per-variant price.
     *   **Cart**: Always pass the `variantId` that matches the user's choices.
 
 ---
@@ -110,5 +110,5 @@ Show a "You may also like" section at the bottom of the PDP.
     *   Execute `GET /api/product/{productId}/related`
 2.  **User Action - Change Color**: Filter `media` gallery by selected color's UUID.
 3.  **User Action - Change Spec**: When a user picks a different spec option (e.g. 16GB RAM), look through the `variants[]` array to find the unique entry where all `specOptionIds` match the user's selection. Use this `variantId` for future operations.
-4.  **User Action - Add to Cart**: Pass the `variantId` corresponding to the user's selected combination. The backend will set the `unitPrice` based on the fixed price for that variant in the store.
+4.  **User Action - Add to Cart**: Pass the `variantId` corresponding to the user's selected combination. It decides which SKU is reserved and which stock is decremented; it does **not** decide the price. The backend sets `unitPrice` from the **store listing**, so the basket charges exactly the `storePrice` the PDP advertised. (This changed: a variant line was previously charged the per-variant price recorded in the store, which no customer surface quoted.)
 5.  **User Action - Load Reviews/Questions**: Call the paginated `GET` endpoints when the user taps on the respective tabs.

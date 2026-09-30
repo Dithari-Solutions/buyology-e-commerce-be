@@ -18,6 +18,8 @@ public class OrderItemResponse {
     private String variantSku;
     private Integer quantity;
     private BigDecimal unitPrice;
+    /** The struck-through "was" price this line was sold against, or null when it was not discounted. */
+    private BigDecimal originalUnitPrice;
     private BigDecimal totalPrice;
     private Instant createdAt;
 
@@ -52,6 +54,9 @@ public class OrderItemResponse {
 
     public BigDecimal getUnitPrice() { return unitPrice; }
     public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+
+    public BigDecimal getOriginalUnitPrice() { return originalUnitPrice; }
+    public void setOriginalUnitPrice(BigDecimal originalUnitPrice) { this.originalUnitPrice = originalUnitPrice; }
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }

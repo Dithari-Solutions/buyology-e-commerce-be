@@ -7,6 +7,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,6 +30,17 @@ public class AssignProductRequest {
     @DecimalMin(value = "0.00", message = "discountValue must be non-negative")
     @Schema(description = "Discount amount: final price when FIXED, percentage (0–100) when PERCENTAGE", example = "40000.00")
     private BigDecimal discountValue;
+
+    @Schema(description = "When the discount starts applying (instant, UTC). Null = already started. "
+            + "Together with discountEndsAt this makes the discount a FLASH SALE rather than a permanent markdown.",
+            example = "2026-03-25T20:00:00Z")
+    private Instant discountStartsAt;
+
+    @Schema(description = "When the discount stops applying (instant, UTC, inclusive). Null = never ends, "
+            + "i.e. an ordinary permanent markdown. For a calendar end date in the shop's own timezone use "
+            + "the flash-sale endpoint, which converts \"ends 31 March\" to the end of that day in Asia/Dubai.",
+            example = "2026-03-31T20:00:00Z")
+    private Instant discountEndsAt;
 
     @Schema(description = "Whether this product is active in the store", defaultValue = "true")
     private Boolean isActive = true;
@@ -56,6 +68,12 @@ public class AssignProductRequest {
 
     public BigDecimal getDiscountValue() { return discountValue; }
     public void setDiscountValue(BigDecimal discountValue) { this.discountValue = discountValue; }
+
+    public Instant getDiscountStartsAt() { return discountStartsAt; }
+    public void setDiscountStartsAt(Instant discountStartsAt) { this.discountStartsAt = discountStartsAt; }
+
+    public Instant getDiscountEndsAt() { return discountEndsAt; }
+    public void setDiscountEndsAt(Instant discountEndsAt) { this.discountEndsAt = discountEndsAt; }
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
