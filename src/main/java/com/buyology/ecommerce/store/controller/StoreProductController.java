@@ -6,10 +6,15 @@ import com.buyology.ecommerce.store.dto.AssignVariantRequest;
 import com.buyology.ecommerce.store.dto.StoreProductResponse;
 import com.buyology.ecommerce.store.dto.UpdateStoreProductRequest;
 import com.buyology.ecommerce.store.dto.UpdateStoreVariantRequest;
+import com.buyology.ecommerce.store.enums.StoreProductExportFormat;
+import com.buyology.ecommerce.store.service.StoreProductExportService;
 import com.buyology.ecommerce.store.service.StoreProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -30,9 +36,12 @@ import java.util.UUID;
 public class StoreProductController {
 
     private final StoreProductService storeProductService;
+    private final StoreProductExportService storeProductExportService;
 
-    public StoreProductController(StoreProductService storeProductService) {
+    public StoreProductController(StoreProductService storeProductService,
+                                  StoreProductExportService storeProductExportService) {
         this.storeProductService = storeProductService;
+        this.storeProductExportService = storeProductExportService;
     }
 
     @Operation(summary = "Assign a product to a store",
@@ -51,6 +60,23 @@ public class StoreProductController {
     public ResponseEntity<ApiResponse<List<StoreProductResponse>>> getStoreProducts(
             @PathVariable UUID storeId) {
         return storeProductService.getStoreProducts(storeId);
+    }
+
+    @Operation(summary = "Export a store's products as Excel or PDF",
+            description = "Every product in the store with its name, description, price, sale price, availability and "
+                    + "available quantity, brand, category, storefront URL and image URLs (thumbnail marked). "
+                    + "XLSX adds an Images sheet and a Variants sheet.")
+    @PreAuthorize("hasRole('SUPERADMIN') or hasAuthority('store:product:read') or @rbacPolicy.legacyAdmin()")
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportStoreProducts(
+            @PathVariable UUID storeId,
+            @RequestParam(defaultValue = "XLSX") StoreProductExportFormat format) {
+        StoreProductExportService.ExportFile file = storeProductExportService.export(storeId, format);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.contentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(file.fileName()).build().toString())
+                .body(file.content());
     }
 
     @Operation(summary = "Update a store product's price, discount, or active status")

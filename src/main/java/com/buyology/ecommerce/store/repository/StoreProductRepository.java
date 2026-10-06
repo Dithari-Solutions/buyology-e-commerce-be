@@ -35,6 +35,20 @@ public interface StoreProductRepository extends JpaRepository<StoreProduct, UUID
     List<StoreProduct> findByStore_IdAndDeletedAtIsNull(UUID storeId);
 
     /**
+     * The same rows as {@link #findByStore_IdAndDeletedAtIsNull}, with the product, brand and category
+     * loaded in the one query — an export reads all three for every row.
+     */
+    @Query("""
+            SELECT sp FROM StoreProduct sp
+            JOIN FETCH sp.product p
+            LEFT JOIN FETCH p.brand
+            LEFT JOIN FETCH p.category
+            WHERE sp.store.id = :storeId
+              AND sp.deletedAt IS NULL
+            """)
+    List<StoreProduct> findForExportByStoreId(@Param("storeId") UUID storeId);
+
+    /**
      * Returns distinct active products that belong to any of the given stores.
      * Only products with status ACTIVE and store-product rows that are active
      * and not soft-deleted are included.

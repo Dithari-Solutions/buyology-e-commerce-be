@@ -18,6 +18,12 @@ public interface StoreProductVariantRepository extends JpaRepository<StoreProduc
 
     List<StoreProductVariant> findByStoreProduct_Id(UUID storeProductId);
 
+    /** The variant rows of many listings at once, with the global variant (for its SKU) loaded. */
+    @Query("select v from StoreProductVariant v join fetch v.variant " +
+           "where v.storeProduct.id in :storeProductIds")
+    List<StoreProductVariant> findWithVariantByStoreProductIds(
+            @Param("storeProductIds") List<UUID> storeProductIds);
+
     /**
      * Every variant row for a batch of store listings, in one query.
      *
