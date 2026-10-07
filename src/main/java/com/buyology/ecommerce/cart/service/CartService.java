@@ -367,6 +367,7 @@ public class CartService {
                 item.setQuantity(newQty);
                 item.setTotalPrice(item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
                 cartItemRepository.save(item);
+                cart.setLastAddedAt(now);
                 recalculateCartTotal(cart);
                 return ApiResponse.success(buildCartResponse(cart, Collections.emptySet()), "Cart updated");
             }
@@ -391,6 +392,7 @@ public class CartService {
             specSelectionRepository.save(new CartItemSpecSelection(cartItem, option));
         }
 
+        cart.setLastAddedAt(now);
         recalculateCartTotal(cart);
         return ApiResponse.created(buildCartResponse(cart, Collections.emptySet()), "Item added to cart");
     }

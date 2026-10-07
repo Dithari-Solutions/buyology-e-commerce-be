@@ -50,6 +50,7 @@ public class Story {
             cascade = CascadeType.ALL,
             orphanRemoval = true
     )
+    @org.hibernate.annotations.BatchSize(size = 50)
     private List<StoryMedia> media = new ArrayList<>();
 
     // ========================

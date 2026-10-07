@@ -1413,6 +1413,21 @@ public class EmailService {
         }
     }
 
+    /** Plain-text cart outreach; reports provider acceptance, not inbox delivery. */
+    public boolean sendCartActivityEmail(String email, String name, String subject, String body, String unsubscribeUrl) {
+        try {
+            String html = accountEmailHtml(escapeHtml(subject),
+                    "<p>Hello " + escapeHtml(safeName(name)) + ",</p><p>"
+                    + escapeHtml(body).replace("\n", "<br />")
+                    + "</p><p><a href=\"" + escapeHtml(unsubscribeUrl) + "\">Unsubscribe</a></p>");
+            send(email, subject, html);
+            return true;
+        } catch (Exception e) {
+            log.warn("Cart outreach email failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
     private static String escapeHtml(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");

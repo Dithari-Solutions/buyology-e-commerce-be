@@ -37,6 +37,10 @@ public class Cart {
     @Column(name = "currency", length = 3)
     private String currency;
 
+    /** Updated only by a successful add, never by reads/repricing/removal. */
+    @Column(name = "last_added_at")
+    private Instant lastAddedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -95,6 +99,9 @@ public class Cart {
 
     public String getCurrency() { return currency; }
     public void setCurrency(String currency) { this.currency = currency; }
+
+    public Instant getLastAddedAt() { return lastAddedAt; }
+    public void setLastAddedAt(Instant value) { lastAddedAt = value; }
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

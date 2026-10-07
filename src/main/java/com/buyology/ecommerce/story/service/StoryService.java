@@ -31,6 +31,19 @@ import com.buyology.ecommerce.infrastructure.external.ContaboObjectService;
 @Service
 public class StoryService {
 
+    private final StoryFeedCache publicFeedCache = new StoryFeedCache();
+
+    /** Evict after the edit commits, so an in-flight reader cannot cache pre-edit data again. */
+    private void invalidatePublicFeedAfterCommit() {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { publicFeedCache.invalidate(); }
+                });
+        } else publicFeedCache.invalidate();
+    }
+
+
     /** Prefix under which direct uploads are staged before a story is created. */
     private static final String STAGING_PREFIX = "stories/uploads/";
     /** How long a presigned upload URL stays valid. */
@@ -59,6 +72,7 @@ public class StoryService {
 
     @Transactional
     public void deleteMediaFromStory(UUID storyId, UUID mediaId) {
+        invalidatePublicFeedAfterCommit();
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 
@@ -81,6 +95,7 @@ public class StoryService {
     @Transactional
     public Story createStory(CreateStoryRequest request, MultipartFile thumbnail,
             List<MultipartFile> mediaFiles, UUID createdBy) {
+        invalidatePublicFeedAfterCommit();
         FileValidationUtils.validateImage(thumbnail);
         FileValidationUtils.validateMediaList(mediaFiles);
 
@@ -167,6 +182,7 @@ public class StoryService {
      */
     @Transactional
     public Story createStoryFromKeys(com.buyology.ecommerce.story.dto.CreateStoryWithKeysRequest request, UUID createdBy) {
+        invalidatePublicFeedAfterCommit();
         validateStagingKey(request.getThumbnailKey());
 
         Story story = new Story(createdBy);
@@ -260,16 +276,31 @@ public class StoryService {
 
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<List<StorySummaryResponse>>> getPublicStories(Language language, UUID currentUserId) {
-        List<StorySummaryResponse> responses = storyRepository
-                .findByStatusOrderByDisplayOrderAscCreatedAtDesc(StoryStatus.ACTIVE)
-                .stream()
-                .map(story -> toSummaryResponse(story, language, currentUserId))
-                .filter(r -> r != null)
-                .toList();
-
-        return ApiResponse.success(
-                responses,
-                responses.isEmpty() ? "No stories found." : "Stories fetched successfully");
+        List<StorySummaryResponse> publicStories = publicFeedCache.get(language, () -> {
+            List<Story> stories = storyRepository.findByStatusOrderByDisplayOrderAscCreatedAtDesc(StoryStatus.ACTIVE);
+            List<UUID> ids = stories.stream().map(Story::getId).toList();
+            if (ids.isEmpty()) return List.of();
+            java.util.Map<UUID, Long> views = storyViewRepository.countsForStories(ids).stream().collect(
+                    java.util.stream.Collectors.toMap(com.buyology.ecommerce.story.repository.StoryEngagementCount::getStoryId,
+                            com.buyology.ecommerce.story.repository.StoryEngagementCount::getTotal));
+            java.util.Map<UUID, Long> likes = storyLikeRepository.countsForStories(ids).stream().collect(
+                    java.util.stream.Collectors.toMap(com.buyology.ecommerce.story.repository.StoryEngagementCount::getStoryId,
+                            com.buyology.ecommerce.story.repository.StoryEngagementCount::getTotal));
+            return stories.stream().map(story -> toSummaryResponse(story, language,
+                    views.getOrDefault(story.getId(), 0L), likes.getOrDefault(story.getId(), 0L), false))
+                    .filter(java.util.Objects::nonNull).toList();
+        });
+        List<StorySummaryResponse> responses = publicStories;
+        if (currentUserId != null && !publicStories.isEmpty()) {
+            java.util.Set<UUID> likedIds = new java.util.HashSet<>(storyLikeRepository.likedStoryIds(
+                    currentUserId, publicStories.stream().map(StorySummaryResponse::id).toList()));
+            responses = publicStories.stream().map(story -> new StorySummaryResponse(story.id(), story.title(),
+                    story.thumbnailUrl(), story.status(), story.media(), story.viewCount(), story.likeCount(),
+                    likedIds.contains(story.id()), story.displayOrder())).toList();
+        }
+        var result = ApiResponse.success(responses, responses.isEmpty() ? "No stories found." : "Stories fetched successfully");
+        return ResponseEntity.ok().header("Cache-Control", currentUserId == null ? "public, max-age=30" : "private, no-store")
+                .header("Vary", "Authorization").body(result.getBody());
     }
 
     @Transactional(readOnly = true)
@@ -347,6 +378,12 @@ public class StoryService {
     }
 
     private StorySummaryResponse toSummaryResponse(Story story, Language language, UUID currentUserId) {
+        return toSummaryResponse(story, language, storyViewRepository.countByStoryId(story.getId()),
+                storyLikeRepository.countByStoryId(story.getId()), currentUserId != null
+                        && storyLikeRepository.existsByStoryIdAndUserId(story.getId(), currentUserId));
+    }
+
+    private StorySummaryResponse toSummaryResponse(Story story, Language language, long viewCount, long likeCount, boolean likedByMe) {
         StoryTranslation translation = story.getTranslations()
                 .stream()
                 .filter(t -> t.getLanguage() == language)
@@ -365,11 +402,6 @@ public class StoryService {
         List<StoryResponse.MediaItem> mediaItems = sortedMedia.stream()
                 .map(this::toMediaItemDto)
                 .toList();
-
-        long viewCount = storyViewRepository.countByStoryId(story.getId());
-        long likeCount = storyLikeRepository.countByStoryId(story.getId());
-        boolean likedByMe = currentUserId != null
-                && storyLikeRepository.existsByStoryIdAndUserId(story.getId(), currentUserId);
 
         return new StorySummaryResponse(
                 story.getId(),
@@ -426,6 +458,7 @@ public class StoryService {
 
     @Transactional
     public void activateStory(UUID storyId) {
+        invalidatePublicFeedAfterCommit();
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 
@@ -439,6 +472,7 @@ public class StoryService {
 
     @Transactional
     public void updateDisplayOrder(UUID storyId, int order) {
+        invalidatePublicFeedAfterCommit();
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
         story.setDisplayOrder(order);
@@ -447,6 +481,7 @@ public class StoryService {
 
     @Transactional
     public void deActivateStory(UUID storyId) {
+        invalidatePublicFeedAfterCommit();
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 
@@ -460,6 +495,7 @@ public class StoryService {
 
     @Transactional
     public void deleteStory(UUID storyId) {
+        invalidatePublicFeedAfterCommit();
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));
 
@@ -471,6 +507,7 @@ public class StoryService {
 
     @Transactional
     public Story addMediaToStory(UUID storyId, List<MultipartFile> mediaFiles) {
+        invalidatePublicFeedAfterCommit();
         FileValidationUtils.validateMediaList(mediaFiles);
         Story story = storyRepository.findById(storyId)
                 .orElseThrow(() -> new StoryNotFoundException(storyId));

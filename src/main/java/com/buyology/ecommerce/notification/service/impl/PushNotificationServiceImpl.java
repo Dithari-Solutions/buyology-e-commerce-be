@@ -55,19 +55,26 @@ public class PushNotificationServiceImpl implements PushNotificationService {
     @Async
     @Transactional
     public void sendToUser(UUID userId, String title, String body, Map<String, String> data) {
-        sendToUserInternal(userId, title, body, null, data);
+        sendToUserInternal(userId, title, body, null, data, true);
     }
 
     @Override
     @Async
     @Transactional
     public void sendToUser(UUID userId, String title, String body, String type, Map<String, String> data) {
-        sendToUserInternal(userId, title, body, type, data);
+        sendToUserInternal(userId, title, body, type, data, true);
     }
 
-    private void sendToUserInternal(UUID userId, String title, String body, String type, Map<String, String> data) {
+    @Override
+    @Async
+    @Transactional
+    public void deliverRecordedToUser(UUID userId, String title, String body, Map<String, String> data) {
+        sendToUserInternal(userId, title, body, "CART_MESSAGE", data, false);
+    }
+
+    private void sendToUserInternal(UUID userId, String title, String body, String type, Map<String, String> data, boolean recordHistory) {
         // Record in history (independent of delivery)
-        try {
+        if (recordHistory) try {
             NotificationHistory history = new NotificationHistory(userId, title, body, type);
             historyRepository.save(history);
         } catch (Exception e) {

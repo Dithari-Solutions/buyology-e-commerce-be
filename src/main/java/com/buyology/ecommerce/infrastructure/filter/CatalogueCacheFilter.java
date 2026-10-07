@@ -107,6 +107,8 @@ public class CatalogueCacheFilter extends OncePerRequestFilter {
     private record Entry(byte[] body, String contentType, long storedAt, long expiresAt,
                          long priceChangesAt) {}
 
+    private final Object[] loadLocks = java.util.stream.IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
+
     private final Map<String, Entry> cache = new ConcurrentHashMap<>();
     private final AtomicLong totalBytes = new AtomicLong();
 
@@ -136,6 +138,14 @@ public class CatalogueCacheFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String key = cacheKey(request);
+        // Fixed-size locks coalesce simultaneous cold requests without an unbounded key/lock map.
+        synchronized (loadLocks[Math.floorMod(key.hashCode(), loadLocks.length)]) {
+            serveCached(request, response, filterChain, key);
+        }
+    }
+
+    private void serveCached(HttpServletRequest request, HttpServletResponse response,
+                             FilterChain filterChain, String key) throws ServletException, IOException {
         long now = System.currentTimeMillis();
 
         Entry hit = cache.get(key);

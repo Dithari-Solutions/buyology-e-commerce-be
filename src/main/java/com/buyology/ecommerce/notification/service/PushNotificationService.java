@@ -19,6 +19,9 @@ public interface PushNotificationService {
      */
     void sendToUser(UUID userId, String title, String body, Map<String, String> data);
 
+    /** Deliver a notification whose inbox history has already been recorded durably. */
+    void deliverRecordedToUser(UUID userId, String title, String body, Map<String, String> data);
+
     /**
      * Sends a push notification and records it in the history with a specific type.
      */
