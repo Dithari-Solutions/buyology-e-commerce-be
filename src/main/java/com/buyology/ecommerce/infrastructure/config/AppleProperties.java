@@ -6,6 +6,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @ConfigurationProperties(prefix = "apple")
 public class AppleProperties {
+    private String iosClientId;
+    public String getIosClientId() { return iosClientId; }
+    public void setIosClientId(String value) { iosClientId = value; }
+
     private String teamId;
     private String clientId;
     private String keyId;

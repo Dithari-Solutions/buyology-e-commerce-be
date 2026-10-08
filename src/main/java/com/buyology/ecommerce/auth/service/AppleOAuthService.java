@@ -27,7 +27,6 @@ import com.buyology.ecommerce.auth.repository.AuthCredentialRepository;
 import com.buyology.ecommerce.infrastructure.config.AppleProperties;
 import com.buyology.ecommerce.user.domain.Users;
 import com.buyology.ecommerce.user.repository.UserRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.jsonwebtoken.Jwts;
 
@@ -40,19 +39,19 @@ public class AppleOAuthService {
     private final RestTemplate restTemplate;
     private final UserRepository userRepository;
     private final AuthCredentialRepository authCredentialRepository;
-    private final ObjectMapper objectMapper;
+    private final AppleIdentityVerifier verifier;
 
     public AppleOAuthService(
             AppleProperties appleProperties,
             RestTemplate restTemplate,
             UserRepository userRepository,
             AuthCredentialRepository authCredentialRepository,
-            ObjectMapper objectMapper) {
+            AppleIdentityVerifier verifier) {
         this.appleProperties = appleProperties;
         this.restTemplate = restTemplate;
         this.userRepository = userRepository;
         this.authCredentialRepository = authCredentialRepository;
-        this.objectMapper = objectMapper;
+        this.verifier = verifier;
     }
 
     @Transactional
@@ -101,36 +100,18 @@ public class AppleOAuthService {
 
             tokenResponse = response.getBody();
         } catch (HttpClientErrorException e) {
-            String body = e.getResponseBodyAsString();
-            log.error("Apple OAuth failed. Body: {}", body);
-            throw new IllegalArgumentException("Apple OAuth token exchange failed: " + body);
+            log.warn("Apple token exchange rejected: {}", e.getStatusCode());
+            throw new IllegalArgumentException("Apple login could not be verified. Please try again.");
         }
 
+        if (tokenResponse == null) throw new IllegalArgumentException("Apple returned no tokens");
         String accessToken = (String) tokenResponse.get("access_token");
         String refreshToken = (String) tokenResponse.get("refresh_token");
         String idToken = (String) tokenResponse.get("id_token");
 
-        // 3️⃣ Parse ID Token to get user info
-        String appleId;
-        String email;
-        try {
-            String[] splitToken = idToken.split("\\.");
-            if (splitToken.length < 2) {
-                throw new IllegalArgumentException("Invalid ID Token format");
-            }
-            String payloadJson = new String(Base64.getDecoder().decode(splitToken[1]));
-            Map<String, Object> claims = objectMapper.readValue(payloadJson, Map.class);
-            
-            appleId = (String) claims.get("sub");
-            email = (String) claims.get("email");
-        } catch (Exception e) {
-            log.error("Failed to parse Apple ID Token: {}", e.getMessage());
-            throw new RuntimeException("Failed to extract information from Apple ID token", e);
-        }
-
-        if (appleId == null) {
-            throw new RuntimeException("Apple user ID (sub) is missing");
-        }
+        var claims = verifier.verify(idToken, appleProperties.getClientId(), authRequest.getNonce());
+        String appleId = claims.getSubject();
+        String email = verifiedEmail(claims);
 
         // 4️⃣ Check if credentials already exist
         Optional<AuthCredentials> existingCred = authCredentialRepository
@@ -175,37 +156,11 @@ public class AppleOAuthService {
         return authCredentialRepository.save(cred);
     }
 
-    /**
-     * Native iOS path: trust the JWT payload of the identityToken (signed by Apple)
-     * to identify the user. We perform a minimal payload parse — full JWKS verification
-     * would be a future hardening step.
-     */
     private AuthCredentials processNativeIdentityToken(AppleOAuthRequest authRequest) {
         String idToken = authRequest.getIdentityToken();
-        String appleId;
-        String email;
-        try {
-            String[] parts = idToken.split("\\.");
-            if (parts.length < 2) {
-                throw new IllegalArgumentException("Invalid identityToken format");
-            }
-            String payloadJson = new String(Base64.getUrlDecoder().decode(parts[1]));
-            @SuppressWarnings("unchecked")
-            Map<String, Object> claims = objectMapper.readValue(payloadJson, Map.class);
-            String aud = (String) claims.get("aud");
-            if (aud == null || !aud.equals(appleProperties.getClientId())) {
-                // For native iOS, the audience is the iOS bundle identifier. Accept
-                // when the configured client-id equals it.
-                log.warn("Apple identityToken aud {} != configured clientId {}", aud, appleProperties.getClientId());
-            }
-            appleId = (String) claims.get("sub");
-            email = (String) claims.get("email");
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to parse Apple identityToken", e);
-        }
-        if (appleId == null) {
-            throw new RuntimeException("Apple user ID (sub) is missing");
-        }
+        var claims = verifier.verify(idToken, appleProperties.getIosClientId(), authRequest.getNonce());
+        String appleId = claims.getSubject();
+        String email = verifiedEmail(claims);
 
         Optional<AuthCredentials> existing = authCredentialRepository
                 .findByProviderAndProviderUserId("APPLE", appleId);
@@ -233,6 +188,16 @@ public class AppleOAuthService {
         return authCredentialRepository.save(cred);
     }
 
+    public String createChallenge(String platform) { return verifier.createChallenge(platform); }
+
+    private String verifiedEmail(io.jsonwebtoken.Claims claims) {
+        Object verified = claims.get("email_verified");
+        String email = claims.get("email", String.class);
+        if (email != null && !Boolean.TRUE.equals(verified) && !"true".equals(verified))
+            throw new IllegalArgumentException("Apple email is not verified");
+        return email;
+    }
+
     private String generateClientSecret() {
         try {
             PrivateKey privateKey = parsePrivateKey(appleProperties.getPrivateKey());
@@ -256,7 +221,7 @@ public class AppleOAuthService {
     }
 
     private PrivateKey parsePrivateKey(String keyContent) throws Exception {
-        String cleaned = keyContent
+        String cleaned = keyContent.replace("\\n", "\n")
                 .replace("-----BEGIN PRIVATE KEY-----", "")
                 .replace("-----END PRIVATE KEY-----", "")
                 .replaceAll("\\s+", "");

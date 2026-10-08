@@ -286,15 +286,24 @@ public class AuthController {
 
     // ── Apple OAuth ───────────────────────────────────────────────────────────
 
+    @PostMapping("/apple/challenge")
+    public ResponseEntity<ApiResponse<java.util.Map<String, String>>> appleChallenge(
+            @RequestBody java.util.Map<String, String> request) {
+        try {
+            return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                    .body(new ApiResponse<>(200, "Apple login challenge", java.util.Map.of(
+                            "nonce", appleOAuthService.createChallenge(request.get("platform")))));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.failure(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
     @Operation(summary = "Apple OAuth login",
             description = "Handles Apple OAuth2 callback. Returns access and refresh tokens.")
     @PostMapping("/apple/callback")
     public ResponseEntity<ApiResponse<SignInResponse>> appleCallback(
             @RequestBody AppleOAuthRequest request,
             HttpServletRequest httpRequest) {
-        if (request.getCode() == null || request.getCode().isEmpty()) {
-            return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Authorization code is required");
-        }
         try {
             AuthCredentials creds = appleOAuthService.processAppleOAuth(request);
             return authService.buildSigninResponse(creds, httpRequest);

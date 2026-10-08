@@ -1,6 +1,9 @@
 package com.buyology.ecommerce.auth.dto;
 
 public class AppleOAuthRequest {
+    private String nonce;
+    public String getNonce() { return nonce; }
+    public void setNonce(String value) { nonce = value; }
     private String code;
     /**
      * The redirect URI the CLIENT used when opening Apple's authorize page. Optional; falls back
