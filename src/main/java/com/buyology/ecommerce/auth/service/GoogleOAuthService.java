@@ -70,7 +70,7 @@ public class GoogleOAuthService {
             Map<String, Object> body = resp.getBody() == null ? Map.of() : resp.getBody();
             claims = body;
         } catch (HttpClientErrorException e) {
-            throw new IllegalArgumentException("Google idToken validation failed: " + e.getResponseBodyAsString());
+            throw new IllegalArgumentException("Google login could not be verified");
         }
 
         String aud = (String) claims.get("aud");
@@ -83,11 +83,23 @@ public class GoogleOAuthService {
             throw new IllegalArgumentException("Google idToken audience mismatch");
         }
 
+        String issuer = (String) claims.get("iss");
+        if (!"https://accounts.google.com".equals(issuer) && !"accounts.google.com".equals(issuer))
+            throw new IllegalArgumentException("Invalid Google token issuer");
+        try {
+            if (Long.parseLong(String.valueOf(claims.get("exp"))) <= System.currentTimeMillis() / 1000)
+                throw new IllegalArgumentException("Google token expired");
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid Google token expiry");
+        }
+        Object verified = claims.get("email_verified");
+        if (!Boolean.TRUE.equals(verified) && !"true".equals(verified))
+            throw new IllegalArgumentException("Google email is not verified");
         String googleId = (String) claims.get("sub");
         String email = (String) claims.get("email");
         String firstName = (String) claims.get("given_name");
         String lastName = (String) claims.get("family_name");
-        if (googleId == null) {
+        if (googleId == null || googleId.isBlank()) {
             throw new RuntimeException("Google user ID is missing");
         }
         return upsertCredentials(googleId, email, firstName, lastName, idToken, null);
@@ -156,7 +168,7 @@ public class GoogleOAuthService {
         String firstName = (String) userInfo.get("given_name");
         String lastName = (String) userInfo.get("family_name");
 
-        if (googleId == null) {
+        if (googleId == null || googleId.isBlank()) {
             throw new RuntimeException("Google user ID is missing");
         }
         return upsertCredentials(googleId, email, firstName, lastName, accessToken, refreshToken);
