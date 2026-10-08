@@ -43,6 +43,26 @@ class GoogleLoginValidationTest {
         claims.put("aud", "legacy-client");
         assertEquals("google-user", service.processGoogleNativeIdToken("legacy-token").getProviderUserId());
     }
+    @Test void longIdentityTokenIsVerifiedWithoutBeingStoredInAccessTokenColumn() {
+        AuthCredentials created = service.processGoogleNativeIdToken("jwt".repeat(700));
+        assertEquals("google-user", created.getProviderUserId());
+        assertNull(created.getAccessToken());
+        assertNull(created.getRefreshToken());
+    }
+    @Test void identityLoginPreservesExistingOAuthTokensAndUser() {
+        Users user = new Users();
+        user.setId(UUID.randomUUID());
+        AuthCredentials existing = new AuthCredentials(user.getId(), "GOOGLE");
+        existing.setAccessToken("existing-access-token");
+        existing.setRefreshToken("existing-refresh-token");
+        when(credentials.findByProviderAndProviderUserId("GOOGLE", "google-user"))
+                .thenReturn(Optional.of(existing));
+        when(users.findById(user.getId())).thenReturn(Optional.of(user));
+        assertSame(existing, service.processGoogleNativeIdToken("jwt".repeat(700)));
+        assertEquals("existing-access-token", existing.getAccessToken());
+        assertEquals("existing-refresh-token", existing.getRefreshToken());
+        verify(users, never()).save(any());
+    }
     @Test void rejectsOtherApplications() { claims.put("aud", "attacker"); reject(); }
     @Test void rejectsWrongIssuer() { claims.put("iss", "https://attacker.example"); reject(); }
     @Test void rejectsExpiredToken() { claims.put("exp", "1"); reject(); }

@@ -102,7 +102,9 @@ public class GoogleOAuthService {
         if (googleId == null || googleId.isBlank()) {
             throw new RuntimeException("Google user ID is missing");
         }
-        return upsertCredentials(googleId, email, firstName, lastName, idToken, null);
+        // The ID token proves identity for this request; it is not an OAuth access
+        // token and is not needed after issuing our own session. Do not persist it.
+        return upsertCredentials(googleId, email, firstName, lastName, null, null);
     }
 
     @Transactional
@@ -186,7 +188,7 @@ public class GoogleOAuthService {
             if ("SUSPENDED".equals(existingUser.getStatus())) {
                 throw new IllegalArgumentException("Your account has been suspended. Please contact support.");
             }
-            cred.setAccessToken(accessToken);
+            if (accessToken != null) cred.setAccessToken(accessToken);
             if (refreshToken != null) cred.setRefreshToken(refreshToken);
             return authCredentialRepository.save(cred);
         }
