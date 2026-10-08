@@ -722,7 +722,8 @@ public class AdminUserService {
 
         UserProfiles profile = profilesRepository.findByUser(user).orElse(null);
 
-        String email = authCredentialRepository.findByUserId(user.getId()).stream()
+        List<AuthCredentials> linkedCredentials = authCredentialRepository.findByUserId(user.getId());
+        String email = linkedCredentials.stream()
                 .map(AuthCredentials::getEmail)
                 .filter(e -> e != null && !e.isBlank())
                 .findFirst()
@@ -765,6 +766,8 @@ public class AdminUserService {
         AdminUserDetailResponse detail = new AdminUserDetailResponse();
         detail.setUserId(user.getId());
         detail.setAuthCredentialId(authCredentialId);
+        detail.setAppleSignIn(linkedCredentials.stream()
+                .anyMatch(c -> "APPLE".equalsIgnoreCase(c.getProvider())));
         detail.setEmail(email);
         detail.setUserType(user.getUserType() != null ? user.getUserType().name() : null);
         detail.setStatus(user.getStatus());
@@ -813,10 +816,12 @@ public class AdminUserService {
                 .distinct()
                 .collect(Collectors.toList());
 
+        Map<UUID, Boolean> appleByUserId = new HashMap<>();
         Map<UUID, String> emailByUserId = new HashMap<>();
         Map<UUID, UUID> credIdByUserId = new HashMap<>();
         if (!userIds.isEmpty()) {
             for (AuthCredentials c : authCredentialRepository.findByUserIdIn(userIds)) {
+                if ("APPLE".equalsIgnoreCase(c.getProvider())) appleByUserId.put(c.getUserId(), true);
                 credIdByUserId.putIfAbsent(c.getUserId(), c.getId());
                 String e = c.getEmail();
                 if (e != null && !e.isBlank()) emailByUserId.putIfAbsent(c.getUserId(), e);
@@ -848,7 +853,7 @@ public class AdminUserService {
                     lastName = addr.getLastName();
                 }
             }
-            summaries.add(new AdminUserSummaryResponse(
+            AdminUserSummaryResponse summary = new AdminUserSummaryResponse(
                     uid,
                     credIdByUserId.get(uid),
                     emailByUserId.get(uid),
@@ -857,7 +862,9 @@ public class AdminUserService {
                     user.getUserType() != null ? user.getUserType().name() : null,
                     user.getStatus(),
                     user.getCreatedAt()
-            ));
+            );
+            summary.setAppleSignIn(appleByUserId.getOrDefault(uid, false));
+            summaries.add(summary);
         }
         return summaries;
     }

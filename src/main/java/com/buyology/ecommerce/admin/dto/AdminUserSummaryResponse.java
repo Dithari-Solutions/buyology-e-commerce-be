@@ -8,6 +8,9 @@ public class AdminUserSummaryResponse {
 
     private UUID userId;
     private UUID authCredentialId;
+    private boolean appleSignIn;
+    public boolean isAppleSignIn() { return appleSignIn; }
+    public void setAppleSignIn(boolean value) { appleSignIn = value; }
     private String email;
     private String firstName;
     private String lastName;
