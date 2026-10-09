@@ -390,6 +390,9 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (path.equals("/auth/refresh")) {
             return RateLimitTier.AUTH_REFRESH;
         }
+        if (path.equals("/api/partnership/requests")) {
+            return RateLimitTier.AUTH_GENERAL;
+        }
         if (path.startsWith("/auth/")) {
             return RateLimitTier.AUTH_GENERAL;
         }

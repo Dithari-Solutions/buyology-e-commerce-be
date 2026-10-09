@@ -153,6 +153,7 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/assistant/status").permitAll()
                         // B2B inquiry contact form (admin B2B endpoints live under /api/admin/**)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/b2b/inquiries").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/partnership/requests").permitAll()
                         // Contact verification (email/phone OTP) used by public supplier & B2B apply forms
                         .requestMatchers("/api/verify/**").permitAll()
                         // Payment webhook — must be reachable by Paymob without a JWT
@@ -226,6 +227,7 @@ public class SecurityConfig {
             "https://buyology.online",
             // Carries the AI assistant widget. A separate site from the shop, and it stays.
             "https://v2.buyology.online",
+            "https://business.buyology.online",
             // The per-region storefronts: one subdomain per served market, plus the global
             // landing for visitors from countries we don't serve. Same first-party app,
             // different hosts — geo routing decides which one a visitor may use.

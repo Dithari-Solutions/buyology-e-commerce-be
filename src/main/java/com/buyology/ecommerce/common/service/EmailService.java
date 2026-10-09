@@ -1428,6 +1428,25 @@ public class EmailService {
         }
     }
 
+    /** Returns provider acceptance; durable partnership queue handles retries after commit. */
+    public boolean sendPartnershipReceivedEmail(String email, String name, String company, String reference) {
+        try {
+            String html = accountEmailHtml("Your partnership request is received",
+                    "<p>Hello " + escapeHtml(safeName(name)) + ",</p>"
+                    + "<p>Thank you for applying to become a Buyology partner. We have received the qualification form for <strong>"
+                    + escapeHtml(company) + "</strong>.</p>"
+                    + "<p>Our team will review your business profile, capabilities and preferred partnership. If your profile meets our requirements, we will contact you for a detailed business discussion followed by a final meeting and MOU discussion.</p>"
+                    + "<p>Your request reference: <strong>" + escapeHtml(reference) + "</strong></p>"
+                    + "<p>This confirms receipt of your application and does not constitute partnership approval.</p>")
+                    .replace("#FBBB14", "#FFBE12").replace("support@buyology.com", "support@buyology.online");
+            send(email, "We received your Buyology partnership request", html);
+            return true;
+        } catch (Exception e) {
+            log.warn("Partnership confirmation failed for request {}: {}", reference, e.getMessage());
+            return false;
+        }
+    }
+
     private static String escapeHtml(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
