@@ -15,6 +15,7 @@ public record PartnershipApplication(
     @NotNull @Size(min=19, max=19) Map<String, Boolean> answers,
     @NotBlank String investment,
     @NotEmpty @Size(min=1, max=1) List<@NotBlank String> partnerships,
+    @NotBlank @Size(max=2000) String whyBuyology,
     @Size(max=0) String websiteAddress
 ) {
     public static final Set<String> ANSWER_KEYS = Set.of("registeredBusiness", "technologySales", "laptopsTablets", "refurbishedTechnology", "customerBase", "storage", "retailLocation", "localFulfilment", "returnsSupport", "onlineChannel", "team", "deployInvestment", "replenishment", "holdInventory", "initialSales", "growthSales", "activeMarketing", "longTerm", "finalDiscussion");

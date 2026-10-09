@@ -26,6 +26,13 @@ class PartnershipControllerTest {
             .andExpect(status().isBadRequest());
         verifyNoInteractions(service);
     }
+    @Test void missingReasonCannotReachPersistence() throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode payload=mapper.valueToTree(PartnershipApplicationTest.valid());
+        payload.remove("whyBuyology");
+        mvc.perform(post("/api/partnership/requests").contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(payload)))
+            .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
     @Test void referenceConflictIsNotConvertedToInternalServerError() throws Exception {
         when(service.submit(any())).thenThrow(new ResponseStatusException(HttpStatus.CONFLICT,"Submission reference already used"));
         mvc.perform(post("/api/partnership/requests").contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(PartnershipApplicationTest.valid())))

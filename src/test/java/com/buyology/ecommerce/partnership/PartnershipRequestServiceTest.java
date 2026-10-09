@@ -32,8 +32,24 @@ class PartnershipRequestServiceTest {
     @Test void sameReferenceCannotOverwriteDifferentApplication() throws Exception {
         PartnershipApplication a=PartnershipApplicationTest.valid();
         when(repository.findById(a.requestId())).thenReturn(Optional.of(stored(a)));
-        PartnershipApplication other=new PartnershipApplication(a.requestId(),"Another Name",a.company(),a.cityCountry(),a.phone(),a.email(),a.website(),a.answers(),a.investment(),a.partnerships(),"");
+        PartnershipApplication other=new PartnershipApplication(a.requestId(),"Another Name",a.company(),a.cityCountry(),a.phone(),a.email(),a.website(),a.answers(),a.investment(),a.partnerships(),a.whyBuyology(),"");
         assertThrows(ResponseStatusException.class,()->service.submit(other)); verifyNoInteractions(emails);
+    }
+    @Test void reasonIsSavedAndReturnedToDashboard() throws Exception {
+        PartnershipApplication a=PartnershipApplicationTest.valid();
+        when(repository.findById(a.requestId())).thenReturn(Optional.of(stored(a)));
+        service.submit(a);
+        verify(repository).insertOnce(eq(a.requestId()),argThat(json->json.contains(a.whyBuyology())));
+        when(repository.findAllByOrderByCreatedAtDesc(any())).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(stored(a))));
+        assertEquals(a.whyBuyology(),service.list(0).content().get(0).application().whyBuyology());
+    }
+    @Test void historicalApplicationWithoutReasonRemainsReadable() throws Exception {
+        PartnershipRequest request=stored(PartnershipApplicationTest.valid());
+        com.fasterxml.jackson.databind.node.ObjectNode payload=(com.fasterxml.jackson.databind.node.ObjectNode)mapper.readTree(request.getPayload());
+        payload.remove("whyBuyology");
+        ReflectionTestUtils.setField(request,"payload",mapper.writeValueAsString(payload));
+        when(repository.findAllByOrderByCreatedAtDesc(any())).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(request)));
+        assertNull(service.list(0).content().get(0).application().whyBuyology());
     }
     @Test void providerFailureRetainsSavedApplicationAndRetriesThenReportsFailure() throws Exception {
         PartnershipApplication a=PartnershipApplicationTest.valid(); PartnershipRequest request=stored(a);
