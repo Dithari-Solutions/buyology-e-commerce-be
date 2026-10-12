@@ -27,7 +27,8 @@ public class UserProfiles {
 
     /** True once the phone number has been verified via Twilio Verify. Reset to false whenever the number changes. */
     @Column(name = "phone_verified", nullable = false)
-    private boolean phoneVerified = false;
+    // Temporary customer policy: SMS verification is not required.
+    private boolean phoneVerified = true;
 
     @Column(name = "address")
     private String address;

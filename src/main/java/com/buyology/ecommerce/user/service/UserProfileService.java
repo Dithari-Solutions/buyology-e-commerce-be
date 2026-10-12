@@ -89,9 +89,9 @@ public class UserProfileService {
 
         if (req.getPhoneNumber() != null && !req.getPhoneNumber().isBlank()) {
             String newPhone = req.getPhoneNumber().trim();
-            // Changing the number invalidates any prior verification — they must re-verify.
+            // Temporary customer policy: accept the phone without SMS verification.
             if (!newPhone.equals(profile.getPhoneNumber())) {
-                profile.setPhoneVerified(false);
+                profile.setPhoneVerified(true);
             }
             profile.setPhoneNumber(newPhone);
         }
@@ -147,8 +147,8 @@ public class UserProfileService {
 
     /**
      * Sends an SMS verification code to the given E.164 number via Twilio Verify.
-     * The number is persisted on the profile (unverified) so the subsequent
-     * verify call confirms the same number the user is changing to.
+     * The number is persisted on the profile so the subsequent verify call
+     * confirms the same number. The temporary auto-verification policy remains active.
      */
     @Transactional
     public void sendPhoneOtp(UUID userId, String phoneNumber) {
@@ -162,7 +162,7 @@ public class UserProfileService {
 
         if (!phone.equals(profile.getPhoneNumber())) {
             profile.setPhoneNumber(phone);
-            profile.setPhoneVerified(false);
+            profile.setPhoneVerified(true);
             profilesRepo.save(profile);
         }
 
@@ -252,12 +252,6 @@ public class UserProfileService {
         // (paymentReady=true) but payment-init throws on a missing lastName.
         if (isBlank(user.getFirstName()))         missing.add("firstName");
         if (isBlank(profile.getPhoneNumber()))    missing.add("phoneNumber");
-        // Only demand a VERIFIED phone while we can actually send a code. With SMS switched off,
-        // requiring it would bar every customer from the giveaway at a step that cannot be
-        // completed — the number is still collected, it is simply not confirmed yet.
-        else if (!profile.isPhoneVerified() && phoneVerificationGuard.isPhoneOtpEnabled()) {
-            missing.add("phoneVerification");
-        }
         if (requireAddress && addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
 
         if (!missing.isEmpty()) {
@@ -372,7 +366,6 @@ public class UserProfileService {
         if (isBlank(user.getFirstName()))      missing.add("firstName");
         // lastName (surname) is optional — not part of payment readiness.
         if (isBlank(profile.getPhoneNumber())) missing.add("phoneNumber");
-        else if (!profile.isPhoneVerified())   missing.add("phoneVerification");
         if (addressRepo.findAllByUser(user).isEmpty()) missing.add("deliveryAddress");
         return missing;
     }
