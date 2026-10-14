@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.math.BigDecimal;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -19,6 +20,19 @@ public class PaymentController {
 
     public PaymentController(PaymentService paymentService) {
         this.paymentService = paymentService;
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/methods")
+    public ResponseEntity<ApiResponse<AvailablePaymentMethodsResponse>> availableMethods() {
+        return ApiResponse.success(paymentService.availablePaymentMethods(), "Available payment methods");
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/quote")
+    public ResponseEntity<ApiResponse<PaymentQuoteResponse>> quote(
+            @RequestParam BigDecimal amount, @RequestParam String currency) {
+        return ApiResponse.success(paymentService.quotePayment(amount, currency), "Estimated payment charge");
     }
 
     /**

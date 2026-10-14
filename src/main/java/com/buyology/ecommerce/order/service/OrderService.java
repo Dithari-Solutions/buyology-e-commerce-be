@@ -392,16 +392,16 @@ public class OrderService {
         // wrong once the money is taken — see CapturePhase.
         repriceForCheckout(cart, cartItems, phase);
 
-        // The order is constrained to the user's market: their explicitly selected country,
-        // or (if unset) the country the cart was browsed/priced in.
+        // Fulfilment follows the server-priced cart's market. A browsing preference can be
+        // stale (or changed on another device after capture); it must not relocate the goods.
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
 
         if (phase == CapturePhase.BEFORE_CAPTURE) requireCustomerPhone(profile);
 
-        String marketCountry = profile.getSelectedCountryCode();
+        String marketCountry = cart.getCountryCode();
         if (marketCountry == null || marketCountry.isBlank()) {
-            marketCountry = cart.getCountryCode();
+            marketCountry = profile.getSelectedCountryCode();
         }
 
         // Resolve the CURRENT checkout completely — method after the EXPRESS downgrade, the fee
@@ -463,9 +463,13 @@ public class OrderService {
             UserAddress address = plan.address();
             // Address snapshot
             order.setDeliveryAddressId(address.getId());
-            order.setRecipientFirstName(address.getFirstName());
-            order.setRecipientLastName(address.getLastName());
-            order.setRecipientPhone(address.getPhoneNumber());
+            // Old addresses may predate the contact completed inline at checkout. Preserve
+            // an explicitly saved recipient, otherwise use the now-complete account contact.
+            order.setRecipientFirstName(firstNonBlank(address.getFirstName(),
+                    profile.getUser() == null ? null : profile.getUser().getFirstName()));
+            order.setRecipientLastName(firstNonBlank(address.getLastName(),
+                    profile.getUser() == null ? null : profile.getUser().getLastName()));
+            order.setRecipientPhone(firstNonBlank(address.getPhoneNumber(), profile.getPhoneNumber()));
             order.setAddressLine1(address.getAddressLine1());
             order.setAddressLine2(address.getAddressLine2());
             order.setCity(address.getCity());
@@ -867,11 +871,12 @@ public class OrderService {
             throw new IllegalArgumentException("Address does not belong to the authenticated user");
         }
 
-        // The delivery address must be in the user's market (when one is set).
+        // The delivery address must be in the goods' market (when one is set).
         if (marketCountry != null && !marketCountry.isBlank()
                 && !isSameCountry(address.getCountry(), marketCountry)) {
-            throw new IllegalArgumentException("You can only purchase products for delivery in your selected country ("
-                    + marketCountry + ").");
+            throw new IllegalArgumentException("This cart is for delivery in " + marketCountry
+                    + ", but your selected address is in " + address.getCountry()
+                    + ". Please choose a delivery address in " + marketCountry + ".");
         }
 
         // Honor the customer's choice. EXPRESS is re-validated against the address (store within

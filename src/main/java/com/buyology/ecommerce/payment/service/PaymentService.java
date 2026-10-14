@@ -128,6 +128,43 @@ public class PaymentService {
     // Initiate payment — Paymob Intention API (v2, single-call flow)
     // =========================================================================
 
+    @Transactional(readOnly = true)
+    public AvailablePaymentMethodsResponse availablePaymentMethods() {
+        PaymentProvider provider = providerRepo.findFirstByIsActiveTrue().orElse(null);
+        if (provider == null || provider.getSecretKey() == null || provider.getSecretKey().isBlank()
+                || provider.getPublicKey() == null || provider.getPublicKey().isBlank()
+                || provider.getHmacSecret() == null || provider.getHmacSecret().isBlank()
+                || provider.getBaseUrl() == null || provider.getBaseUrl().isBlank()) {
+            return new AvailablePaymentMethodsResponse(List.of(), "AED");
+        }
+        List<PaymentMethodType> methods = List.of(PaymentMethodType.CARD, PaymentMethodType.TABBY, PaymentMethodType.TAMARA)
+                .stream().filter(method -> methodConfigRepo.findByProviderAndMethodTypeAndIsActiveTrue(provider, method)
+                        .filter(this::usableCheckoutConfig)
+                        .isPresent()).toList();
+        return new AvailablePaymentMethodsResponse(methods, "AED");
+    }
+
+    private boolean usableCheckoutConfig(PaymentMethodConfig config) {
+        try {
+            return "AED".equalsIgnoreCase(config.getCurrency())
+                    && config.getIntegrationId() != null
+                    && config.getIntegrationId().matches("[0-9]+")
+                    && Integer.parseInt(config.getIntegrationId()) > 0;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
+    public PaymentQuoteResponse quotePayment(BigDecimal amount, String currency) {
+        if (amount == null || amount.signum() < 0 || amount.compareTo(new BigDecimal("100000000")) > 0
+                || currency == null || currency.isBlank()) {
+            throw new IllegalArgumentException("A valid amount and currency are required");
+        }
+        String from = currency.trim().toUpperCase(java.util.Locale.ROOT);
+        java.util.Currency.getInstance(from); // Reject unsupported codes before reaching the FX provider.
+        return new PaymentQuoteResponse(currencyExchangeService.convert(amount, from, "AED"), "AED");
+    }
+
     @Transactional
     public PaymentInitiatedResponse initiatePayment(InitiatePaymentRequest req) {
         // The authenticated principal IS the users.id (JwtAuthenticationFilter sets it to
@@ -145,7 +182,8 @@ public class PaymentService {
         // (no appOrderId yet) keeps the address requirement.
         boolean requireAddress = true;
         if (req.getAppOrderId() != null) {
-            var preOrder = orderRepoProvider.getObject().findById(req.getAppOrderId()).orElse(null);
+            var preOrder = orderRepoProvider.getObject().findById(req.getAppOrderId())
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found. Please check your orders before paying again."));
             // A cash order must not also be chargeable online. repayOrder has always refused this,
             // with a comment about double-charging, but this entry point did not — so a direct call
             // could take the card payment while a courier was still on the way to collect the same
