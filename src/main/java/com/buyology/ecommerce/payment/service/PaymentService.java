@@ -291,6 +291,14 @@ public class PaymentService {
                 req.getCustomerEmail(),
                 billingOrder != null ? accountEmailFor(billingOrder.getUserId()) : null);
 
+        if (req.getCustomerPhone() == null || req.getCustomerPhone().isBlank()) {
+            var profile = userProfileService.getProfile(currentUserId);
+            req.setCustomerPhone(firstNonBlank(address == null ? null : address.getPhoneNumber(),
+                    billingOrder == null ? null : billingOrder.getRecipientPhone(),
+                    profile == null ? null : profile.getPhoneNumber()));
+        }
+        // The same resolved contact is sent to Paymob and retained on the payment attempt,
+        // so the dashboard can display it even when the original request omitted it.
         ObjectNode billingData = buildBillingData(req, address, billingOrder, payerEmail);
 
         ObjectNode customer = objectMapper.createObjectNode();
@@ -917,8 +925,21 @@ public class PaymentService {
                         .reversed())
                 .toList();
         if (attempts.isEmpty()) {
+            if (typedIdProvided) {
+                PaymobPaymentLookup lookup = lookupPaymobPayment(providerTransactionIdOverride);
+                if (!orderId.equals(lookup.orderId())) {
+                    return new RecheckResult(false, lookup.paymentStatus(),
+                            "Paymob transaction " + lookup.providerTransactionId()
+                                    + (lookup.orderId() == null ? " has no linked local order."
+                                    : " is linked to order " + lookup.orderId() + ", not this order.")
+                                    + " Open Orders → Payment verification to inspect the match. Nothing was changed.");
+                }
+                return new RecheckResult(false, lookup.paymentStatus(), lookup.message());
+            }
             return new RecheckResult(false, null,
-                    "No pending payment found for this order — nothing to re-check.");
+                    "No pending local payment attempt is linked to this order. This does not prove "
+                            + "the customer has not paid. Open Orders → Payment verification and "
+                            + "enter the Paymob transaction ID to find its actual payment and order.");
         }
 
         String typed = providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim();
@@ -1208,7 +1229,10 @@ public class PaymentService {
                 : !paid ? "Paymob has not confirmed a completed, non-reversed payment. Nothing was changed."
                 : order == null ? "Payment found, but no active local order exists. Manual review is required."
                 : confirmable ? "Paymob confirms payment. Review the matched order below before confirming."
-                : "Paymob confirms payment. This order is not awaiting payment; no confirmation is needed here.";
+                : order.getStatus() == OrderStatus.PENDING_PAYMENT
+                    ? "Paymob confirms payment, but the local payment status " + known.getStatus()
+                        + " requires manual review. Nothing was changed."
+                    : "Paymob confirms payment. This order is not awaiting payment; no confirmation is needed here.";
         return new PaymobPaymentLookup(typed, known == null ? null : known.getId(),
                 known == null ? null : known.getAppOrderId(), order == null ? null : order.getStatus().name(),
                 known == null ? null : known.getStatus().name(), paid, confirmable,

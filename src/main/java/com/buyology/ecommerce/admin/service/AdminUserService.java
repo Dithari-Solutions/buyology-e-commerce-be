@@ -74,6 +74,7 @@ public class AdminUserService {
     private static final DateTimeFormatter JOINED_ON =
             DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH).withZone(ZoneOffset.UTC);
 
+    private final com.buyology.ecommerce.payment.repository.PaymentTransactionRepository paymentTransactionRepository;
     private final UserRepository userRepository;
     private final UserProfilesRepository profilesRepository;
     private final AuthCredentialRepository authCredentialRepository;
@@ -88,7 +89,8 @@ public class AdminUserService {
     private final UserPermissionRepository userPermissionRepository;
     private final RefreshTokenRepository refreshTokenRepository;
 
-    public AdminUserService(UserRepository userRepository,
+    public AdminUserService(com.buyology.ecommerce.payment.repository.PaymentTransactionRepository paymentTransactionRepository,
+                            UserRepository userRepository,
                             UserProfilesRepository profilesRepository,
                             AuthCredentialRepository authCredentialRepository,
                             UserAddressRepository userAddressRepository,
@@ -101,6 +103,7 @@ public class AdminUserService {
                             UserRoleRepository userRoleRepository,
                             UserPermissionRepository userPermissionRepository,
                             RefreshTokenRepository refreshTokenRepository) {
+        this.paymentTransactionRepository = paymentTransactionRepository;
         this.userRepository = userRepository;
         this.profilesRepository = profilesRepository;
         this.authCredentialRepository = authCredentialRepository;
@@ -746,12 +749,15 @@ public class AdminUserService {
                 .orElse(null);
         CartResponse cartResponse = activeCart != null ? buildCartResponse(activeCart) : null;
 
-        // Account name/phone are often empty (email/password signups never capture a name; a phone is
-        // only stored after SMS verification). Fall back to the customer's saved address, which carries
+        // Older email/password signups did not capture a name or account phone. Fall back to the customer's saved address, which carries
         // both — so admins always see who the customer is.
         String firstName = user.getFirstName();
         String lastName = user.getLastName();
         String phone = profile != null ? profile.getPhoneNumber() : null;
+        if (isBlank(phone)) {
+            phone = linkedCredentials.stream().map(AuthCredentials::getPhoneNumber)
+                    .filter(value -> !isBlank(value)).findFirst().orElse(null);
+        }
         if ((isBlank(firstName) && isBlank(lastName)) || isBlank(phone)) {
             UserAddress addr = bestAddress(user);
             if (addr != null) {
@@ -774,6 +780,10 @@ public class AdminUserService {
         detail.setJoinedAt(user.getCreatedAt());
         detail.setFirstName(firstName);
         detail.setLastName(lastName);
+        if (isBlank(phone)) {
+            phone = paymentTransactionRepository.findUserContactPhones(user.getId(), PageRequest.of(0, 1))
+                    .stream().findFirst().orElse(null);
+        }
         detail.setPhoneNumber(phone);
         if (profile != null) {
             detail.setDateOfBirth(profile.getDateOfBirth());

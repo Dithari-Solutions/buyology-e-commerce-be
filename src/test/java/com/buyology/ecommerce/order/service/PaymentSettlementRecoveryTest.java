@@ -80,4 +80,27 @@ class PaymentSettlementRecoveryTest {
         assertEquals(OrderStatus.PAID, order.getStatus());
         assertEquals(1, paidEvents(), "Recovered orders must reach the ERP/fulfilment paid-event path too");
     }
+    @Test
+    void adminOrderDetailFallsBackToSavedPaymentPhone() {
+        order.setUserId(UUID.randomUUID());
+        when(dependency(PaymentTransactionRepository.class).findOrderContactPhones(eq(order.getId()), any()))
+                .thenReturn(List.of("+971501234567"));
+        var response = new com.buyology.ecommerce.order.dto.OrderResponse();
+        ReflectionTestUtils.invokeMethod(service, "populateCustomerContact", response, order);
+        assertEquals("+971501234567", response.getCustomerPhone());
+    }
+
+    @Test
+    void currentProfilePhoneTakesPriorityOverPaymentHistory() {
+        order.setUserId(UUID.randomUUID());
+        var profile = new com.buyology.ecommerce.user.domain.UserProfiles();
+        profile.setPhoneNumber("+994501234567");
+        when(dependency(com.buyology.ecommerce.user.repository.UserProfilesRepository.class).findByUserId(order.getUserId()))
+                .thenReturn(Optional.of(profile));
+        var response = new com.buyology.ecommerce.order.dto.OrderResponse();
+        ReflectionTestUtils.invokeMethod(service, "populateCustomerContact", response, order);
+        assertEquals("+994501234567", response.getCustomerPhone());
+        verify(dependency(PaymentTransactionRepository.class), never()).findOrderContactPhones(any(), any());
+    }
+
 }

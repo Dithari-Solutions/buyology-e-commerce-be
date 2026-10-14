@@ -106,6 +106,31 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     @Query("UPDATE PaymentTransaction t SET t.lastGatewayCheckAt = :checkedAt WHERE t.id = :id")
     void markGatewayChecked(@Param("id") UUID id, @Param("checkedAt") Instant checkedAt);
 
+    @Query("""
+            SELECT t.customerPhone FROM PaymentTransaction t
+            WHERE t.appOrderId = :orderId AND t.customerPhone IS NOT NULL
+              AND TRIM(t.customerPhone) <> '' AND UPPER(TRIM(t.customerPhone)) <> 'NA'
+            ORDER BY t.createdAt DESC
+            """)
+    List<String> findOrderContactPhones(@Param("orderId") UUID orderId, org.springframework.data.domain.Pageable pageable);
+
+    @Query("""
+            SELECT t.customerPhone FROM PaymentTransaction t
+            WHERE t.customerId IN (SELECT c.id FROM AuthCredentials c WHERE c.userId = :userId)
+              AND t.customerPhone IS NOT NULL AND TRIM(t.customerPhone) <> ''
+              AND UPPER(TRIM(t.customerPhone)) <> 'NA'
+            ORDER BY t.createdAt DESC
+            """)
+    List<String> findUserContactPhones(@Param("userId") UUID userId, org.springframework.data.domain.Pageable pageable);
+
+    @Query("""
+            SELECT t.appOrderId, t.customerPhone FROM PaymentTransaction t
+            WHERE t.appOrderId IN :orderIds AND t.customerPhone IS NOT NULL
+              AND TRIM(t.customerPhone) <> '' AND UPPER(TRIM(t.customerPhone)) <> 'NA'
+            ORDER BY t.createdAt DESC
+            """)
+    List<Object[]> findOrderContactPhonesForOrders(@Param("orderIds") List<UUID> orderIds);
+
     /** Latest courier-fee charge for a refund in any of the given statuses (for resume/idempotency). */
     Optional<PaymentTransaction> findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(
             UUID refundRequestId, PaymentPurpose purpose, List<PaymentStatus> statuses);

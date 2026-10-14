@@ -138,6 +138,7 @@ public class AuthService {
         newOtp.setType(OtpType.SIGNUP);
         newOtp.setEmail(request.getEmail());
         newOtp.setPasswordHash(PasswordUtils.hashPassword(request.getPassword()));
+        newOtp.setPhoneNumber(normaliseSignupPhone(request.getPhoneNumber()));
         newOtp.setOtpCode(otpCode);
         newOtp.setExpiresAt(Instant.now().plus(otpProperties.getExpiryMinutes(), ChronoUnit.MINUTES));
         emailOtpRepository.save(newOtp);
@@ -217,6 +218,8 @@ public class AuthService {
         credentials.setEmail(otp.getEmail());
         credentials.setPasswordHash(otp.getPasswordHash());
         credentials.setProvider("LOCAL");
+        credentials.setPhoneNumber(otp.getPhoneNumber());
+        credentials.setPhoneVerified(otp.getPhoneNumber() != null);
         credentials.setIsActive(true);
         authCredentialRepository.save(credentials);
 
@@ -224,6 +227,7 @@ public class AuthService {
         // found" before the user first opens their profile page.
         com.buyology.ecommerce.user.domain.UserProfiles profile = new com.buyology.ecommerce.user.domain.UserProfiles();
         profile.setUser(newUser);
+        profile.setPhoneNumber(otp.getPhoneNumber());
         userProfilesRepository.save(profile);
 
         emailService.sendRegistrationSuccessEmail(otp.getEmail());
@@ -234,6 +238,15 @@ public class AuthService {
                 "Welcome to Buyology! Here's 10% off — one-time use, valid for 7 days. Applies to everything except laptops.");
 
         return buildSigninResponse(credentials, httpRequest);
+    }
+
+    static String normaliseSignupPhone(String raw) {
+        if (raw == null) return null;
+        String phone = raw.trim().replaceAll("[ ()\\-.]", "");
+        if (!phone.matches("\\+?[0-9]{7,15}")) {
+            throw new IllegalArgumentException("Enter a valid phone number including its country code.");
+        }
+        return phone;
     }
 
     // ── Admin Signup ──────────────────────────────────────────────────────────

@@ -49,6 +49,9 @@ public class EmailOtp {
     @Column(name = "last_name", length = 100)
     private String lastName;
 
+    @Column(name = "phone_number", length = 32)
+    private String phoneNumber;
+
     @Column(name = "otp_code", nullable = false, length = 6)
     private String otpCode;
 
@@ -101,6 +104,9 @@ public class EmailOtp {
 
     public String getLastName() { return lastName; }
     public void setLastName(String lastName) { this.lastName = lastName; }
+
+    public String getPhoneNumber() { return phoneNumber; }
+    public void setPhoneNumber(String phoneNumber) { this.phoneNumber = phoneNumber; }
 
     public String getOtpCode() { return otpCode; }
     public void setOtpCode(String otpCode) { this.otpCode = otpCode; }

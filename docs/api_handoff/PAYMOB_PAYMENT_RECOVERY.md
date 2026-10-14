@@ -35,6 +35,26 @@ provided transaction is confirmed successful at Paymob. Declines cannot be confi
   repeatedly processing only the latest 40 attempts. Its existing grace period,
   lookback and per-run limit remain in effect.
 
+## Signup contact and dashboard display
+
+Current web and mobile email/password signup forms collect an international phone.
+`POST /auth/signup` accepts `phoneNumber`, normalizes it, and retains it on the email
+OTP record. Verifying the email code saves the number on UserProfiles and the local
+AuthCredentials record without an SMS step. The field remains optional in the API
+for previously released clients; ordering still requires a nonblank profile phone.
+Flyway V66 adds `email_otp.phone_number`.
+
+Payment initiation retains the same resolved contact sent to Paymob on the local
+payment attempt. Dashboard customer details prefer profile/credential phones and
+saved addresses, then fall back to an existing payment contact. Order lists and
+details also fall back to the payment contact; list lookups are batched. A billing
+number from a payment does not overwrite a customer's current account phone.
+
+The order re-check no longer interprets a missing eligible local attempt as evidence
+that the customer did not pay. A supplied Paymob ID is still queried to identify its
+actual local order. The order page links to Payment verification with that ID filled
+in, and ineligible local states are explicitly identified as requiring review.
+
 ## Phone requirement
 
 New orders require a nonblank customer profile phone before capture; SMS verification
@@ -45,7 +65,7 @@ its customer profile lacks a phone.
 ## Deployment and verification
 
 Deploy backend first so Flyway applies V64 (phone defaults) if needed and V65 (gateway
-check timestamp), then deploy the dashboard using its normal production API URL.
+check timestamp) and V66 (signup phone), then deploy the dashboard using its normal production API URL.
 Unit tests and mocked dashboard browser tests never query or settle a live payment.
 The reported transaction 36914143 still requires inspection through the merchant
 account after deployment; its live state was not established from source code.

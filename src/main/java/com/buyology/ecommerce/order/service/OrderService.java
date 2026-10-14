@@ -1902,6 +1902,14 @@ public class OrderService {
             }
         }
 
+        Map<UUID, String> paymentPhoneByOrderId = new java.util.HashMap<>();
+        List<UUID> orderIds = orders.getContent().stream().map(Order::getId).toList();
+        if (!orderIds.isEmpty()) {
+            for (Object[] row : paymentTransactionRepo.findOrderContactPhonesForOrders(orderIds)) {
+                paymentPhoneByOrderId.putIfAbsent((UUID) row[0], (String) row[1]);
+            }
+        }
+
         return orders.map(o -> {
             OrderSummaryResponse res = toSummaryResponse(o);
             Users u = o.getUserId() != null ? usersById.get(o.getUserId()) : null;
@@ -1915,9 +1923,9 @@ public class OrderService {
             res.setCustomerFirstName(firstName);
             res.setCustomerLastName(lastName);
             if (o.getUserId() != null) res.setCustomerEmail(emailByUserId.get(o.getUserId()));
-            // Prefer the verified profile phone; fall back to the order's recipient snapshot.
+            // Prefer the account profile phone; fall back to the order's recipient snapshot.
             String phone = o.getUserId() != null ? profilePhoneByUserId.get(o.getUserId()) : null;
-            res.setCustomerPhone(firstNonBlank(phone, o.getRecipientPhone()));
+            res.setCustomerPhone(firstNonBlank(phone, o.getRecipientPhone(), paymentPhoneByOrderId.get(o.getId())));
             return res;
         });
     }
@@ -2437,7 +2445,7 @@ public class OrderService {
     /**
      * Populates the customer's name/email/phone on the response so the admin order-detail view can show
      * who placed the order. The account record is often incomplete — email/password signups never set
-     * Users.firstName/lastName, and a phone is only stored after SMS verification — so we fall back to
+     * Users.firstName/lastName, and older signups did not store a phone — so we fall back to
      * the order's recipient snapshot (copied from the chosen address at checkout) and then to the
      * customer's default saved address, both of which reliably carry a name and phone.
      */
@@ -2484,6 +2492,10 @@ public class OrderService {
             }
         }
 
+        if (isBlank(phone)) {
+            phone = paymentTransactionRepo.findOrderContactPhones(order.getId(), PageRequest.of(0, 1))
+                    .stream().findFirst().orElse(null);
+        }
         res.setCustomerFirstName(firstName);
         res.setCustomerLastName(lastName);
         res.setCustomerPhone(phone);

@@ -561,4 +561,24 @@ class RecheckOrderPaymentTest {
         assertEquals(0, publishedSuccesses());
     }
 
+    @Test
+    void missingAttemptMessageDoesNotClaimTheCustomerHasNotPaid() {
+        var result = service.recheckOrderPayment(ORDER, null);
+        assertFalse(result.settled());
+        assertTrue(result.message().contains("does not prove"));
+        assertTrue(result.message().contains("Payment verification"));
+        verifyNoInteractions(paymob);
+    }
+
+    @Test
+    void typedTransactionWithoutOrderAttemptsStillQueriesPaymobAndIdentifiesItsRealOrder() throws Exception {
+        PaymentTransaction tx = matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        UUID realOrder = UUID.randomUUID(); tx.setAppOrderId(realOrder); attempts.clear();
+        var result = service.recheckOrderPayment(ORDER, "#36914143");
+        assertFalse(result.settled());
+        assertTrue(result.message().contains(realOrder.toString()));
+        assertTrue(result.message().contains("not this order"));
+        assertEquals(0, publishedSuccesses());
+    }
+
 }
