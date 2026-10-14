@@ -17,6 +17,18 @@ import java.util.UUID;
 import java.time.Instant;
 public interface OrderRepository extends JpaRepository<Order, UUID> {
 
+    @Query("""
+            SELECT o FROM Order o
+            WHERE o.status = com.buyology.ecommerce.order.domain.enums.OrderStatus.PENDING_PAYMENT
+              AND o.createdAt < :cutoff
+              AND EXISTS (SELECT t.id FROM PaymentTransaction t
+                          WHERE t.appOrderId = o.id
+                            AND t.status = com.buyology.ecommerce.payment.enums.PaymentStatus.SUCCESS)
+            ORDER BY o.createdAt ASC
+            """)
+    List<Order> findPendingWithSuccessfulPayment(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+
     Page<Order> findAllByUserId(UUID userId, Pageable pageable);
 
     Page<Order> findAll(Pageable pageable);

@@ -13,8 +13,10 @@ import java.util.UUID;
 
 /**
  * Central table — one row per payment attempt, regardless of outcome.
- * PENDING and PROCESSING are the only mutable states.
- * Once SUCCESS, FAILED, or CANCELLED: the status must never be changed
+ * PENDING and PROCESSING track an unsettled attempt.
+ * A FAILED attempt may be recovered only after an administrator verifies a later
+ * successful Paymob transaction belonging to the same attempt.
+ * Once SUCCESS or CANCELLED: the status must never be changed
  * except by the refund workflow (→ REFUNDED / PARTIALLY_REFUNDED).
  */
 @Entity
@@ -242,6 +244,9 @@ public class PaymentTransaction {
 
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }
+
+    @Column(name = "last_gateway_check_at")
+    private Instant lastGatewayCheckAt;
 
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

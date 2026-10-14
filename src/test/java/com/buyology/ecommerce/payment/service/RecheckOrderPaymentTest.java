@@ -1,6 +1,10 @@
 package com.buyology.ecommerce.payment.service;
 
 import com.buyology.ecommerce.order.event.PaymentFailedEvent;
+import com.buyology.ecommerce.order.domain.Order;
+import com.buyology.ecommerce.order.domain.enums.OrderStatus;
+import com.buyology.ecommerce.order.repository.OrderRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import com.buyology.ecommerce.order.event.PaymentSucceededEvent;
 import com.buyology.ecommerce.payment.domain.PaymentProvider;
 import com.buyology.ecommerce.payment.domain.PaymentTransaction;
@@ -53,6 +57,7 @@ class RecheckOrderPaymentTest {
     private final PaymobClient paymob;
     private final ApplicationEventPublisher events;
     private final EntityManager em = mock(EntityManager.class);
+    private final OrderRepository orders = mock(OrderRepository.class);
     private final List<PaymentTransaction> attempts = new ArrayList<>();
 
     RecheckOrderPaymentTest() {
@@ -81,6 +86,10 @@ class RecheckOrderPaymentTest {
         when(firstOfType(PaymentProviderRepository.class).findFirstByIsActiveTrue()).thenReturn(Optional.of(provider));
         when(txRepo.findAllByAppOrderId(ORDER)).thenReturn(attempts);
         when(txRepo.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<OrderRepository> orderProvider = (ObjectProvider<OrderRepository>) ReflectionTestUtils.getField(service, "orderRepoProvider");
+        when(orderProvider.getIfAvailable()).thenReturn(orders);
+        when(orderProvider.getObject()).thenReturn(orders);
     }
 
     @SuppressWarnings("unchecked")
@@ -400,4 +409,156 @@ class RecheckOrderPaymentTest {
         assertTrue(service.recheckOrderPayment(ORDER, null).settled());
         verifyNoInteractions(paymob);
     }
+    private void pendingOrder() {
+        Order order = new Order();
+        order.setId(ORDER);
+        order.setStatus(OrderStatus.PENDING_PAYMENT);
+        when(orders.findById(ORDER)).thenReturn(Optional.of(order));
+    }
+
+    private PaymentTransaction matchedLookup(JsonNode reply) {
+        PaymentTransaction tx = attempt(PaymentMethodType.TABBY, PAYMOB_ORDER, Instant.now());
+        when(txRepo.findByPaymobOrderId(PAYMOB_ORDER)).thenReturn(Optional.of(tx));
+        when(paymob.getTransaction("secret", "api-key", "https://uae.paymob.com", "36914143")).thenReturn(reply);
+        pendingOrder();
+        return tx;
+    }
+
+    @Test
+    void successfulPaymentWithPendingOrderRetriesItsLostSettlementEvent() {
+        PaymentTransaction tx = attempt(PaymentMethodType.TABBY, PAYMOB_ORDER, Instant.now());
+        tx.setStatus(PaymentStatus.SUCCESS);
+        pendingOrder();
+        assertTrue(service.recheckOrderPayment(ORDER, null).settled());
+        assertEquals(1, publishedSuccesses());
+        verifyNoInteractions(paymob);
+    }
+
+    @Test
+    void alreadyAppliedSuccessfulPaymentDoesNotDispatchAgain() {
+        PaymentTransaction tx = attempt(PaymentMethodType.TABBY, PAYMOB_ORDER, Instant.now());
+        tx.setStatus(PaymentStatus.SUCCESS);
+        Order order = new Order(); order.setStatus(OrderStatus.PAID);
+        when(orders.findById(ORDER)).thenReturn(Optional.of(order));
+        service.recheckOrderPayment(ORDER, null);
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void transactionOnlyLookupFindsOrderWithoutCallbacksAndDoesNotMutateIt() throws Exception {
+        PaymentTransaction tx = matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        var result = service.lookupPaymobPayment(" #36914143 ");
+        assertEquals(ORDER, result.orderId());
+        assertTrue(result.gatewayPaid());
+        assertTrue(result.canConfirm());
+        assertEquals(PaymentStatus.PENDING, tx.getStatus());
+        assertEquals(0, publishedSuccesses());
+        verify(txRepo, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void confirmationRechecksAndSettlesTheMatchedOrder() throws Exception {
+        PaymentTransaction tx = matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        assertTrue(service.confirmPaymobPayment("#36914143", ORDER).settled());
+        assertEquals(PaymentStatus.SUCCESS, tx.getStatus());
+        assertEquals(1, publishedSuccesses());
+    }
+
+    @Test
+    void confirmationCannotUseAnotherOrdersTransaction() throws Exception {
+        matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        assertThrows(IllegalArgumentException.class, () -> service.confirmPaymobPayment("36914143", UUID.randomUUID()));
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void lookupRefusesWrongAmountOrCurrency() throws Exception {
+        JsonNode reply = paymob(36914143L, PAYMOB_ORDER, null, true, false, 1);
+        matchedLookup(reply);
+        assertFalse(service.lookupPaymobPayment("36914143").canConfirm());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) reply).put("amount_cents", 189900).put("currency", "EGP");
+        assertFalse(service.lookupPaymobPayment("36914143").canConfirm());
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void lookupRefusesRefundedVoidedAndPendingPayments() throws Exception {
+        for (String flag : List.of("is_refunded", "is_voided", "is_refund", "is_void", "pending", "is_auth")) {
+            JsonNode reply = paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900);
+            ((com.fasterxml.jackson.databind.node.ObjectNode) reply).put(flag, true);
+            matchedLookup(reply);
+            assertFalse(service.lookupPaymobPayment("36914143").canConfirm(), flag);
+        }
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void lookupDoesNotInventAnOrderWhenNoAttemptMatches() throws Exception {
+        when(paymob.getTransaction(anyString(), anyString(), anyString(), eq("36914143")))
+                .thenReturn(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        var result = service.lookupPaymobPayment("36914143");
+        assertNull(result.orderId());
+        assertFalse(result.canConfirm());
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void failedAttemptCanBeRecoveredOnlyWhenGatewayConfirmsSuccess() throws Exception {
+        PaymentTransaction tx = matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        tx.setStatus(PaymentStatus.FAILED);
+        tx.setFailureReason("Earlier card decline");
+        assertTrue(service.confirmPaymobPayment("36914143", ORDER).settled());
+        assertEquals(PaymentStatus.SUCCESS, tx.getStatus());
+        assertNull(tx.getFailureReason());
+        assertEquals(1, publishedSuccesses());
+    }
+
+    @Test
+    void cancelledOrRefundedAttemptsCannotBeRecovered() throws Exception {
+        PaymentTransaction tx = matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        for (PaymentStatus status : List.of(PaymentStatus.CANCELLED, PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED)) {
+            tx.setStatus(status);
+            assertFalse(service.lookupPaymobPayment("36914143").canConfirm());
+            assertFalse(service.confirmPaymobPayment("36914143", ORDER).settled());
+            assertEquals(status, tx.getStatus());
+        }
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void cancelledOrderIsNotSilentlyRevived() throws Exception {
+        matchedLookup(paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900));
+        Order order = new Order(); order.setStatus(OrderStatus.CANCELLED);
+        when(orders.findById(ORDER)).thenReturn(Optional.of(order));
+        assertFalse(service.lookupPaymobPayment("36914143").canConfirm());
+        assertFalse(service.confirmPaymobPayment("36914143", ORDER).settled());
+        assertEquals(0, publishedSuccesses());
+    }
+
+    @Test
+    void numericIdsAreValidatedBeforeCallingGateway() {
+        for (String id : List.of("", "../other", "0", "-1", "36914143?other=1", "999999999999999999999")) {
+            assertThrows(IllegalArgumentException.class, () -> service.lookupPaymobPayment(id));
+        }
+        verifyNoInteractions(paymob);
+    }
+
+    @Test
+    void eachAutomaticLookupRotatesTheAttemptOutOfTheFrontOfTheSweep() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.TABBY, PAYMOB_ORDER, Instant.now());
+        when(paymob.inquireTransaction(anyString(), anyString(), eq(PAYMOB_ORDER), anyString())).thenReturn(null);
+        service.recheckOrderPayment(ORDER, null);
+        verify(txRepo).markGatewayChecked(eq(tx.getId()), any(Instant.class));
+    }
+
+    @Test
+    void gatewayAuthorizationAloneCannotSettleAnOrder() throws Exception {
+        JsonNode reply = paymob(36914143L, PAYMOB_ORDER, null, true, false, 189900);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) reply).put("is_auth", true);
+        PaymentTransaction tx = matchedLookup(reply);
+        assertFalse(service.recheckOrderPayment(ORDER, "36914143").settled());
+        assertEquals(PaymentStatus.PENDING, tx.getStatus());
+        assertEquals(0, publishedSuccesses());
+    }
+
 }

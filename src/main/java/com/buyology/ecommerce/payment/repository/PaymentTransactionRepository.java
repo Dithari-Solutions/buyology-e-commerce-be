@@ -8,6 +8,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -94,12 +95,16 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
               AND NOT EXISTS (SELECT 1 FROM payment_transactions s
                               WHERE s.app_order_id = pt.app_order_id
                                 AND s.status = 'SUCCESS')
-            ORDER BY pt.created_at DESC
+            ORDER BY pt.last_gateway_check_at ASC NULLS FIRST, pt.created_at ASC
             LIMIT :limit
             """, nativeQuery = true)
     List<PaymentTransaction> findUnsettledOrderPayments(@Param("cutoff") Instant cutoff,
                                                         @Param("floor") Instant floor,
                                                         @Param("limit") int limit);
+
+    @Modifying
+    @Query("UPDATE PaymentTransaction t SET t.lastGatewayCheckAt = :checkedAt WHERE t.id = :id")
+    void markGatewayChecked(@Param("id") UUID id, @Param("checkedAt") Instant checkedAt);
 
     /** Latest courier-fee charge for a refund in any of the given statuses (for resume/idempotency). */
     Optional<PaymentTransaction> findFirstByRefundRequestIdAndPurposeAndStatusInOrderByCreatedAtDesc(

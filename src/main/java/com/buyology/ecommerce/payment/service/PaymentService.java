@@ -886,7 +886,19 @@ public class PaymentService {
     @Transactional
     public RecheckResult recheckOrderPayment(UUID orderId, String providerTransactionIdOverride) {
         List<PaymentTransaction> all = transactionRepo.findAllByAppOrderId(orderId);
-        if (all.stream().anyMatch(t -> t.getStatus() == PaymentStatus.SUCCESS)) {
+        PaymentTransaction successful = all.stream()
+                .filter(t -> t.getStatus() == PaymentStatus.SUCCESS).findFirst().orElse(null);
+        if (successful != null) {
+            var orders = orderRepoProvider.getIfAvailable();
+            var order = orders == null ? null : orders.findById(orderId).orElse(null);
+            if (order != null && order.getStatus() == OrderStatus.PENDING_PAYMENT) {
+                // The payment commit survived but its AFTER_COMMIT order listener did not.
+                // Retry the normal paid path; never report the order as repaired merely because
+                // the payment row says SUCCESS.
+                publishSettlementEvents(successful);
+                return new RecheckResult(true, PaymentStatus.SUCCESS.name(),
+                        "Payment is confirmed. Order settlement has been retried; refresh the order to check its status.");
+            }
             return new RecheckResult(true, PaymentStatus.SUCCESS.name(),
                     "This order already has a settled payment.");
         }
@@ -894,7 +906,10 @@ public class PaymentService {
         // Every unsettled attempt, newest first. An order can carry several — a card try, then an
         // instalment try, or a reload of the payment page — and the paid one is not necessarily
         // the newest, nor the one the gateway happened to tell us about.
-        List<PaymentStatus> unsettled = List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING);
+        boolean typedIdProvided = providerTransactionIdOverride != null && !providerTransactionIdOverride.isBlank();
+        List<PaymentStatus> unsettled = typedIdProvided
+                ? List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.FAILED)
+                : List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING);
         List<PaymentTransaction> attempts = all.stream()
                 .filter(t -> unsettled.contains(t.getStatus()))
                 .sorted(Comparator.comparing(
@@ -908,7 +923,7 @@ public class PaymentService {
 
         String typed = providerTransactionIdOverride == null ? null : providerTransactionIdOverride.trim();
         if (typed != null && !typed.isBlank()) {
-            return recheckWithTypedId(orderId, attempts, typed);
+            return recheckWithTypedId(orderId, attempts, normalisePaymobId(typed));
         }
 
         // Without a typed id this only ever writes what Paymob confirms — paid, or pending with its
@@ -925,6 +940,7 @@ public class PaymentService {
             RecheckResult result = lookup.reply() == null
                     ? new RecheckResult(false, tx.getStatus().name(), lookup.note(), lookup.failed())
                     : settleFromGateway(orderId, tx, lookup.reply(), false);
+            transactionRepo.markGatewayChecked(tx.getId(), Instant.now());
             if (result.settled()) {
                 return result;
             }
@@ -1022,6 +1038,10 @@ public class PaymentService {
             return new RecheckResult(false, tx.getStatus().name(),
                     "Paymob shows this payment as refunded or voided. Nothing was changed.");
         }
+        if (isAuthorisationOnly(reply)) {
+            return new RecheckResult(false, tx.getStatus().name(),
+                    "Paymob shows an authorization only; capture has not been confirmed. Nothing was changed.");
+        }
         Long numericTxnId;
         try {
             numericTxnId = Long.valueOf(reply.path("id").asText());
@@ -1030,6 +1050,9 @@ public class PaymentService {
                     "\"" + reply.path("id").asText() + "\" is not a Paymob transaction id.");
         }
         boolean success = isSuccess(reply);
+        if (tx.getStatus() == PaymentStatus.FAILED && !success) {
+            return new RecheckResult(false, tx.getStatus().name(), "Paymob has not confirmed a successful payment. Nothing was changed.");
+        }
         boolean pending = reply.path("pending").asBoolean(false);
         if (success && !webhookMoneyMatchesTransaction(tx, reply)) {
             // Money was taken, just not the amount this order costs. Failing the order would hide a
@@ -1050,7 +1073,8 @@ public class PaymentService {
         }
 
         entityManager.refresh(tx, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-        if (tx.getStatus() != PaymentStatus.PENDING && tx.getStatus() != PaymentStatus.PROCESSING) {
+        boolean recoverFailed = mayFail && success && tx.getStatus() == PaymentStatus.FAILED;
+        if (tx.getStatus() != PaymentStatus.PENDING && tx.getStatus() != PaymentStatus.PROCESSING && !recoverFailed) {
             // Settled by a webhook or the other replica while we were asking; they published.
             return new RecheckResult(tx.getStatus() == PaymentStatus.SUCCESS, tx.getStatus().name(),
                     tx.getStatus() == PaymentStatus.SUCCESS
@@ -1147,6 +1171,70 @@ public class PaymentService {
         return settleFromGateway(orderId, target, reply, true);
     }
 
+    public record PaymobPaymentLookup(String providerTransactionId, UUID paymentTransactionId,
+            UUID orderId, String orderStatus, String paymentStatus, boolean gatewayPaid,
+            boolean canConfirm, long amountCents, String currency, String message) {}
+
+    @Transactional(readOnly = true)
+    public PaymobPaymentLookup lookupPaymobPayment(String transactionId) {
+        String typed = normalisePaymobId(transactionId);
+        PaymentTransaction known = transactionRepo.findByPaymobTransactionId(Long.valueOf(typed)).orElse(null);
+        PaymentProvider provider = known == null
+                ? providerRepo.findFirstByIsActiveTrue().orElseThrow(() -> new IllegalStateException("No active payment provider configured"))
+                : providerFor(known);
+        JsonNode reply = paymobClient.getTransaction(provider.getSecretKey(), provider.getApiKey(), provider.getBaseUrl(), typed);
+        if (reply == null || !typed.equals(reply.path("id").asText())) {
+            throw new IllegalStateException("Paymob did not return the requested transaction.");
+        }
+        JsonNode gatewayOrder = reply.path("order");
+        if (known == null && gatewayOrder.hasNonNull("id")) {
+            known = transactionRepo.findByPaymobOrderId(gatewayOrder.path("id").asLong()).orElse(null);
+        }
+        if (known == null && gatewayOrder.hasNonNull("merchant_order_id")) {
+            known = transactionRepo.findByMerchantOrderId(gatewayOrder.path("merchant_order_id").asText()).orElse(null);
+        }
+        boolean paid = isSuccess(reply) && !reply.path("pending").asBoolean(false)
+                && !isReversal(reply) && !isAuthorisationOnly(reply);
+        var orders = orderRepoProvider.getIfAvailable();
+        var order = known == null || known.getAppOrderId() == null || orders == null
+                ? null : orders.findById(known.getAppOrderId()).orElse(null);
+        boolean matches = known != null && known.getPurpose() == PaymentPurpose.ORDER
+                && belongsByReference(known, reply) && webhookMoneyMatchesTransaction(known, reply);
+        boolean confirmable = paid && matches && order != null
+                && order.getStatus() == OrderStatus.PENDING_PAYMENT
+                && List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.FAILED, PaymentStatus.SUCCESS).contains(known.getStatus());
+        String message = known == null ? "No matching local payment attempt was found. Nothing was changed."
+                : !matches ? "The payment references, amount or currency do not match the local order. Nothing was changed."
+                : !paid ? "Paymob has not confirmed a completed, non-reversed payment. Nothing was changed."
+                : order == null ? "Payment found, but no active local order exists. Manual review is required."
+                : confirmable ? "Paymob confirms payment. Review the matched order below before confirming."
+                : "Paymob confirms payment. This order is not awaiting payment; no confirmation is needed here.";
+        return new PaymobPaymentLookup(typed, known == null ? null : known.getId(),
+                known == null ? null : known.getAppOrderId(), order == null ? null : order.getStatus().name(),
+                known == null ? null : known.getStatus().name(), paid, confirmable,
+                reply.path("amount_cents").asLong(), reply.path("currency").asText(), message);
+    }
+
+    @Transactional
+    public RecheckResult confirmPaymobPayment(String transactionId, UUID expectedOrderId) {
+        PaymobPaymentLookup lookup = lookupPaymobPayment(transactionId);
+        if (expectedOrderId == null || !expectedOrderId.equals(lookup.orderId())) {
+            throw new IllegalArgumentException("This transaction does not belong to the reviewed order.");
+        }
+        if (!lookup.canConfirm()) {
+            return new RecheckResult(false, lookup.paymentStatus(), lookup.message());
+        }
+        return recheckOrderPayment(expectedOrderId, lookup.providerTransactionId());
+    }
+
+    static String normalisePaymobId(String transactionId) {
+        String typed = transactionId == null ? "" : transactionId.trim().replaceFirst("^#", "").trim();
+        if (!typed.matches("[1-9][0-9]{0,17}")) {
+            throw new IllegalArgumentException("Enter a valid numeric Paymob transaction ID.");
+        }
+        return typed;
+    }
+
     /** Why this reply must not be applied to this attempt, or null when it may be. */
     static String replyDoesNotBelong(PaymentTransaction tx, JsonNode reply) {
         JsonNode order = reply.path("order");
@@ -1179,6 +1267,12 @@ public class PaymentService {
 
     private static boolean isSuccess(JsonNode reply) {
         return reply != null && reply.path("success").asBoolean(false);
+    }
+
+    private static boolean isAuthorisationOnly(JsonNode reply) {
+        return reply.path("is_auth").asBoolean(false)
+                && !reply.path("is_capture").asBoolean(false)
+                && !reply.path("is_captured").asBoolean(false);
     }
 
     /** A refund or void, or a payment since refunded or voided: never grounds to mark an order paid. */
@@ -1411,6 +1505,8 @@ public class PaymentService {
 
         if (success) {
             tx.setStatus(PaymentStatus.SUCCESS);
+            tx.setFailureReason(null);
+            tx.setFailureCode(null);
         } else if (pending) {
             tx.setStatus(PaymentStatus.PROCESSING);
         } else {

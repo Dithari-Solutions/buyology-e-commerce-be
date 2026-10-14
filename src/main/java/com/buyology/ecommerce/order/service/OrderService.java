@@ -82,6 +82,13 @@ import java.util.UUID;
 @Service
 public class OrderService {
 
+    /** Order contact requires a number, without requiring SMS verification. */
+    static void requireCustomerPhone(UserProfiles profile) {
+        if (profile.getPhoneNumber() == null || profile.getPhoneNumber().isBlank()) {
+            throw new IllegalStateException("Please enter your phone number before placing an order.");
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
     private static final UUID SYSTEM_ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final double THIRTY_MIN_RADIUS_KM = com.buyology.ecommerce.store.service.ExpressDeliveryRadius.KM;
@@ -389,6 +396,8 @@ public class OrderService {
         // or (if unset) the country the cart was browsed/priced in.
         UserProfiles profile = userProfileRepo.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User profile not found"));
+
+        if (phase == CapturePhase.BEFORE_CAPTURE) requireCustomerPhone(profile);
 
         String marketCountry = profile.getSelectedCountryCode();
         if (marketCountry == null || marketCountry.isBlank()) {
@@ -1206,6 +1215,10 @@ public class OrderService {
                         "SUCCESS payment references a missing order row", "LISTENER");
                 return;
             }
+
+            // Webhooks, manual recovery and both scheduler replicas may race. Re-read the
+            // order under a lock before deciding whether its paid effects have already run.
+            entityManager.refresh(order, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
 
             var classification = com.buyology.ecommerce.payment.service.PaymentAnomalyService.classify(
                     order.getStatus(),
@@ -3196,22 +3209,21 @@ public class OrderService {
      * fails an order — so it can never void or mis-handle a real payment. Runs every 5 min.
      *
      * <p>Cluster-safety, stated once because three fixes now meet here: this job runs on BOTH
-     * replicas (no ShedLock). It is promote-only — transitionTo(PAID) never touches stock — and
-     * the cart clear is safe to run twice ONLY because clearOrderedItems deletes selected rows and
-     * leaves survivors unticked, so the second replica's pass matches zero rows. Do not "improve"
-     * this by re-ticking survivors.
+     * replicas (no ShedLock). Each order is locked and re-read before promotion, so the full
+     * paid-order path (including promo usage and OrderPaidEvent) runs once. The worklist selects
+     * only orders with confirmed local payments; abandoned checkouts cannot fill the batch.
      */
     @org.springframework.scheduling.annotation.Scheduled(
             fixedDelayString = "${order.reconciliation-interval-ms:300000}")
     @Transactional
     public void reconcileStuckPayments() {
-        List<Order> stuck = orderRepo.findAllByStatus(
-                OrderStatus.PENDING_PAYMENT, PageRequest.of(0, 200)).getContent();
-        if (stuck.isEmpty()) return;
-
         Instant cutoff = Instant.now().minus(java.time.Duration.ofMinutes(15));
+        List<Order> stuck = orderRepo.findPendingWithSuccessfulPayment(cutoff, PageRequest.of(0, 200));
+        if (stuck.isEmpty()) return;
         int promoted = 0;
         for (Order order : stuck) {
+            entityManager.refresh(order, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            if (order.getStatus() != OrderStatus.PENDING_PAYMENT) continue;
             // Only act on orders that have had time to receive their webhook.
             if (order.getCreatedAt() != null && order.getCreatedAt().isAfter(cutoff)) continue;
 
@@ -3233,13 +3245,7 @@ public class OrderService {
                 continue;
             }
 
-            transitionTo(order, OrderStatus.PAID);
-            order.setPaymentTransactionId(tx.getId());
-            order.setPaidAt(Instant.now());
-            appendTrackingEvent(order, OrderStatus.PAID, "Payment reconciled (webhook recovery)",
-                    null, null, null, SYSTEM_ACTOR_ID, "SYSTEM");
-            orderRepo.save(order);
-            if (order.getCartId() != null) cartCheckoutCleanupService.clearOrderedItems(order.getCartId());
+            applySettledPayment(order, tx, new PaymentSucceededEvent(order.getId(), tx.getId()));
             promoted++;
         }
         if (promoted > 0) {

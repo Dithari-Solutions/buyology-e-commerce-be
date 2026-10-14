@@ -5,6 +5,7 @@ import com.buyology.ecommerce.payment.service.PaymentService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -45,4 +46,18 @@ public class AdminPaymentController {
                 paymentService.recheckOrderPayment(orderId, providerTransactionId);
         return ApiResponse.success(result, result.message());
     }
+    @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
+    @GetMapping("/paymob/transactions/{transactionId}")
+    public ResponseEntity<ApiResponse<PaymentService.PaymobPaymentLookup>> lookup(@PathVariable String transactionId) {
+        return ApiResponse.success(paymentService.lookupPaymobPayment(transactionId), "Paymob transaction checked");
+    }
+
+    @PreAuthorize("hasRole('SUPERADMIN') or @rbacPolicy.legacyAdmin()")
+    @PostMapping("/paymob/transactions/{transactionId}/confirm")
+    public ResponseEntity<ApiResponse<PaymentService.RecheckResult>> confirm(@PathVariable String transactionId,
+            @RequestParam UUID orderId) {
+        var result = paymentService.confirmPaymobPayment(transactionId, orderId);
+        return ApiResponse.success(result, result.message());
+    }
+
 }
