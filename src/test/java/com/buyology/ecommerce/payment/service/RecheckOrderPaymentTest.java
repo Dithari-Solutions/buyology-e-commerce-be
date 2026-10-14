@@ -581,4 +581,93 @@ class RecheckOrderPaymentTest {
         assertEquals(0, publishedSuccesses());
     }
 
+    @Test
+    void numericGatewayOrderAndExtrasReferenceCanFindAnExistingAttempt() throws Exception {
+        JsonNode reply = JSON.readTree("{\"id\":36914143,\"success\":true,\"pending\":false,\"amount_cents\":189900,\"currency\":\"AED\",\"order\":" + PAYMOB_ORDER + "}");
+        matchedLookup(reply);
+        assertTrue(service.lookupPaymobPayment("36914143").canConfirm());
+        assertEquals(PAYMOB_ORDER + "",service.lookupPaymobPayment("36914143").evidence().orderId());
+    }
+
+    @Test
+    void gatewayEvidenceShowsContactAndReferenceEvenWhenNoLocalPaymentMatches() throws Exception {
+        JsonNode reply = JSON.readTree("{\"id\":36914143,\"success\":true,\"amount_cents\":99900,\"currency\":\"AED\",\"integration_id\":123,\"order\":{\"id\":456},\"payment_key_claims\":{\"extra\":{\"merchant_order_id\":\"external-reference\",\"platform\":\"other-channel\"},\"billing_data\":{\"phone_number\":\"+971501234567\",\"email\":\"buyer@example.com\"}}}");
+        when(paymob.getTransaction(anyString(),anyString(),anyString(),eq("36914143"))).thenReturn(reply);
+        var result = service.lookupPaymobPayment("36914143");
+        assertFalse(result.canConfirm()); assertNull(result.orderId());
+        assertEquals("456",result.evidence().orderId());
+        assertEquals("external-reference",result.evidence().merchantReference());
+        assertEquals("+971501234567",result.evidence().billingPhone());
+        assertEquals("123",result.evidence().integrationId());
+        assertEquals(0,publishedSuccesses());
+    }
+
+    @Test
+    void extrasReferenceMatchesWithoutInferringAnOrderFromAmountOrPhone() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.TABBY,null,Instant.now());
+        JsonNode reply = JSON.readTree("{\"id\":36914143,\"success\":true,\"pending\":false,\"amount_cents\":189900,\"currency\":\"AED\",\"payment_key_claims\":{\"extra\":{\"merchant_order_id\":\"" + tx.getMerchantOrderId() + "\"}}}");
+        when(txRepo.findByMerchantOrderId(tx.getMerchantOrderId())).thenReturn(Optional.of(tx));
+        when(paymob.getTransaction(anyString(),anyString(),anyString(),eq("36914143"))).thenReturn(reply);
+        pendingOrder();
+        assertTrue(service.lookupPaymobPayment("36914143").canConfirm());
+    }
+
+    @Test
+    void unsignedReferenceCannotOverrideAConflictingPaymobOrderId() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.CARD,PAYMOB_ORDER,Instant.now());
+        JsonNode reply = paymob(36914143L,999999L,tx.getMerchantOrderId(),true,false,189900);
+        assertFalse(PaymentService.belongsByReference(tx,reply));
+        assertNotNull(PaymentService.replyDoesNotBelong(tx,reply));
+    }
+
+    @Test
+    void webhookFallsThroughAnUnknownMerchantReferenceToItsKnownSignedOrder() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.CARD,PAYMOB_ORDER,Instant.now());
+        when(txRepo.findByPaymobOrderId(PAYMOB_ORDER)).thenReturn(Optional.of(tx));
+        var reply = paymob(36914143L,PAYMOB_ORDER,"unrecognized-legacy-reference",true,false,189900);
+        assertSame(tx,ReflectionTestUtils.invokeMethod(service,"resolveTransactionFromPayload",reply));
+    }
+
+    @Test
+    void unresolvedSignedCallbackDoesNotConsumeItsSuccessEventAndCanResolveLater() throws Exception {
+        PaymentProvider provider = new PaymentProvider(); provider.setHmacSecret("test-hmac-secret");
+        when(firstOfType(PaymentProviderRepository.class).findFirstByIsActiveTrue()).thenReturn(Optional.of(provider));
+        JsonNode reply = paymob(36914143L,PAYMOB_ORDER,null,true,false,189900);
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA512");
+        mac.init(new javax.crypto.spec.SecretKeySpec("test-hmac-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8),"HmacSHA512"));
+        String signature = java.util.HexFormat.of().formatHex(mac.doFinal(PaymobHmacValidator.buildConcatString(reply).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        var ledger = firstOfType(com.buyology.ecommerce.payment.repository.ProcessedWebhookEventRepository.class);
+        service.handleWebhook(reply.toString(),signature);
+        verify(ledger,never()).saveAndFlush(any());
+        PaymentTransaction tx = attempt(PaymentMethodType.CARD,PAYMOB_ORDER,Instant.now());
+        when(txRepo.findByPaymobOrderId(PAYMOB_ORDER)).thenReturn(Optional.of(tx));
+        service.handleWebhook(reply.toString(),signature);
+        verify(ledger,times(1)).saveAndFlush(any());
+        assertEquals(PaymentStatus.SUCCESS,tx.getStatus());
+        assertEquals(1,publishedSuccesses());
+    }
+
+    @Test
+    void callbackCannotRepointUnsignedReferenceToAnotherLegacySamePriceAttempt() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.CARD,null,Instant.now());
+        when(txRepo.findByMerchantOrderId(tx.getMerchantOrderId())).thenReturn(Optional.of(tx));
+        JsonNode claimed = paymob(36914143L,PAYMOB_ORDER,tx.getMerchantOrderId(),true,false,189900);
+        JsonNode actual = paymob(36914143L,PAYMOB_ORDER,"another-attempt-reference",true,false,189900);
+        when(paymob.getTransaction("secret","api-key","https://uae.paymob.com","36914143")).thenReturn(actual);
+        assertNull(ReflectionTestUtils.invokeMethod(service,"resolveTransactionFromPayload",claimed));
+        assertEquals(PaymentStatus.PENDING,tx.getStatus());
+        when(paymob.getTransaction("secret","api-key","https://uae.paymob.com","36914143")).thenReturn(claimed);
+        assertSame(tx,ReflectionTestUtils.invokeMethod(service,"resolveTransactionFromPayload",claimed));
+    }
+
+    @Test
+    void unsignedClaimOrderIdDoesNotCountAsTheCallbacksSignedOrderId() throws Exception {
+        PaymentTransaction tx = attempt(PaymentMethodType.CARD,PAYMOB_ORDER,Instant.now());
+        when(txRepo.findByPaymobOrderId(PAYMOB_ORDER)).thenReturn(Optional.of(tx));
+        JsonNode claimed = JSON.readTree("{\"id\":36914143,\"payment_key_claims\":{\"order_id\":" + PAYMOB_ORDER + "}}");
+        when(paymob.getTransaction(anyString(),anyString(),anyString(),eq("36914143")))
+                .thenReturn(paymob(36914143L,999999L,"another-attempt",true,false,189900));
+        assertNull(ReflectionTestUtils.invokeMethod(service,"resolveTransactionFromPayload",claimed));
+    }
+
 }

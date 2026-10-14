@@ -69,3 +69,30 @@ check timestamp) and V66 (signup phone), then deploy the dashboard using its nor
 Unit tests and mocked dashboard browser tests never query or settle a live payment.
 The reported transaction 36914143 still requires inspection through the merchant
 account after deployment; its live state was not established from source code.
+
+## Paymob request contract and unmatched-payment evidence
+
+Intention requests use Paymob's documented top-level `special_reference`, `items`,
+`notification_url` and `redirection_url`. The former request placed the reference
+under `merchant_order_id` and callbacks inside an `order` object, which is not the
+Intention API contract. `extras` now includes a Buyology platform marker and a copy
+of the local attempt reference. The numeric `intention_order_id` is still stored.
+
+The admin lookup returns a restricted evidence object: Paymob order/reference,
+intention, integration, creation time, billing phone/email, source, platform marker,
+gateway URL and live/test flag when supplied. It never exposes payment tokens,
+client secrets or card numbers. Numeric order replies, intention IDs and documented
+extra references can identify an existing payment; amounts and contacts cannot.
+The dashboard also displays its configured backend API so a dev/production mismatch
+is visible. No local match alone does not establish that a payment is external.
+
+Callbacks try all supported reference routes instead of stopping after an unknown
+merchant reference. Unresolved callbacks are audited without consuming their
+idempotency event, so later re-delivery can resolve after reference persistence.
+Known Paymob order ID conflicts remain a refusal to associate payments. For legacy
+attempts with no saved Paymob order ID, unsigned callback references must also be
+confirmed by an authenticated gateway query before they can identify the payment.
+
+These changes do not invent or backfill a missing historical payment/order mapping.
+For transaction 36914143, deploy the diagnostic fields and compare its Paymob order
+and merchant reference with the production database before any manual association.

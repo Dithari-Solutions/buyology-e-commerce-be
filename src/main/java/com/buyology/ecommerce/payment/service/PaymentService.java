@@ -681,9 +681,18 @@ public class PaymentService {
         String providerTxnIdStr = obj.has("id") ? obj.get("id").asText() : null;
         Long providerTxnId = (providerTxnIdStr != null) ? Long.valueOf(providerTxnIdStr) : null;
 
-        String maybeMoid = null;
-        if (obj.has("order") && obj.get("order").has("merchant_order_id")) {
-            maybeMoid = obj.get("order").get("merchant_order_id").asText();
+        String maybeMoid = gatewayMerchantReference(obj);
+
+        PaymentTransaction transaction = null;
+        boolean creditPayback = maybeMoid != null && maybeMoid.startsWith(
+                com.buyology.ecommerce.membership.service.CreditPaybackService.MERCHANT_ID_PREFIX);
+        if (!creditPayback) {
+            transaction = resolveTransactionFromPayload(root);
+            if (transaction == null) {
+                log.error("[WEBHOOK] No local payment matches Paymob transaction {}; leaving the event retryable", providerTxnIdStr);
+                saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, "Unresolved transaction");
+                return;
+            }
         }
 
         // 1. TRUE IDEMPOTENCY (INSERT-first). Reserve this event in the ledger before doing any
@@ -736,15 +745,6 @@ public class PaymentService {
                 saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, e.getMessage());
                 throw e;
             }
-            return;
-        }
-
-        // 3. Resolve Transaction
-        PaymentTransaction transaction = resolveTransactionFromPayload(root);
-
-        if (transaction == null) {
-            log.error("[WEBHOOK] Could not resolve transaction from payload. raw={}", rawPayload);
-            saveWebhookEvent(provider, null, providerTxnIdStr, true, rawPayload, "Unresolved transaction");
             return;
         }
 
@@ -1192,9 +1192,20 @@ public class PaymentService {
         return settleFromGateway(orderId, target, reply, true);
     }
 
+    public record PaymobEvidence(String orderId, String merchantReference, String intentionId,
+            String integrationId, String createdAt, String billingPhone, String billingEmail,
+            String source, String platform, String gatewayBaseUrl, Boolean live) {}
+
     public record PaymobPaymentLookup(String providerTransactionId, UUID paymentTransactionId,
             UUID orderId, String orderStatus, String paymentStatus, boolean gatewayPaid,
-            boolean canConfirm, long amountCents, String currency, String message) {}
+            boolean canConfirm, long amountCents, String currency, String message, PaymobEvidence evidence) {
+        public PaymobPaymentLookup(String providerTransactionId, UUID paymentTransactionId,
+                UUID orderId, String orderStatus, String paymentStatus, boolean gatewayPaid,
+                boolean canConfirm, long amountCents, String currency, String message) {
+            this(providerTransactionId, paymentTransactionId, orderId, orderStatus, paymentStatus,
+                    gatewayPaid, canConfirm, amountCents, currency, message, null);
+        }
+    }
 
     @Transactional(readOnly = true)
     public PaymobPaymentLookup lookupPaymobPayment(String transactionId) {
@@ -1207,13 +1218,7 @@ public class PaymentService {
         if (reply == null || !typed.equals(reply.path("id").asText())) {
             throw new IllegalStateException("Paymob did not return the requested transaction.");
         }
-        JsonNode gatewayOrder = reply.path("order");
-        if (known == null && gatewayOrder.hasNonNull("id")) {
-            known = transactionRepo.findByPaymobOrderId(gatewayOrder.path("id").asLong()).orElse(null);
-        }
-        if (known == null && gatewayOrder.hasNonNull("merchant_order_id")) {
-            known = transactionRepo.findByMerchantOrderId(gatewayOrder.path("merchant_order_id").asText()).orElse(null);
-        }
+        if (known == null) known = findAttemptByGatewayReferences(reply);
         boolean paid = isSuccess(reply) && !reply.path("pending").asBoolean(false)
                 && !isReversal(reply) && !isAuthorisationOnly(reply);
         var orders = orderRepoProvider.getIfAvailable();
@@ -1224,7 +1229,9 @@ public class PaymentService {
         boolean confirmable = paid && matches && order != null
                 && order.getStatus() == OrderStatus.PENDING_PAYMENT
                 && List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.FAILED, PaymentStatus.SUCCESS).contains(known.getStatus());
-        String message = known == null ? "No matching local payment attempt was found. Nothing was changed."
+        String message = known == null ? "Paymob confirms the transaction details, but no payment attempt matches in this backend database. "
+                + "Compare the Paymob order, merchant reference and integration below with the order and the production payment configuration. "
+                + "This alone does not prove the payment belongs to another platform. Nothing was changed."
                 : !matches ? "The payment references, amount or currency do not match the local order. Nothing was changed."
                 : !paid ? "Paymob has not confirmed a completed, non-reversed payment. Nothing was changed."
                 : order == null ? "Payment found, but no active local order exists. Manual review is required."
@@ -1236,7 +1243,8 @@ public class PaymentService {
         return new PaymobPaymentLookup(typed, known == null ? null : known.getId(),
                 known == null ? null : known.getAppOrderId(), order == null ? null : order.getStatus().name(),
                 known == null ? null : known.getStatus().name(), paid, confirmable,
-                reply.path("amount_cents").asLong(), reply.path("currency").asText(), message);
+                reply.path("amount_cents").asLong(), reply.path("currency").asText(), message,
+                gatewayEvidence(reply, provider.getBaseUrl()));
     }
 
     @Transactional
@@ -1259,11 +1267,56 @@ public class PaymentService {
         return typed;
     }
 
+    static Long gatewayOrderId(JsonNode reply) {
+        JsonNode order = reply.path("order");
+        JsonNode value = order.isObject() ? order.path("id") : order;
+        if (value.isMissingNode() || value.isNull()) value = reply.path("payment_key_claims").path("order_id");
+        try { return value.isMissingNode() || value.isNull() ? null : Long.valueOf(value.asText()); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+
+    static String gatewayMerchantReference(JsonNode reply) {
+        return firstNonBlank(reply.path("order").path("merchant_order_id").asText(null),
+                reply.path("merchant_order_id").asText(null), reply.path("special_reference").asText(null),
+                reply.path("payment_key_claims").path("extra").path("merchant_order_id").asText(null),
+                reply.path("payment_key_claims").path("extra").path("creation_extras").path("merchant_order_id").asText(null));
+    }
+
+    private static String gatewayIntentionId(JsonNode reply) {
+        return firstNonBlank(reply.path("intention_id").asText(null),
+                reply.path("intention").isObject() ? reply.path("intention").path("id").asText(null)
+                        : reply.path("intention").asText(null));
+    }
+
+    private static PaymobEvidence gatewayEvidence(JsonNode reply, String baseUrl) {
+        JsonNode billing = reply.path("payment_key_claims").path("billing_data");
+        JsonNode shipping = reply.path("order").path("shipping_data");
+        Long orderId = gatewayOrderId(reply);
+        return new PaymobEvidence(orderId == null ? null : orderId.toString(), gatewayMerchantReference(reply),
+                gatewayIntentionId(reply), reply.path("integration_id").asText(null), reply.path("created_at").asText(null),
+                firstNonBlank(billing.path("phone_number").asText(null), shipping.path("phone_number").asText(null)),
+                firstNonBlank(billing.path("email").asText(null), shipping.path("email").asText(null)),
+                firstNonBlank(reply.path("api_source").asText(null), reply.path("order").path("api_source").asText(null)),
+                firstNonBlank(reply.path("payment_key_claims").path("extra").path("platform").asText(null),
+                        reply.path("payment_key_claims").path("extra").path("creation_extras").path("platform").asText(null)), baseUrl,
+                reply.hasNonNull("is_live") ? reply.path("is_live").asBoolean() : null);
+    }
+
+    private PaymentTransaction findAttemptByGatewayReferences(JsonNode reply) {
+        Long orderId = gatewayOrderId(reply);
+        PaymentTransaction found = orderId == null ? null : transactionRepo.findByPaymobOrderId(orderId).orElse(null);
+        if (found != null) return found;
+        String reference = gatewayMerchantReference(reply);
+        found = reference == null ? null : transactionRepo.findByMerchantOrderId(reference).orElse(null);
+        if (found != null) return found;
+        String intentionId = gatewayIntentionId(reply);
+        return intentionId == null ? null : transactionRepo.findByIntentionId(intentionId).orElse(null);
+    }
+
     /** Why this reply must not be applied to this attempt, or null when it may be. */
     static String replyDoesNotBelong(PaymentTransaction tx, JsonNode reply) {
-        JsonNode order = reply.path("order");
-        String replyMoid = order.hasNonNull("merchant_order_id") ? order.get("merchant_order_id").asText() : null;
-        Long replyOrderId = order.hasNonNull("id") ? order.get("id").asLong() : null;
+        String replyMoid = gatewayMerchantReference(reply);
+        Long replyOrderId = gatewayOrderId(reply);
         if (belongsByReference(tx, reply)) {
             return null;
         }
@@ -1281,12 +1334,15 @@ public class PaymentService {
 
     /** True when Paymob's reply names this attempt by its Paymob order id or our reference. */
     static boolean belongsByReference(PaymentTransaction tx, JsonNode reply) {
-        JsonNode order = reply.path("order");
-        boolean byOrderId = order.hasNonNull("id") && tx.getPaymobOrderId() != null
-                && order.get("id").asLong() == tx.getPaymobOrderId();
-        boolean byReference = order.hasNonNull("merchant_order_id") && tx.getMerchantOrderId() != null
-                && order.get("merchant_order_id").asText().equals(tx.getMerchantOrderId());
-        return byOrderId || byReference;
+        Long orderId = gatewayOrderId(reply);
+        String reference = gatewayMerchantReference(reply);
+        if (orderId != null && tx.getPaymobOrderId() != null && !orderId.equals(tx.getPaymobOrderId())) return false;
+        boolean byOrderId = orderId != null && orderId.equals(tx.getPaymobOrderId());
+        boolean byReference = reference != null && reference.equals(tx.getMerchantOrderId());
+        // Intention is accepted only from the authenticated gateway query; callbacks still need
+        // their signed Paymob order ID checked below before applying a successful outcome.
+        boolean byIntention = gatewayIntentionId(reply) != null && gatewayIntentionId(reply).equals(tx.getIntentionId());
+        return byOrderId || byReference || byIntention;
     }
 
     private static boolean isSuccess(JsonNode reply) {
@@ -1419,28 +1475,27 @@ public class PaymentService {
 
     private PaymentTransaction resolveTransactionFromPayload(JsonNode root) {
         JsonNode obj = root.has("obj") ? root.get("obj") : root;
-        
-        // Priority 1: merchant_order_id (Our internal UUID string)
-        if (obj.has("order") && obj.get("order").has("merchant_order_id")) {
-            String moid = obj.get("order").get("merchant_order_id").asText();
-            if (moid != null && !moid.isBlank() && !moid.equals("null")) {
-                return transactionRepo.findByMerchantOrderId(moid).orElse(null);
-            }
+        PaymentTransaction found = findAttemptByGatewayReferences(obj);
+        if (found == null) {
+            String intentionId = root.path("intention_id").asText(null);
+            found = intentionId == null ? null : transactionRepo.findByIntentionId(intentionId).orElse(null);
         }
-
-        // Priority 2: paymob_order_id (Numeric)
-        if (obj.has("order") && obj.get("order").has("id")) {
-            long poid = obj.get("order").get("id").asLong();
-            return transactionRepo.findByPaymobOrderId(poid).orElse(null);
+        Long signedOrderId = obj.path("order").isObject() && obj.path("order").hasNonNull("id")
+                ? obj.path("order").path("id").asLong() : null;
+        if (found != null && found.getPaymobOrderId() != null && signedOrderId != null
+                && !found.getPaymobOrderId().equals(signedOrderId)) return null;
+        if (found != null && (found.getPaymobOrderId() == null || signedOrderId == null)) {
+            // Merchant/extra/intention references are not in Paymob's HMAC. For a legacy
+            // attempt with no saved gateway order, prove the reference through the gateway
+            // rather than allowing one signed payment to be pointed at another same-price order.
+            PaymentProvider provider = providerFor(found);
+            JsonNode authoritative = paymobClient.getTransaction(provider.getSecretKey(), provider.getApiKey(),
+                    provider.getBaseUrl(), obj.path("id").asText());
+            if (authoritative == null || !obj.path("id").asText().equals(authoritative.path("id").asText())
+                    || (signedOrderId != null && !signedOrderId.equals(gatewayOrderId(authoritative)))
+                    || !belongsByReference(found, authoritative)) return null;
         }
-
-        // Priority 3: intention_id (pi_live_*)
-        if (root.has("intention_id")) {
-            String iid = root.get("intention_id").asText();
-            return transactionRepo.findByIntentionId(iid).orElse(null);
-        }
-
-        return null;
+        return found;
     }
 
     /**
@@ -1517,7 +1572,10 @@ public class PaymentService {
         // A successful callback moves money, so it is the one that must prove it belongs here.
         // A failure or pending callback is applied as-is: refusing to record a failure would leave
         // the transaction stuck PENDING, and marking a payment FAILED costs nobody anything.
-        if (success && !webhookMoneyMatchesTransaction(tx, obj)) {
+        Long signedOrderId = gatewayOrderId(obj);
+        boolean gatewayOrderConflicts = tx.getPaymobOrderId() != null && signedOrderId != null
+                && !tx.getPaymobOrderId().equals(signedOrderId);
+        if (success && (gatewayOrderConflicts || !webhookMoneyMatchesTransaction(tx, obj))) {
             tx.setStatus(PaymentStatus.FAILED);
             tx.setFailureReason("Rejected: callback amount/currency did not match this transaction");
             return;

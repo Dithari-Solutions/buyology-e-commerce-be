@@ -63,28 +63,27 @@ public class PaymobClient {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("amount", amountCents);
         body.put("currency", currency);
-        body.put("merchant_order_id", merchantOrderId); // Root level for Intention API
+        body.put("special_reference", merchantOrderId); // Echoed as order.merchant_order_id in callbacks.
         
         ArrayNode paymentMethods = objectMapper.createArrayNode();
         paymentMethods.add(integrationId);
         body.set("payment_methods", paymentMethods);
 
-        // Intention API (v2) also supports an optional 'order' object for grouping items/billing
-        ObjectNode orderNode = objectMapper.createObjectNode();
-        orderNode.put("amount", amountCents);
-        orderNode.put("currency", currency);
-        orderNode.put("merchant_order_id", merchantOrderId); // Double-verify at order level
-        orderNode.set("items", items);
+        body.set("items", items);
         if (notificationUrl != null && !notificationUrl.isBlank()) {
-            orderNode.put("notification_url", notificationUrl);
+            body.put("notification_url", notificationUrl);
         }
-        body.set("order", orderNode);
+        if (redirectionUrl != null && !redirectionUrl.isBlank()) {
+            body.put("redirection_url", redirectionUrl);
+        }
 
         body.set("billing_data", billingData);
         body.set("customer", customer);
 
         // Extras for redirection
         ObjectNode extras = objectMapper.createObjectNode();
+        extras.put("platform", "buyology");
+        extras.put("merchant_order_id", merchantOrderId);
         if (redirectionUrl != null && !redirectionUrl.isBlank()) {
             extras.put("redirection_url", redirectionUrl);
         }
@@ -93,7 +92,8 @@ public class PaymobClient {
         String url = baseUrl + "/v1/intention/";
         log.info("[PAYMOB] Creating intention: url={}, merchant_order_id={}", url, merchantOrderId);
         JsonNode response = post(url, body, "Token " + secretKey);
-        log.info("[PAYMOB] Intention response: {}", response.toString());
+        log.info("[PAYMOB] Intention response: id={}, order={}",
+                response.path("id").asText(), response.path("intention_order_id").asText());
         
         // Defensive: a 200 with an unexpected body (no id/client_secret) must NOT NPE on
         // .asText() — surface it as a clear PaymentGatewayException instead of a generic 500.
