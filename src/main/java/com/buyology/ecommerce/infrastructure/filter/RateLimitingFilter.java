@@ -402,7 +402,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         // The visitor beacon fires once per page view, so leaving it in the PUBLIC tier would make
         // every page cost two tokens and roughly halve the browsing budget of a shared/NAT'd IP.
         // Its own bucket keeps shoppers browsing freely while still capping beacon abuse.
-        if (path.startsWith("/api/analytics/")) {
+        if (path.startsWith("/api/analytics/") || path.equals("/api/privacy/consents")) {
             return RateLimitTier.ANALYTICS_BEACON;
         }
         // Every accepted assistant message is a paid model call, so this endpoint is the only one

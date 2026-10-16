@@ -21,6 +21,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @RestControllerAdvice(basePackages = "com.buyology.ecommerce")
 public class GlobalExceptionHandler {
@@ -175,6 +176,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleNoSuchElement(java.util.NoSuchElementException ex) {
         log.warn("Resource not found: {}", ex.getMessage());
         return ApiResponse.failure(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    // Preserve intentional HTTP errors (including public product-slug 404s) instead
+    // of routing them through the generic 500 handler and confusing crawlers.
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ApiResponse<Void>> handleResponseStatus(
+            org.springframework.web.server.ResponseStatusException ex) {
+        String message = ex.getStatusCode().is5xxServerError()
+                ? "An unexpected error occurred"
+                : Objects.toString(ex.getReason(), "The request could not be completed");
+        return ResponseEntity.status(ex.getStatusCode()).headers(ex.getHeaders())
+                .body(new ApiResponse<>(ex.getStatusCode().value(), message, null));
     }
 
     @ExceptionHandler(Exception.class)

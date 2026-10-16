@@ -140,6 +140,9 @@ public class SecurityConfig {
                         // the counts are read back under /api/admin/analytics/**, which stays
                         // authenticated and permission-guarded.
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/analytics/visit").permitAll()
+                        // Anonymous cookie decisions are write-only; their history stays SUPERADMIN-only.
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/privacy/consents").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/privacy/cookies").permitAll()
                         // Storefront AI assistant. Public for the same reason the beacon is: the
                         // shoppers most likely to ask "do you have this in stock?" are not logged
                         // in, and a login wall would leave the assistant answering only the
