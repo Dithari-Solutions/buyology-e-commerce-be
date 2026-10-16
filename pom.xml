@@ -28,6 +28,8 @@
 	</scm>
 	<properties>
 		<java.version>17</java.version>
+		<!-- Allows Surefire's late replacement to preserve optional coverage/JVM flags. -->
+		<argLine></argLine>
 	</properties>
 	<dependencies>
 		<!-- Claude API — AI repair price estimation from problem photos + description. -->
@@ -268,6 +270,27 @@
 
 	<build>
 		<plugins>
+			<!-- Use one default inline MockMaker across the whole suite. Supplying its
+			     instrumentation at startup also avoids per-test subclass workarounds
+			     and dynamic-agent attachment restrictions on newer developer JDKs. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>resolve-test-agent</id>
+						<phase>initialize</phase>
+						<goals><goal>properties</goal></goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>@{argLine} -javaagent:"${org.mockito:mockito-core:jar}"</argLine>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

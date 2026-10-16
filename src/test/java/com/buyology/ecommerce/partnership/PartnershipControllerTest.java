@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class PartnershipControllerTest {
-    private final PartnershipRequestService service=mock(PartnershipRequestService.class,withSettings().mockMaker("mock-maker-subclass"));
+    private final PartnershipRequestService service=mock(PartnershipRequestService.class);
     private final ObjectMapper mapper=new ObjectMapper();
     private final MockMvc mvc=MockMvcBuilders.standaloneSetup(new PartnershipController(service)).setControllerAdvice(new GlobalExceptionHandler()).setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(mapper)).build();
     @Test void returnsOnlyReceiptOnPublicSubmission() throws Exception {

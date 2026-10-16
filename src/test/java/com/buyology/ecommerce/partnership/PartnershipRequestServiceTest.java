@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class PartnershipRequestServiceTest {
-    private final PartnershipRequestRepository repository=mock(PartnershipRequestRepository.class,withSettings().mockMaker("mock-maker-subclass"));
-    private final EmailService emails=mock(EmailService.class,withSettings().mockMaker("mock-maker-subclass"));
+    private final PartnershipRequestRepository repository=mock(PartnershipRequestRepository.class);
+    private final EmailService emails=mock(EmailService.class);
     private final ObjectMapper mapper=new ObjectMapper();
     private final PartnershipRequestService service=new PartnershipRequestService(repository,mapper,emails);
     private PartnershipRequest stored(PartnershipApplication application) throws Exception {
