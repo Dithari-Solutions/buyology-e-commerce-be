@@ -8,6 +8,8 @@ import com.sendgrid.SendGrid;
 import com.sendgrid.helpers.mail.Mail;
 import com.sendgrid.helpers.mail.objects.Content;
 import com.sendgrid.helpers.mail.objects.Email;
+import com.sendgrid.helpers.mail.objects.ClickTrackingSetting;
+import com.sendgrid.helpers.mail.objects.TrackingSettings;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
@@ -1454,6 +1456,14 @@ public class EmailService {
         Mail mail = new Mail(new Email(sendGridProps.getFromEmail(), sendGridProps.getFromName()),
                 subject, new Email(email), new Content("text/html", html));
         mail.setReplyTo(new Email("support@buyology.online", "Buyology Partnerships"));
+        // Keep the reviewed HTTPS links intact. The account's branded click-tracking
+        // host has a certificate mismatch; recipients must go straight to the form.
+        ClickTrackingSetting clickTracking = new ClickTrackingSetting();
+        clickTracking.setEnable(false);
+        clickTracking.setEnableText(false);
+        TrackingSettings tracking = new TrackingSettings();
+        tracking.setClickTrackingSetting(clickTracking);
+        mail.setTrackingSettings(tracking);
         try {
             Request request = new Request();
             request.setMethod(Method.POST);

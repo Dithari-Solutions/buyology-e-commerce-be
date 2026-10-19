@@ -33,6 +33,12 @@ class PartnershipInvitationEmailTest {
         assertTrue(preview.html().contains("href=\"https://business.buyology.online\""));
         assertTrue(preview.html().contains(">Apply for partnership</a>"));
         assertEquals("support@buyology.online", payload.get("reply_to").get("email").asText());
+        // Account-level tracking must not rewrite the direct application link after sending.
+        var clickTracking = payload.path("tracking_settings").path("click_tracking");
+        assertTrue(clickTracking.path("enable").isBoolean());
+        assertFalse(clickTracking.path("enable").asBoolean());
+        assertTrue(clickTracking.path("enable_text").isBoolean());
+        assertFalse(clickTracking.path("enable_text").asBoolean());
     }
     @Test void timeoutAndServerErrorsAreUnknownRatherThanClaimedAsSent() throws Exception {
         when(provider.api(any())).thenThrow(new IOException("timeout"));
