@@ -1447,6 +1447,28 @@ public class EmailService {
         }
     }
 
+    public enum InvitationOutcome { ACCEPTED, FAILED, UNKNOWN }
+
+    /** One private recipient per message. A timeout is uncertain, never a reason to resend blindly. */
+    public InvitationOutcome sendPartnershipInvitationEmail(String email, String subject, String html) {
+        Mail mail = new Mail(new Email(sendGridProps.getFromEmail(), sendGridProps.getFromName()),
+                subject, new Email(email), new Content("text/html", html));
+        mail.setReplyTo(new Email("support@buyology.online", "Buyology Partnerships"));
+        try {
+            Request request = new Request();
+            request.setMethod(Method.POST);
+            request.setEndpoint("mail/send");
+            request.setBody(mail.build());
+            int status = sendGrid.api(request).getStatusCode();
+            if (status == 202) return InvitationOutcome.ACCEPTED;
+            if (status >= 400 && status < 500 && status != 408) return InvitationOutcome.FAILED;
+            return InvitationOutcome.UNKNOWN;
+        } catch (Exception e) {
+            log.warn("Partnership invitation provider outcome unknown");
+            return InvitationOutcome.UNKNOWN;
+        }
+    }
+
     private static String escapeHtml(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
