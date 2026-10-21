@@ -2,6 +2,9 @@ package com.buyology.ecommerce.role.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
+import java.util.List;
+import java.util.UUID;
 
 public class CreateRoleRequest {
 
@@ -10,6 +13,12 @@ public class CreateRoleRequest {
     private String name;
 
     private String description;
+
+    @Size(max = 500, message = "Too many permissions")
+    private List<@NotNull UUID> permissionIds = List.of();
+
+    public List<UUID> getPermissionIds() { return permissionIds; }
+    public void setPermissionIds(List<UUID> permissionIds) { this.permissionIds = permissionIds; }
 
     private Boolean isSystem = true;
 

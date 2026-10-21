@@ -25,6 +25,10 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UserRoleId> 
     @Query("SELECT r.name FROM UserRole ur JOIN ur.role r WHERE ur.id.userId = :userId")
     List<String> findRoleNamesByUserId(@Param("userId") UUID userId);
 
+    /** Custom staff roles opt an account into permission-based access, including legacy deployments. */
+    @Query("SELECT r.name FROM UserRole ur JOIN ur.role r WHERE ur.id.userId = :userId AND r.isSystem = false")
+    List<String> findCustomRoleNamesByUserId(@Param("userId") UUID userId);
+
     @Query("SELECT r.id FROM UserRole ur JOIN ur.role r WHERE ur.id.userId = :userId")
     List<UUID> findRoleIdsByUserId(@Param("userId") UUID userId);
 

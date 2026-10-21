@@ -93,8 +93,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
+        // A custom role must restrict access even while legacy ADMIN compatibility is enabled.
+        // Re-read assignments on every request so grants and revocations apply to existing tokens.
+        boolean customRoleAccount = !userRoleRepository.findCustomRoleNamesByUserId(userId).isEmpty();
+
         // 1. Add ROLE_ authority based on UserType (ADMIN / CUSTOMER)
-        if (userOpt.get().getUserType() != null) {
+        if (userOpt.get().getUserType() != null
+                && !(customRoleAccount && userOpt.get().getUserType() == com.buyology.ecommerce.user.domain.Users.UserType.ADMIN)) {
             authorities.add(new SimpleGrantedAuthority("ROLE_" + userOpt.get().getUserType().name()));
         }
 
@@ -120,7 +125,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        roleNames.forEach(name -> authorities.add(new SimpleGrantedAuthority("ROLE_" + name)));
+        roleNames.stream()
+                .filter(name -> !customRoleAccount || !"ADMIN".equalsIgnoreCase(name))
+                .forEach(name -> authorities.add(new SimpleGrantedAuthority("ROLE_" + name)));
 
         // 3. Add permission codes derived from roles
         if (!roleIds.isEmpty()) {

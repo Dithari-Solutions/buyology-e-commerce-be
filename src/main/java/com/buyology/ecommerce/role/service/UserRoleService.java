@@ -1,6 +1,7 @@
 package com.buyology.ecommerce.role.service;
 
 import com.buyology.ecommerce.common.response.ApiResponse;
+import com.buyology.ecommerce.common.utils.SecurityUtils;
 import com.buyology.ecommerce.role.domain.Role;
 import com.buyology.ecommerce.role.domain.UserRole;
 import com.buyology.ecommerce.role.domain.UserRoleId;
@@ -59,6 +60,14 @@ public class UserRoleService {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Role not found");
         }
 
+        if (!Boolean.TRUE.equals(role.getIsSystem()) && user.getUserType() != Users.UserType.ADMIN) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "Create or promote this person's admin account before assigning a custom staff role.");
+        }
+        if (!Boolean.TRUE.equals(role.getIsSystem()) && !"ACTIVE".equals(user.getStatus())) {
+            return ApiResponse.failure(HttpStatus.CONFLICT, "Only active admin accounts can receive a custom role.");
+        }
+
         if (userRoleRepository.existsByIdUserIdAndIdRoleId(request.getUserId(), request.getRoleId())) {
             return ApiResponse.failure(HttpStatus.CONFLICT, "Role is already assigned to this user");
         }
@@ -68,8 +77,9 @@ public class UserRoleService {
         userRole.setUser(user);
         userRole.setRole(role);
 
-        if (request.getAssignedBy() != null) {
-            userRepository.findById(request.getAssignedBy()).ifPresent(userRole::setAssignedBy);
+        UUID actorId = SecurityUtils.currentUserIdOrNull();
+        if (actorId != null) {
+            userRepository.findById(actorId).ifPresent(userRole::setAssignedBy);
         }
 
         UserRole saved = userRoleRepository.save(userRole);
@@ -86,6 +96,22 @@ public class UserRoleService {
         }
         if (!userRoleRepository.existsByIdUserIdAndIdRoleId(userId, roleId)) {
             return ApiResponse.failure(HttpStatus.NOT_FOUND, "Role is not assigned to this user");
+        }
+
+        List<String> roles = userRoleRepository.findRoleNamesByUserId(userId);
+        if (roles.size() <= 1 && userRepository.findById(userId)
+                .map(user -> user.getUserType() == Users.UserType.ADMIN).orElse(false)) {
+            return ApiResponse.failure(HttpStatus.CONFLICT,
+                    "An admin must keep at least one role. Assign a replacement role first.");
+        }
+        Role role = roleRepository.findById(roleId).orElse(null);
+        if (role != null && "SUPERADMIN".equalsIgnoreCase(role.getName())) {
+            if (userId.equals(SecurityUtils.currentUserIdOrNull())
+                    || userRoleRepository.findUserIdsByRoleName("SUPERADMIN").stream()
+                            .noneMatch(other -> !other.equals(userId))) {
+                return ApiResponse.failure(HttpStatus.CONFLICT,
+                        "You cannot remove your own or the last Super Admin role.");
+            }
         }
 
         userRoleRepository.deleteByIdUserIdAndIdRoleId(userId, roleId);

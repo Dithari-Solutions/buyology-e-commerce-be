@@ -20,8 +20,9 @@ import org.springframework.stereotype.Component;
  * <pre>hasRole('SUPERADMIN') or hasAuthority('&lt;code&gt;') or &#64;rbacPolicy.legacyAdmin()</pre>
  *
  * <p>With {@code rbac.strict-permissions=false} (the default) the last clause keeps every existing admin
- * working exactly as before, while the permission codes become real for anyone who is not a blanket
- * ADMIN. Once roles are configured and every admin has been granted a role that covers their job, setting
+ * working exactly as before. Accounts holding a custom role are always permission-based:
+ * {@code JwtAuthenticationFilter} does not grant them the blanket {@code ROLE_ADMIN} authority.
+ * Once system roles are configured and every legacy admin has been granted a role that covers their job, setting
  * {@code RBAC_STRICT_PERMISSIONS=true} drops the fallback and the permission matrix starts genuinely
  * restricting access. Flipping it back is instant and needs no redeploy of the guards.
  *

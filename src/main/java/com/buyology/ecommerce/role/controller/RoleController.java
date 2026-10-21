@@ -55,7 +55,7 @@ public class RoleController {
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<RoleResponse>> updateRole(
             @PathVariable UUID id,
-            @RequestBody UpdateRoleRequest request) {
+            @Valid @RequestBody UpdateRoleRequest request) {
         return roleService.updateRole(id, request);
     }
 

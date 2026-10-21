@@ -117,6 +117,20 @@ public class RoleService {
             return ApiResponse.failure(HttpStatus.CONFLICT, "Role '" + name + "' already exists");
         }
 
+        // Resolve the full selection before writing: creation and its initial grants are atomic.
+        List<Permission> initialPermissions = new ArrayList<>();
+        for (UUID permissionId : new LinkedHashSet<>(
+                request.getPermissionIds() == null ? List.<UUID>of() : request.getPermissionIds())) {
+            if (permissionId == null) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Permission ID is required");
+            }
+            Permission permission = permissionRepository.findById(permissionId).orElse(null);
+            if (permission == null) {
+                return ApiResponse.failure(HttpStatus.BAD_REQUEST, "Permission not found: " + permissionId);
+            }
+            initialPermissions.add(permission);
+        }
+
         Role role = new Role();
         role.setName(name);
         role.setDescription(trimToNull(request.getDescription()));
@@ -124,8 +138,17 @@ public class RoleService {
         role.setIsSystem(false);
 
         Role saved = roleRepository.save(role);
+        for (Permission permission : initialPermissions) {
+            RolePermission grant = new RolePermission();
+            grant.setId(new RolePermissionId(saved.getId(), permission.getId()));
+            grant.setRole(saved);
+            grant.setPermission(permission);
+            rolePermissionRepository.save(grant);
+        }
         log.info("Role {} created", name);
-        return ApiResponse.created(RoleResponse.from(saved, List.of(), 0L), "Role created successfully");
+        return ApiResponse.created(RoleResponse.from(saved,
+                initialPermissions.stream().map(Permission::getCode).sorted().toList(), 0L),
+                "Role created successfully");
     }
 
     @Transactional

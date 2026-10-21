@@ -149,6 +149,7 @@ public class TokenService {
                 .subject(authCredentials.getId().toString())
                 .claim("uid", userId.toString())
                 .claim("roles", List.copyOf(roleNames))
+                .claim("customRoles", userRoleRepository.findCustomRoleNamesByUserId(userId))
                 .claim("permissions", List.copyOf(effectivePermissions))
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(exp))

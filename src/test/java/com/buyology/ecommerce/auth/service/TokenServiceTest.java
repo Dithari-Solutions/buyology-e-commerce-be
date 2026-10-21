@@ -62,6 +62,28 @@ class TokenServiceTest {
     }
 
     @Test
+    void customRolesAndPermissionsAreIncludedInSignedDashboardSession() {
+        UserRoleRepository roles = mock(UserRoleRepository.class);
+        RolePermissionRepository grants = mock(RolePermissionRepository.class);
+        UUID roleId = UUID.randomUUID();
+        when(roles.findRoleNamesByUserId(userId)).thenReturn(java.util.List.of("INVENTORY_MANAGER"));
+        when(roles.findCustomRoleNamesByUserId(userId)).thenReturn(java.util.List.of("INVENTORY_MANAGER"));
+        when(roles.findRoleIdsByUserId(userId)).thenReturn(java.util.List.of(roleId));
+        when(grants.findPermissionCodesByRoleIds(java.util.List.of(roleId)))
+                .thenReturn(java.util.List.of("store:read", "store:product:update"));
+        TokenService custom = new TokenService(refreshRepo, roles, grants, mock(UserPermissionRepository.class),
+                SECRET, "buyology-ecommerce-service", 15, 7, true, GRACE_SECONDS);
+        String token = custom.generateAccessToken(creds, "dashboard");
+        var claims = io.jsonwebtoken.Jwts.parser()
+                .verifyWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor(SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .build().parseSignedClaims(token).getPayload();
+        assertEquals(java.util.List.of("INVENTORY_MANAGER"), claims.get("customRoles"));
+        assertEquals(java.util.List.of("INVENTORY_MANAGER"), claims.get("roles"));
+        assertTrue(((java.util.List<?>) claims.get("permissions")).contains("store:product:update"));
+        assertFalse(((java.util.List<?>) claims.get("permissions")).contains("user:read"));
+    }
+
+    @Test
     void accessToken_defaultsAudienceToWeb() {
         String token = svc.generateAccessToken(creds);
         assertEquals("web", svc.getAudience(token));
