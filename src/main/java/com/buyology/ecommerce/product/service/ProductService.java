@@ -131,6 +131,7 @@ public class ProductService {
     private final StoreLocationRepository storeLocationRepository;
     private final ContaboObjectService contaboObjectService;
     private final ProductSearchService productSearchService;
+    private final com.buyology.ecommerce.warranty.service.ProductWarrantyAssigner productWarrantyAssigner;
     private final com.buyology.ecommerce.review.repository.ProductReviewStatsRepository productReviewStatsRepository;
 
     public ProductService(
@@ -158,7 +159,8 @@ public class ProductService {
             StoreLocationRepository storeLocationRepository,
             ContaboObjectService contaboObjectService,
             ProductSearchService productSearchService,
-            com.buyology.ecommerce.review.repository.ProductReviewStatsRepository productReviewStatsRepository) {
+            com.buyology.ecommerce.review.repository.ProductReviewStatsRepository productReviewStatsRepository,
+            com.buyology.ecommerce.warranty.service.ProductWarrantyAssigner productWarrantyAssigner) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
@@ -184,6 +186,7 @@ public class ProductService {
         this.contaboObjectService = contaboObjectService;
         this.productSearchService = productSearchService;
         this.productReviewStatsRepository = productReviewStatsRepository;
+        this.productWarrantyAssigner = productWarrantyAssigner;
     }
 
     /**
@@ -276,6 +279,7 @@ public class ProductService {
         // Null means this product's stock is not tracked and it sells without a ceiling — which is
         // how the whole catalogue behaves until somebody states a figure. See V55.
         product.setAvailableQuantity(request.getAvailableQuantity());
+        productWarrantyAssigner.applyOnCreate(product, request.getWarrantyPresetId(), request.getWarrantyMonths());
         Product savedProduct = productRepository.save(product);
 
         // 5. Save translations
@@ -498,6 +502,8 @@ public class ProductService {
         } else if (request.getAvailableQuantity() != null) {
             product.setAvailableQuantity(request.getAvailableQuantity());
         }
+        productWarrantyAssigner.applyOnUpdate(product, request.getWarrantyPresetId(),
+                request.getWarrantyMonths(), request.getRemoveWarranty());
         if (request.getIsRefurbished() != null) {
             product.setIsRefurbished(request.getIsRefurbished());
         }
@@ -2539,6 +2545,8 @@ public class ProductService {
         response.setAvailabilityStatus(product.getAvailabilityStatus() != null ? product.getAvailabilityStatus().name() : null);
         response.setStockQuantity(product.getStockQuantity());
         response.setAvailableQuantity(product.getAvailableQuantity());
+        response.setWarrantyMonths(product.getWarrantyMonths());
+        response.setWarrantyPresetId(product.getWarrantyPresetId());
         response.setIsSuperDeal(product.getIsSuperDeal());
         response.setIsLimitedStock(product.getIsLimitedStock());
         if (includeStatus) {

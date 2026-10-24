@@ -162,6 +162,7 @@ public class OrderService {
     private final com.buyology.ecommerce.payment.repository.PaymentAnomalyRepository paymentAnomalyRepo;
     /** Publishes OrderPaidEvent so downstream integrations (ERPNext) stay decoupled from this service. */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final com.buyology.ecommerce.warranty.service.OrderWarrantyReader orderWarrantyReader;
 
     /**
      * Only for {@link #getFreshOrderForAdmin}. Field-injected so the constructor, which a dozen
@@ -215,7 +216,8 @@ public class OrderService {
                         com.buyology.ecommerce.payment.service.PaymentAnomalyService paymentAnomalyService,
                         com.buyology.ecommerce.payment.service.PaidAmountPolicy paidAmountPolicy,
                         com.buyology.ecommerce.payment.repository.PaymentAnomalyRepository paymentAnomalyRepo,
-                        org.springframework.context.ApplicationEventPublisher eventPublisher) {
+                        org.springframework.context.ApplicationEventPublisher eventPublisher,
+                        com.buyology.ecommerce.warranty.service.OrderWarrantyReader orderWarrantyReader) {
         this.orderRepo = orderRepo;
         this.trackingRepo = trackingRepo;
         this.cartRepo = cartRepo;
@@ -260,6 +262,7 @@ public class OrderService {
         this.paidAmountPolicy = paidAmountPolicy;
         this.paymentAnomalyRepo = paymentAnomalyRepo;
         this.eventPublisher = eventPublisher;
+        this.orderWarrantyReader = orderWarrantyReader;
     }
 
     // =========================================================================
@@ -3476,6 +3479,13 @@ public class OrderService {
             eventPublisher.publishEvent(new OrderPackagingEvent(order.getId()));
         }
 
+        if (target == OrderStatus.DELIVERED && from != OrderStatus.DELIVERED) {
+            // Warranty cards are issued once the customer has the goods. Here for the same reason
+            // as packaging: admin, courier, delivery partner and supplier all deliver, and each
+            // gets this by writing the status the only way this class allows.
+            eventPublisher.publishEvent(new com.buyology.ecommerce.order.event.OrderDeliveredEvent(order.getId()));
+        }
+
         if (releasesStock(from, target)) {
             if (target == OrderStatus.CANCELLED && courierNotConfirmedStopped(order)) {
                 // The one case where "cancelled" does not mean "the goods are ours again": a
@@ -3644,7 +3654,15 @@ public class OrderService {
         // order-detail view can show real products, not just SKUs.
         Map<UUID, String> productNames = resolveEnglishProductNames(o.getItems());
         Map<UUID, String> productImages = resolvePrimaryImageUrls(o.getItems());
-        res.setItems(o.getItems().stream().map(i -> toItemResponse(i, productNames, productImages)).toList());
+        // Cards exist only once an order is delivered, so undelivered orders skip the query.
+        Map<UUID, List<com.buyology.ecommerce.warranty.dto.OrderItemWarranty>> warranties =
+                o.getDeliveredAt() == null ? Map.of() : orderWarrantyReader.forOrder(o.getId());
+        res.setItems(o.getItems().stream().map(i -> {
+            OrderItemResponse item = toItemResponse(i, productNames, productImages);
+            // Null-checked first: an item not yet flushed has no id, and Map.of() rejects a null key.
+            item.setWarranties(i.getId() == null ? null : warranties.get(i.getId()));
+            return item;
+        }).toList());
         res.setTrackingHistory(o.getTrackingHistory().stream().map(this::toTrackingEventResponse).toList());
 
         // Customer account contact (email/phone) for admin/order-detail views. Looked up once per

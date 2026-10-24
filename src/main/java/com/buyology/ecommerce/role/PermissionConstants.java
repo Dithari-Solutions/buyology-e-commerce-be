@@ -152,6 +152,19 @@ public final class PermissionConstants {
     // Delete spec groups, spec options and spec codes.
     public static final String PRODUCT_SPEC_DELETE = "product:spec:delete";
 
+    // View the warranty presets (named lengths such as "Laptop — 12 months"). Anyone who can create
+    // or edit products can also read them, because the product form's dropdown needs the list.
+    public static final String PRODUCT_WARRANTY_READ = "product:warranty:read";
+
+    // Create a warranty preset.
+    public static final String PRODUCT_WARRANTY_CREATE = "product:warranty:create";
+
+    // Rename a warranty preset or change its length. Products following it take the new length.
+    public static final String PRODUCT_WARRANTY_UPDATE = "product:warranty:update";
+
+    // Delete a warranty preset; its products keep their length as a custom duration.
+    public static final String PRODUCT_WARRANTY_DELETE = "product:warranty:delete";
+
     // ── Couriers ──────────────────────────────────────────────────────────────────
     // View courier accounts, courier detail and the live courier map.
     public static final String COURIER_READ = "courier:read";
@@ -338,6 +351,9 @@ public final class PermissionConstants {
     // order:read because writing to a customer in the store's name is a different act from
     // looking at their order, and a read-only support role must not acquire it by accident.
     public static final String ORDER_PAYMENT_CONTACT = "order:payment:contact";
+
+    // Void or restore the warranty card of a unit on an order, e.g. after it was returned.
+    public static final String ORDER_WARRANTY_UPDATE = "order:warranty:update";
 
     // ── Payments, Refunds & Payouts ───────────────────────────────────────────────
     // Issue a full or partial refund against a successful payment transaction directly at the

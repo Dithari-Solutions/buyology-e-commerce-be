@@ -43,6 +43,14 @@ public class CreateProductRequest {
     @Min(value = 0, message = "Available quantity cannot be negative")
     private Integer availableQuantity;
 
+    @Schema(description = "Warranty preset to follow; its months are copied and kept in step with it. "
+            + "Takes precedence over warrantyMonths.")
+    private UUID warrantyPresetId;
+
+    @Schema(description = "Custom warranty length in whole months (1-120), used when no preset is given. "
+            + "Send 24 for two years. Omit both for no warranty: no card is issued when it sells.", example = "12")
+    private Integer warrantyMonths;
+
     @NotNull(message = "Product type is required")
     @Schema(description = "Type of the product", allowableValues = {"SIMPLE", "DIY", "ACCESSORY"})
     private ProductType productType;
@@ -218,5 +226,21 @@ public class CreateProductRequest {
 
     public void setAvailableQuantity(Integer availableQuantity) {
         this.availableQuantity = availableQuantity;
+    }
+
+    public UUID getWarrantyPresetId() {
+        return warrantyPresetId;
+    }
+
+    public void setWarrantyPresetId(UUID warrantyPresetId) {
+        this.warrantyPresetId = warrantyPresetId;
+    }
+
+    public Integer getWarrantyMonths() {
+        return warrantyMonths;
+    }
+
+    public void setWarrantyMonths(Integer warrantyMonths) {
+        this.warrantyMonths = warrantyMonths;
     }
 }

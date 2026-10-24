@@ -35,6 +35,12 @@ public class ProductResponse {
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer availableQuantity;
+    /** Warranty length in whole months; absent when the product states none. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer warrantyMonths;
+    /** The preset the warranty follows; absent for a custom length. Lets the admin form reselect it. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UUID warrantyPresetId;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String status;
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -404,6 +410,12 @@ public class ProductResponse {
     public void setStockQuantity(Integer stockQuantity) { this.stockQuantity = stockQuantity; }
     public Integer getAvailableQuantity() { return availableQuantity; }
     public void setAvailableQuantity(Integer availableQuantity) { this.availableQuantity = availableQuantity; }
+
+    public Integer getWarrantyMonths() { return warrantyMonths; }
+    public void setWarrantyMonths(Integer warrantyMonths) { this.warrantyMonths = warrantyMonths; }
+
+    public UUID getWarrantyPresetId() { return warrantyPresetId; }
+    public void setWarrantyPresetId(UUID warrantyPresetId) { this.warrantyPresetId = warrantyPresetId; }
     public String getProductType() { return productType; }
     public void setProductType(String productType) { this.productType = productType; }
     public Boolean getIsRefurbished() { return isRefurbished; }

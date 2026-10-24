@@ -1,7 +1,11 @@
 package com.buyology.ecommerce.order.dto;
 
+import com.buyology.ecommerce.warranty.dto.OrderItemWarranty;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public class OrderItemResponse {
@@ -22,6 +26,13 @@ public class OrderItemResponse {
     private BigDecimal originalUnitPrice;
     private BigDecimal totalPrice;
     private Instant createdAt;
+    /**
+     * One warranty card per unit, issued once the order is delivered. Absent before then, and for
+     * products without a warranty. The storefront shows only the serial; the card itself lives on
+     * Dithari's checker.
+     */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<OrderItemWarranty> warranties;
 
     // ── Getters & Setters ─────────────────────────────────────────────────────
 
@@ -63,4 +74,7 @@ public class OrderItemResponse {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public List<OrderItemWarranty> getWarranties() { return warranties; }
+    public void setWarranties(List<OrderItemWarranty> warranties) { this.warranties = warranties; }
 }

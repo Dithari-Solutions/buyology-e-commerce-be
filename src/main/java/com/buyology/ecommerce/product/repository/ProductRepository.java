@@ -330,4 +330,23 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     Page<Product> findBySupplierIdIsNotNull(Pageable pageable);
     Page<Product> findBySupplierIdAndSupplierStatus(UUID supplierId, Product.SupplierStatus supplierStatus, Pageable pageable);
     Page<Product> findBySupplierStatus(Product.SupplierStatus supplierStatus, Pageable pageable);
+
+    /** Moves every product following a warranty preset to the preset's new length. */
+    @Modifying
+    @Query("update Product p set p.warrantyMonths = :months, p.updatedAt = :now "
+            + "where p.warrantyPresetId = :presetId")
+    int updateWarrantyMonthsForPreset(@Param("presetId") UUID presetId,
+                                      @Param("months") int months,
+                                      @Param("now") Instant now);
+
+    /** Unlinks a preset that is being deleted; the products keep their months as a custom duration. */
+    @Modifying
+    @Query("update Product p set p.warrantyPresetId = null, p.updatedAt = :now "
+            + "where p.warrantyPresetId = :presetId")
+    int detachWarrantyPreset(@Param("presetId") UUID presetId, @Param("now") Instant now);
+
+    /** [presetId, count] for each preset in use, ignoring trashed products. */
+    @Query("select p.warrantyPresetId, count(p) from Product p "
+            + "where p.warrantyPresetId is not null and p.status <> 'DELETED' group by p.warrantyPresetId")
+    List<Object[]> countByWarrantyPreset();
 }

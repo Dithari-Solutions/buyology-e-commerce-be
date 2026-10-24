@@ -114,6 +114,8 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/countries/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/currency/**").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/**").permitAll()
+                        // Dithari's warranty checker: one card by its serial, product and dates only.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/warranty/**").permitAll()
                         // Public return/refund policy (window days) for the storefront. The
                         // admin read/write lives under /api/admin/refund-settings (authenticated).
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/refund-settings").permitAll()
@@ -277,6 +279,37 @@ public class SecurityConfig {
         return List.copyOf(allowed);
     }
 
+    /**
+     * Origins allowed to call the public warranty lookup, and nothing else.
+     *
+     * <p>Dithari's site is ours but lives on another domain, and all it needs is one public read.
+     * Putting it on the main list would also let it make credentialed calls — with a shopper's
+     * cookies — to every endpoint, so it gets {@link #warrantyLookupCors} instead.
+     */
+    static final List<String> WARRANTY_LOOKUP_ORIGINS = List.of(
+            "https://v2.dithari.com",
+            "https://dithari.com",
+            "https://www.dithari.com");
+
+    /**
+     * CORS for {@code /api/warranty/**}: the Dithari origins plus the main allowlist (so local
+     * frontends can test it), GET only, and never with credentials — the lookup needs no session,
+     * and refusing credentials is what keeps the extra origins harmless.
+     */
+    static CorsConfiguration warrantyLookupCors(List<String> mainAllowlist) {
+        List<String> origins = new java.util.ArrayList<>(WARRANTY_LOOKUP_ORIGINS);
+        for (String origin : mainAllowlist) {
+            if (!origins.contains(origin)) origins.add(origin);
+        }
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.copyOf(origins));
+        configuration.setAllowedMethods(List.of("GET", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Accept", "Content-Type"));
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(3600L);
+        return configuration;
+    }
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -294,6 +327,8 @@ public class SecurityConfig {
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        // First: the source answers with the first pattern that matches, and /** matches everything.
+        source.registerCorsConfiguration("/api/warranty/**", warrantyLookupCors(allowed));
         source.registerCorsConfiguration("/**", configuration);
 
         return source;

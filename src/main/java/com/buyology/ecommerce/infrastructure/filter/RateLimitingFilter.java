@@ -423,6 +423,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (path.equals("/api/payments/webhook") || path.equals("/api/payments/confirm-redirect")) {
             return RateLimitTier.PAYMENT_CALLBACK;
         }
+        // The public warranty checker. Serials are 60 random bits, so this is not about guessing:
+        // it keeps a scraper walking serials out of the shoppers' PUBLIC budget, and theirs out of it.
+        if (path.startsWith("/api/warranty/")) {
+            return RateLimitTier.WARRANTY_LOOKUP;
+        }
         return RateLimitTier.PUBLIC;
     }
 
@@ -532,6 +537,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             BucketConfiguration buildConfiguration() {
                 return BucketConfiguration.builder()
                         .addLimit(Bandwidth.builder().capacity(600).refillGreedy(600, Duration.ofMinutes(1)).build())
+                        .build();
+            }
+        },
+
+        // 60 req/min — Dithari's warranty checker. A person checks one card, maybe two; a page of
+        // serials a minute is far more than real use and still cheap to serve (one indexed read).
+        WARRANTY_LOOKUP {
+
+            BucketConfiguration buildConfiguration() {
+                return BucketConfiguration.builder()
+                        .addLimit(Bandwidth.builder().capacity(60).refillGreedy(60, Duration.ofMinutes(1)).build())
                         .build();
             }
         },

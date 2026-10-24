@@ -76,6 +76,20 @@ public class Product {
     @Column(name = "available_quantity")
     private Integer availableQuantity;
 
+    /**
+     * Warranty length in whole months, copied onto a card for each unit when an order is delivered.
+     * Null means no warranty is stated, and no card is issued.
+     *
+     * <p>When {@link #warrantyPresetId} is set this mirrors the preset's months, and editing the
+     * preset moves it; without one it is a duration typed for this product alone.
+     */
+    @Column(name = "warranty_months")
+    private Integer warrantyMonths;
+
+    // Plain id, as for other cross-module references. FK with ON DELETE SET NULL in V69.
+    @Column(name = "warranty_preset_id")
+    private UUID warrantyPresetId;
+
     @Column(name = "status", nullable = false, length = 20)
     private String status = "ACTIVE";
 
@@ -323,6 +337,12 @@ public class Product {
     public boolean tracksAvailableQuantity() {
         return availableQuantity != null;
     }
+
+    public Integer getWarrantyMonths() { return warrantyMonths; }
+    public void setWarrantyMonths(Integer warrantyMonths) { this.warrantyMonths = warrantyMonths; }
+
+    public UUID getWarrantyPresetId() { return warrantyPresetId; }
+    public void setWarrantyPresetId(UUID warrantyPresetId) { this.warrantyPresetId = warrantyPresetId; }
 
     public UUID getSupplierId() { return supplierId; }
     public void setSupplierId(UUID supplierId) { this.supplierId = supplierId; }

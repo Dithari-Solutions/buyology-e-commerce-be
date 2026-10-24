@@ -51,6 +51,18 @@ public class UpdateProductRequest {
             + "removing the order ceiling). Takes precedence over availableQuantity.")
     private Boolean untrackAvailableQuantity;
 
+    @Schema(description = "Switch the product to this warranty preset. Takes precedence over warrantyMonths.")
+    private UUID warrantyPresetId;
+
+    @Schema(description = "Switch the product to a custom warranty of this many months (1-120), "
+            + "unlinking any preset. Omit to leave the warranty unchanged.")
+    private Integer warrantyMonths;
+
+    /** Same reasoning as untrackAvailableQuantity: an omitted field cannot express "no warranty". */
+    @Schema(description = "Set true to remove the product's warranty (no cards are issued for future "
+            + "deliveries). Takes precedence over warrantyPresetId and warrantyMonths.")
+    private Boolean removeWarranty;
+
     @Schema(description = "New SKU (optional). Must stay globally unique. Blank/omitted leaves it unchanged.")
     private String sku;
 
@@ -183,6 +195,30 @@ public class UpdateProductRequest {
 
     public void setUntrackAvailableQuantity(Boolean untrackAvailableQuantity) {
         this.untrackAvailableQuantity = untrackAvailableQuantity;
+    }
+
+    public UUID getWarrantyPresetId() {
+        return warrantyPresetId;
+    }
+
+    public void setWarrantyPresetId(UUID warrantyPresetId) {
+        this.warrantyPresetId = warrantyPresetId;
+    }
+
+    public Integer getWarrantyMonths() {
+        return warrantyMonths;
+    }
+
+    public void setWarrantyMonths(Integer warrantyMonths) {
+        this.warrantyMonths = warrantyMonths;
+    }
+
+    public Boolean getRemoveWarranty() {
+        return removeWarranty;
+    }
+
+    public void setRemoveWarranty(Boolean removeWarranty) {
+        this.removeWarranty = removeWarranty;
     }
 
     public TranslationPatch getTranslations() {
